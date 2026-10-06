@@ -27,6 +27,12 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 READY = os.path.join(HERE, "agents_ready")
 
 sys.path.insert(0, os.path.join(REPO, "tools"))
+# `dont_write_bytecode`: senza questo, `import check_perms` lascia un
+# `tools/__pycache__/*.pyc` nel repo. `.gitignore` non ha la regola
+# `__pycache__` (e `.gitignore` e' di -scheletro, quindi il vertice non la
+# tocca), e una volta committato un .pyc dentro si rimuove solo con
+# `git rm --cached`, che al vertice e' negato. Quindi: non lo si genera.
+sys.dont_write_bytecode = True
 import check_perms as cp  # noqa: E402
 
 # I due file che l'utente deve installare, e da dove arrivano.

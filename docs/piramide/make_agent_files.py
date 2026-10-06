@@ -247,6 +247,9 @@ for line in u_perms:
             got.append(res)
 # Ricava gli edit dal file finale usando il parser della porta, non a occhio.
 sys.path.insert(0, os.path.join(REPO, "tools"))
+# Vedi verify_agent_install.py: `import check_perms` scriverebbe un
+# `tools/__pycache__/*.pyc` nel repo, e `.gitignore` non ha la regola.
+sys.dont_write_bytecode = True
 import check_perms as cp  # noqa: E402
 
 rules = cp.parse_frontmatter(os.path.join(OUT, "terminal-gun-ui.md"))

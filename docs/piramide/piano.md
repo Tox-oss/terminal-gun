@@ -416,6 +416,8 @@ Poi **riavviare opencode** (i permessi si caricano all'avvio, §10) e lanciare `
 
 **`check_perms.py` è già registrato per `terminal-gun-ui`** (`LEAVES` e `SCOPE`, con il passaggio di `scenes/hud.tscn` e `src/ui/**` da `-arena` a `-ui` in `DECLARED_OVERLAP`). Finché i file non sono installati la porta dice **`PERM: 0/15` con `perm_install`**, che è il comportamento giusto: la piramide non è installata, e la porta lo dice una volta sola invece di tredici.
 
+**Un `.pyc` è finito nel repo, e non lo posso togliere.** `import check_perms` dentro i due script di m2-w0 ha scritto `tools/__pycache__/check_perms.cpython-314.pyc`, e `git add -A` lo ha committato. `.gitignore` **non ha la regola `__pycache__`**, e `.gitignore` è scope di `-scheletro`, quindi il vertice non la tocca. Il rimedio è `git rm --cached tools/__pycache__/`, che al vertice è **negato** (non è in allowlist, e `git rm` è nella stessa famiglia di `git clean`/`git reset`). Quindi: **lo toglie l'utente, o lo toglie `-scheletro` in un'onda dedicata** con le due righe `__pycache__/` e `*.pyc`. Intanto i due script hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo, non una crescita.
+
 ### I sei criteri della milestone 1, uno per uno
 
 | # | criterio | esito | numeri |

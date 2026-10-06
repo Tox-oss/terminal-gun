@@ -1,7 +1,7 @@
 ---
 description: "terminal-gun-arena: scena chiusa, luci, camera, MultiMesh che disegna 200 nemici, HUD e level-up a schermo. È l'unico che tocca scenes/arena_main.tscn."
 mode: subagent
-model: opencode/fledge-alpha-free#max
+model: opencode/space-bunny-free#max
 color: "#f59e0b"
 steps: 55
 hidden: true

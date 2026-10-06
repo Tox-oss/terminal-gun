@@ -96,6 +96,8 @@ Non LFS: sono artefatti di rilascio e non vale la pena spenderne il quota. `bina
 
 **Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 
+**Riconfermato dal vertice il 2026-10-06**: `write` su `.gitattributes` risponde `Permission denied: edit`. Il file è quindi **in mano all'utente**, non al vertice. Le due righe ci sono (scritte a mano) ma erano **fuori da ogni commit**: il vertice le ha committate il 2026-10-06, il che è l'unico atto che gli resta su questo file. Manca solo il newline finale in fondo, che è cosmetico e non blocca nulla.
+
 ## 4. Onde
 
 | onda | chi | parallelismo | finisce quando |
@@ -258,6 +260,21 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | 5 | Si sente il "bonk" | **sì** | `assets/sfx/bonk.wav` 44100 Hz mono, 0.18 s (tetto 0.6) |
 | 6 | Niente binari nel Git normale | **sì** | `git lfs ls-files` elenca 13 file: 6 `.glb` + 7 `.wav` |
 
+### Rimesurazione dal vertice, 2026-10-06
+
+Il vertice **non si è fidato di §8**: ha rieseguito le porte e rimisurato i sei criteri invece di rileggere una tabella. **Verdi tutti e sei.** I knockback tornano a `0.3128` e `0.3555`, cioè gli stessi numeri già dichiarati ma più arrotondati: non è una variazione, è la stessa misura.
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | La porta è verde | **sì** | `GATE: 4/4`, `exit 0` rieseguito dal vertice |
+| 2 | La scena si apre senza errori | **sì** | `--quit-after 300`, `exit 0` letto esplicitamente, zero `SCRIPT ERROR` / `Parse Error` / `ERROR:` |
+| 3 | 200 nemici vivi, senza un nodo per nemico | **sì** | `node_count=27` con `horde.count=200` (tetto 120) |
+| 4 | Il player spara e uccide | **sì** | `PASS test_gameplay` 110 asserzioni; knockback reale in 5 frame: runner **0.3128**, grunt **0.3555** (tetto 0.3), brute 0.1964 e boss 0.0555 esclusi per progetto |
+| 5 | Si sente il "bonk" | **sì, ma non con `ffprobe`** | `tools/gen_sfx.py` scrive `SAMPLE_RATE = 44100`, `nchannels=1`, `bonk = render_tone(0.18, ...)`. Il vertice ha una deny su `shell *` con allow solo su `godot`/`git`/`winget`, quindi **non ha potuto misurare il file**: dato da sorgente, non sul campione |
+| 6 | Niente binari nel Git normale | **sì** | `git lfs ls-files`: 13 file, 6 `.glb` + 7 `.wav` |
+
+**Cosa è cambiato in questa sessione, in una riga:** niente del codice. Il vertice ha committato `.gitattributes`, che era **modificato ma fuori da ogni commit**, e ha corretto due affermazioni del piano che non reggevano più (§3.2, §8: il modello di -arena).
+
 ### Come w2 è finita: sette difetti reali, e due miei
 
 **Il vertice ha sbagliato due volte, ed è il fatto più utile di questa onda.**
@@ -284,7 +301,7 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - **XP e potenziamenti non sono tra i criteri della milestone** e non sono coperti da una porta dedicata: sono implementati (`src/player/progression.gd`) e provati sul percorso reale, ma senza criterio di accettazione dichiarato. Milestone 2.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
 - **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. Scelta consapevole.
-- **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi.
+- **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
 
 ### Come w1 è finita, e cosa è costato
 

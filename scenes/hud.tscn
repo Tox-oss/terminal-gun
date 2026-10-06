@@ -1,0 +1,77 @@
+[gd_scene load_steps=2 format=3]
+
+; -arena. L'HUD: otto nodi, sempre gli stessi.
+;
+; I figli stanno sotto "Root" con offset assoluti e senza ancoraggio: l'HUD e'
+; un livello sopra un viewport 1280x720 dichiarato in project.godot, quindi non
+; ha bisogno di seguire una finestra che si ridimensiona. Il layout e' quindi
+; leggibile dal file, che e' il modo piu' economico di leggerlo.
+
+[ext_resource type="Script" path="res://src/ui/hud.gd" id="1_hud"]
+
+[node name="Hud" type="CanvasLayer"]
+script = ExtResource("1_hud")
+
+[node name="Root" type="Control" parent="."]
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 2
+
+[node name="Health" type="ProgressBar" parent="Root"]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 324.0
+offset_bottom = 44.0
+show_percentage = false
+
+[node name="HealthText" type="Label" parent="Root"]
+offset_left = 32.0
+offset_top = 18.0
+offset_right = 324.0
+offset_bottom = 46.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "HP"
+
+[node name="Enemies" type="Label" parent="Root"]
+offset_left = 24.0
+offset_top = 50.0
+offset_right = 424.0
+offset_bottom = 76.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "ENEMIES 0"
+
+[node name="Score" type="Label" parent="Root"]
+offset_left = 900.0
+offset_top = 18.0
+offset_right = 1256.0
+offset_bottom = 46.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 22
+text = "SCORE 0"
+horizontal_alignment = 2
+
+[node name="Level" type="Label" parent="Root"]
+offset_left = 1100.0
+offset_top = 48.0
+offset_right = 1256.0
+offset_bottom = 74.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "LV 1"
+horizontal_alignment = 2
+
+[node name="Weapon" type="Label" parent="Root"]
+offset_left = 24.0
+offset_top = 654.0
+offset_right = 824.0
+offset_bottom = 682.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 18
+text = "WEAPON -"

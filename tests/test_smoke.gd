@@ -22,13 +22,33 @@ const CONTRACTS_PATH := "res://src/core/contracts.gd"
 
 ## Figlio finto: una foglia che registra sul contratto ciò che possiede.
 ## Serve a provare che il meccanismo di registrazione funziona, non l'orda.
+## Le firme sono quelle del contratto vigente (piano §5.2): indice e non nodo
+## per i nemici, bool per danno e proiettile.
 class FakeLeaf extends Node:
 	var marker: Node3D
 	var calls: int = 0
+	# Valori di risposta e traccia degli argomenti ricevuti.
+	var enemy_index: int = 7
+	var killed: bool = false
+	var slot_taken: bool = true
+	var last_index: int = -99
+	var last_amount: float = -1.0
+	var last_knockback: Vector3 = Vector3.ZERO
 
-	func nearest_enemy(from: Vector3, radius: float) -> Node3D:
+	func nearest_enemy(from: Vector3, radius: float) -> int:
 		calls += 1
-		return marker
+		return enemy_index
+
+	func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
+		calls += 1
+		last_index = index
+		last_amount = amount
+		last_knockback = knockback
+		return killed
+
+	func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool:
+		calls += 1
+		return slot_taken
 
 	func player_position() -> Vector3:
 		calls += 1
@@ -69,23 +89,48 @@ func _autoload_is_registered(h) -> void:
 ## 2b. Un metodo non ancora registrato non deve crashare il gioco: dà un valore
 ## neutro e avvisa una volta sola. Su un'istanza separata, per non sporcare il
 ## singleton che le altre sezioni di questo test usano.
+##
+## Il TIPO conta quanto il valore, ed è la metà del motivo di questa sezione:
+## uno stub che restituisce `null` dove il contratto dichiara `int` o `bool`
+## spazza il chiamante sul `as int`/`as bool` del callee, lontano da qui, e
+## nessun confronto di valori se ne accorgerebbe. -1 non è un indice valido e
+## false non è un uccisione: sono valori che non possono creare un falso bersaglio.
 func _stubs_are_neutral(h) -> void:
 	var probe = CONTRACTS.new()
 	h.near(probe.arena_radius, 28.0, 0.0001, "arena_radius di default su un'istanza nuova")
-	h.check(probe.nearest_enemy(Vector3(5.0, 0.0, 5.0), 10.0) == null,
-		"nearest_enemy non registrato deve dare null, non crashare")
-	h.check(probe.spawn_projectile(Vector3.ZERO, Vector3.FORWARD, 30.0) == null,
-		"spawn_projectile non registrato deve dare null, non crashare")
-	h.vec_near(probe.player_position(), Vector3.ZERO, 0.0001,
-		"player_position non registrato deve dare ZERO, non crashare")
+
+	var nearest := probe.nearest_enemy(Vector3(5.0, 0.0, 5.0), 10.0)
+	h.eq(nearest, -1, "nearest_enemy non registrato deve dare -1 (nessun nemico), non crashare")
+	h.check(typeof(nearest) == TYPE_INT,
+		"nearest_enemy deve restituire int, ha restituito " + type_string(typeof(nearest)))
+
+	# I due che non potevano funzionare: `as bool` su un null era un errore a
+	# runtime nel callee di ogni chiamante.
+	var killed := probe.damage_enemy(0, 10.0, Vector3.FORWARD)
+	h.eq(killed, false, "damage_enemy non registrato deve dare false (nessuna uccisione)")
+	h.check(typeof(killed) == TYPE_BOOL,
+		"damage_enemy deve restituire bool, ha restituito " + type_string(typeof(killed)))
+
+	var slot := probe.spawn_projectile(Vector3.ZERO, Vector3.FORWARD, 30.0)
+	h.eq(slot, false, "spawn_projectile non registrato deve dare false (nessuno slot preso)")
+	h.check(typeof(slot) == TYPE_BOOL,
+		"spawn_projectile deve restituire bool, ha restituito " + type_string(typeof(slot)))
+
+	var pos := probe.player_position()
+	h.vec_near(pos, Vector3.ZERO, 0.0001, "player_position non registrato deve dare ZERO, non crashare")
+	h.check(typeof(pos) == TYPE_VECTOR3,
+		"player_position deve restituire Vector3, ha restituito " + type_string(typeof(pos)))
+
 	# Il punto di spawn neutro è pericoloso: ZERO è anche sotto il giocatore,
 	# quindi va segnalato, non restituito di nascosto.
-	h.vec_near(probe.random_spawn_point(), Vector3.ZERO, 0.0001,
-		"random_spawn_point non registrato non deve inventare un punto")
-	# damage_enemy restituisce void: non si può confrontare il valore di ritorno,
-	# si verifica che l'istanza sopravviva alla chiamata (e che non sia crashata).
-	probe.damage_enemy(0, 10.0, Vector3.FORWARD)
-	h.check(is_instance_valid(probe), "damage_enemy non registrato deve essere un no-op, non un crash")
+	var spawn := probe.random_spawn_point()
+	h.vec_near(spawn, Vector3.ZERO, 0.0001, "random_spawn_point non registrato non deve inventare un punto")
+	h.check(typeof(spawn) == TYPE_VECTOR3,
+		"random_spawn_point deve restituire Vector3, ha restituito " + type_string(typeof(spawn)))
+
+	# Chiamare uno stub non deve corrompere l'istanza: è la prova che la
+	# chiamata è tornata indietro invece di essere esplosa.
+	h.check(is_instance_valid(probe), "uno stub non registrato deve essere un no-op, non un crash")
 	probe.free()
 
 ## 2c. Il meccanismo su cui si regge tutto il piano §5: la foglia registra e il
@@ -117,15 +162,43 @@ func _leaves_can_register(h) -> void:
 
 	# Metodi: la foglia registra con register_impl, nelle due forme.
 	h.check(not game.has_impl("nearest_enemy"), "prima della registrazione l'API deve risultare assente")
-	game.register_impl("nearest_enemy", leaf.nearest_enemy)
-	game.register_impl("player_position", leaf)  # forma corta: metodo omonimo
+	game.register_impl("nearest_enemy", leaf.nearest_enemy)      # forma lunga
+	game.register_impl("damage_enemy", leaf.damage_enemy)        # forma lunga
+	game.register_impl("spawn_projectile", leaf.spawn_projectile)  # forma lunga
+	game.register_impl("player_position", leaf)                  # forma corta: metodo omonimo
 	h.check(game.has_impl("nearest_enemy"), "register_impl deve registrare l'API")
-	h.check(game.nearest_enemy(Vector3.ZERO, 100.0) == marker,
-		"registrazione metodi: Game.nearest_enemy deve chiamare l'impl di -orda")
+	h.check(game.has_impl("damage_enemy"), "register_impl deve registrare l'API")
+	h.check(game.has_impl("spawn_projectile"), "register_impl deve registrare l'API")
+	h.check(game.has_impl("player_position"), "register_impl deve registrare l'API")
+
+	# Le risposte devono arrivare dall'implementazione, con i tipi del contratto.
+	leaf.calls = 0
+	h.eq(game.nearest_enemy(Vector3.ZERO, 100.0), leaf.enemy_index,
+		"registrazione metodi: Game.nearest_enemy deve restituire l'indice dell'impl di -orda")
+	h.eq(game.damage_enemy(2, 12.0, Vector3(0.0, 0.0, 3.5)), leaf.killed,
+		"registrazione metodi: Game.damage_enemy deve restituire il bool dell'impl di -orda")
+	h.eq(game.spawn_projectile(Vector3.ZERO, Vector3.FORWARD, 30.0), leaf.slot_taken,
+		"registrazione metodi: Game.spawn_projectile deve restituire il bool dell'impl di -gameplay")
 	h.vec_near(game.player_position(), Vector3(1.0, 2.0, 3.0), 0.0001,
 		"registrazione metodi: Game.player_position deve chiamare l'impl di -gameplay")
-	h.eq(leaf.calls, 2, "le chiamate devono arrivare all'implementazione registrata")
-	h.check(not game.has_impl("damage_enemy"), "le API non registrate restano stub")
+	h.eq(leaf.calls, 4, "tutte e quattro le chiamate devono arrivare all'implementazione registrata")
+
+	# Gli argomenti passano invariati. `knockback` e' un impulso in m/s gia'
+	# scalato dal chiamante: se il contratto lo normalizzasse, un modulo 3.5
+	# tornerebbe 1.0 e il knockback di 0.3 unita' del criterio n. 4 vorrebbe
+	# dire tre cose diverse a seconda di chi misura.
+	h.eq(leaf.last_index, 2, "il contratto deve passare l'indice del nemico invariato")
+	h.near(leaf.last_amount, 12.0, 0.0001, "il contratto deve passare il danno invariato")
+	h.near(leaf.last_knockback.length(), 3.5, 0.0001,
+		"knockback deve restare un impulso col suo modulo, non diventare un vettore unitario")
+
+	# Stato misto, che e' la realta' di w2: quattro API registrate e una no.
+	# Lo stub deve continuare a dare il suo valore neutro, senza warning di
+	# nuovo e senza rompere il conteggio delle chiamate.
+	h.check(not game.has_impl("random_spawn_point"), "random_spawn_point resta non registrata: e' lo stub")
+	h.vec_near(game.random_spawn_point(), Vector3.ZERO, 0.0001,
+		"uno stub deve dare ZERO anche quando le altre API sono registrate")
+	h.eq(leaf.calls, 4, "chiamare uno stub non deve arrivare a nessuna implementazione")
 	# Il rifiuto di un'API fuori contratto (contracts.gd stampa un push_error)
 	# non viene provato qui di proposito: farebbe rumore in stderr, e il gate
 	# tratta un ERROR come un FAIL.

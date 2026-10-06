@@ -19,7 +19,7 @@ Milestone 1 — **vertical slice giocabile**. Deve valere tutto questo, verifica
 | 1 | La porta è verde | `godot --headless --path . --script tools/gate.gd` esce `0` e stampa `GATE: 4/4` |
 | 2 | La scena si apre senza errori | `godot --headless --path . --quit-after 300` esce `0`, zero `SCRIPT ERROR` nel log |
 | 3 | 200 nemici vivi, senza un nodo per nemico | `node_count < 120` con `horde.count == 200` (test arena) |
-| 4 | Il player spara e uccide | test gameplay: danno applicato una volta sola, knockback ≥ 0.3 unità |
+| 4 | Il player spara e uccide | `tests/test_arena.gd` sulla scena **vera**: HP scende di **esattamente un colpo** e resta fermo (30 frame, `pierce=3`, proiettile ancora in volo), knockback ≥ 0.3 unità **sulle specie su cui è progettato per funzionare** (§5.4). `tests/test_gameplay.gd` copre danno-una-volta-sola anche con nemici sovrapposti, traiettoria entro 5°, e l'impulso passato **grezzo e non normalizzato** |
 | 5 | Si sente il "bonk" | `assets/sfx/bonk.wav` esiste, < 0.6 s, 44100 Hz mono |
 | 6 | Niente binari nel Git normale | `git lfs ls-files` elenca `.glb` e `.wav` |
 
@@ -94,9 +94,9 @@ Vive in `src/core/contracts.gd` (autoload `Game`). **Il contratto dichiara, le i
 var player: Node3D
 var horde: Node            # src/sim/horde.gd
 var arena_radius: float = 28.0
-func nearest_enemy(from: Vector3, radius: float) -> Node3D
-func damage_enemy(index: int, amount: float, knockback: Vector3) -> void
-func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> Node3D
+func nearest_enemy(from: Vector3, radius: float) -> int    # indice, -1 se nessuno
+func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool   # true = ucciso
+func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool     # true = slot preso
 func random_spawn_point() -> Vector3
 func player_position() -> Vector3
 ```
@@ -111,6 +111,12 @@ Game.player = self
 Game.horde = self
 Game.arena_radius = 28.0
 ```
+
+**⚠ `_ready()` è troppo tardi se qualcuno legge il dato durante il proprio avvio.** Godot chiama il `_ready()` dei **figli prima** di quello del padre. Se un nodo che ha figli registra un dato che i suoi figli leggono nel loro `_ready()`, i figli leggono il **valore di default**: non è intermittente, è ordine di esecuzione, ed è **sempre** rotto.
+
+Verificato in w2 da `terminal-gun-arena`: `arena_radius` registrato in `_ready()` produceva muri da 152 m invece di 352 e pavimento da 32 m invece di 64. Il test l'ha scoperto solo perché il muro era **misurabile**: un errore di grandezza che nessuna asserzione guardava sarebbe passato.
+
+**Regola**: chi ha figli che leggono il dato registra in **`_enter_tree()`**, che gira prima di qualunque `_ready()`. Chi è foglia e non ha figli tiene `_ready()`. La registrazione in `_enter_tree()` deve essere **idempotente**, perché può essere chiamata più volte.
 
 **Metodi**, nel proprio `_ready()`, una volta sola:
 ```gdscript
@@ -128,6 +134,51 @@ Già nel contratto, se serve: `Game.has_impl("nearest_enemy") -> bool` per verif
 Proprietari, come nei commenti di `contracts.gd`: `nearest_enemy`, `damage_enemy`, `random_spawn_point` → **-orda**; `spawn_projectile`, `player_position` → **-gameplay** (`player_position` può essere anche di -orda, ma **uno solo** dei due la registra).
 
 Stringhe a schermo: **ASCII only** nei `print`/`push_warning`/`push_error`. La console Windows e le pipe di `OS.execute` stanno in codepage e mangiano gli accenti. I commenti invece possono accentedersi: non passano dalla pipe.
+
+### 5.2 Le firme originali erano sbagliate: emendate in w2
+
+`terminal-gun-orda` e `terminal-gun-gameplay` hanno trovato che tre firme del §5 originale **non potevano funzionare**. Non è stile, è incoerenza con la regola 1.
+
+| firma originale | problema verificato | ora |
+|---|---|---|
+| `nearest_enemy(...) -> Node3D` | Il nemico **non è un nodo** (regola 1), quindi non c'è un `Node3D` da restituire. `int as Node3D` dà `SCRIPT ERROR: Invalid cast` | `-> int`, `-1` se nessuno |
+| `spawn_projectile(...) -> Node3D` | Idem: i proiettili sono record in un pool, non nodi | `-> bool`, `true` se ha preso uno slot |
+| `damage_enemy(...) -> void` | Non diceva **cosa fosse** `knockback`: due foglie lo avevano interpretato in due modi diversi | `-> bool`, semantica definita sotto |
+
+- **`knockback` è un impulso in m/s**, già scalato dal chiamante e **non** normalizzato nel callee, sommato alla velocità del nemico. Il suo modulo **non** è la misura in unità del criterio n. 4: per verificare "knockback ≥ 0.3 unità" si simula un passo di tempo fisso e si misura la **delta di posizione**.
+- **`damage_enemy` restituisce `bool`** (nemico morto). Era la richiesta di -gameplay per l'XP: senza questo l'XP si aggancia al calo di `horde.count` e non sa **chi** è morto. Un segnale `enemy_died` apposito è rimandato, non dimenticato.
+
+L'indice di `nearest_enemy` è lo stesso che `damage_enemy` si aspetta: si spara a un nemico senza trasformare la referenza in un nodo.
+
+### 5.3 L'identificatore `Game`: cosa è provato e cosa no
+
+**Provato:** l'identificatore nudo `Game` **risolve** sotto `--script`. `src/sim/horde.gd` scrive `Game.horde = self` e `Game.register_impl(...)` in testa al file, e i suoi errori di parse sono su un altro identificatore: se `Game` non risolvesse, l'errore sarebbe su `Game`. `tests/test_smoke.gd` passa inoltre controllando che l'autoload sia **istanziato**.
+
+**Non provato, e da non dare per scontato:** `terminal-gun-gameplay` ha riferito un errore di compilazione su `Game` in tre suoi file e ha adottato la via del nodo (`root.get_node_or_null("Game")`). Non ho isolato **in quale contesto** fallisce, e la mia prima versione di questa sezione lo dichiarava incompatibile ovunque: **era sbagliato**, l'ho scritto su una sola testimonianza mentre il codice di -orda lo contraddiceva. Non farlo propagare.
+
+**Regola:** `Game.<campo>` e `Game.register_impl(...)` sono la forma normale e vanno usate per default. Se un file specifico non compila con `Identifier "Game" not declared`, il problema è in **quel** file — i sospetti sono i contesti dove un autoload non è visibile: `static func`, un `const`, un'annotazione di tipo (`var g: Game`) o un `class_name`. In quel file solo, usa `root.get_node_or_null("Game")` e annota il perché. Non estendere il workaround agli altri file senza evidenza.
+
+### 5.4 Il knockback non è uniforme: le specie che lo subiscono e quelle che lo resistono
+
+Emendamento del vertice in w2, dopo che `terminal-gun-gameplay` ha tarato `KNOCKBACK` sul **proprio finto** (misurava 0.2985, sotto soglia, e l'ha alzata a 18) e `terminal-gun-arena` ha misurato il criterio n. 4 sulla **scena vera**, dove i numeri erano diversi.
+
+`src/sim/enemy.gd` ha una **resistenza per specie** che scala l'impulso di knockback (`static var`, non un campo modificabile a runtime): **0 / 0.20 / 0.55 / 0.90** per runner, grunt, brute, boss. Con `KNOCKBACK` = 18 m/s lo spostamento misurato in 5 frame a DT=1/60 è:
+
+| specie | impulso ricevuto | spostamento | tetto 0.3 |
+|---|---|---|---|
+| runner | 18.0 m/s | 0.311 | sì, ma **+3.7%** |
+| grunt | 14.4 m/s | 0.356 | sì |
+| brute | 8.1 m/s | 0.196 | **no** |
+| boss | 1.8 m/s | 0.055 | **no** |
+
+Due conclusioni, e sono una decisione di progetto, non un aggiustamento:
+
+1. **Il knockback è asseverato sulle specie su cui è progettato per funzionare**, cioè runner e grunt, che sono **l'80% dell'onda** con i pesi veri di `Spawner.KIND_WEIGHTS`. Brute e boss **resistono al knockback per progetto**: un nemico pesante che non scivola quando lo colpisci è giusto in un bullet heaven, e il boss con resistenza 0.90 è di fatto **non knockbackabile** — portarlo a 0.3 richiederebbe `KNOCKBACK` ≈ 170 e un'integrazione che regge. Non è un difetto, è una proprietà, e da ora è scritta qui perché nessuno la riscopra come un bug.
+2. **Il +3.7% sul runner è sottile ma non è fragile**, e la distinzione conta: la misura è su **passo di tempo fisso** (5 frame a DT=1/60), quindi è **deterministica** e non dipende dal framerate né dalla macchina. Non è la stessa cosa del benchmark di `tests/test_orda.gd`, che misura microsecondi di wall-clock e quelli oscillano davvero: quello sì era a rischio di fallire a caso.
+
+   Resta però un problema reale, diverso: **il margine è sottile e accoppiato alla regolazione di -orda**. Il tetto n. 4 è a 0.011 dal valore misurato, quindi chiunque tocchi `chase_speed`, `ACCEL`, `SPEED_MAX` o la tabella di resistenza spegne il criterio senza accorgersene. Il numero di `KNOCKBACK` è di -gameplay ma c'è un **accoppiamento non dichiarato**: `-orda` ha `SPEED_MAX = 18.0`, cioè la velocità del nemico è **limitata a 18 m/s**, che è esattamente il valore di `KNOCKBACK`. Alzare il knockback oltre quella soglia **potrebbe non muovere nulla**. Va verificato, non assunto: il vertice ha ordinato a -gameplay di alzarlo come **esperimento**, con l'obbligo di riportare se il numero si muove o resta fermo per la saturazione.
+
+Nota tecnica per chi rimisura: l'orda **non** usa un `drag`, usa smorzamento di primo ordine `v += (wanted - v) * min(1, dt*ACCEL)` con `ACCEL = 8.0` 1/s (τ = 0.125 s), più `SPEED_MAX = 18.0` e `ARRIVE_RADIUS = 3.0`. Due errori di misura che arena ha già commesso e documentato: leggere la velocità **prima** dell'assestamento (dà zero), e infilare la finestra di "nessun secondo colpo" **prima** della misura (a τ = 0.125 s l'impulso è già sparito e si misura l'inseguimento: 0.5382 ≈ 6.6 m/s × 5/60).
 
 Il lato "massa" dell'orda non passa da funzioni ma da tre campi pubblici, perché disegnarli non è una query:
 
@@ -166,14 +217,53 @@ Cinque agenti scrivono nella stessa cartella **in parallelo**. Queste regole son
 
 ## 8. Stato
 
-Da aggiornare a fine onda. **w0 e w1 verdi. w2 in attesa.**
+Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | w0 | vertice | Godot 4.7.2 + Blender 5.2.2 installati, `tools/env.sh` scritto, `git init` + LFS su `*.glb`/`*.wav`/`*.ogg`, identità git impostata **localmente** (`bisco <bisco@localhost>`: non c'era nessuna, né locale né globale) | — | **verde** |
 | w1 | scheletro, assets | `project.godot`, `contracts.gd`, `gate.gd`, `test_harness.gd`, `test_smoke.gd`, `.gitignore`; 7 SFX + 6 modelli generati e deterministici | `GATE: 1/1`, exit 0, verificato dal vertice | **verde** |
-| w2 | orda, gameplay, arena | — | — | da fare |
-| w3 | vertice | — | — | da fare |
+| w2 | orda, gameplay, arena | orda: `src/sim/` (horde, griglia spaziale, pool, spawner, tabelle specie). gameplay: player, armi, proiettili, XP e potenziamenti. arena: `MultiMeshInstance3D`, terreno, camera, HUD — **eseguito via `esecutore`** | `GATE: 4/4`, exit 0; `--quit-after 300` exit 0 con zero `SCRIPT ERROR` | **verde** |
+| w3 | vertice | piano emendato in §5.1 (ordine di registrazione), §5.2 (firme), §5.3 (identificatore `Game`), §5.4 (knockback per specie); stato e criteri aggiornati | entrambe le porte rieseguite dal vertice | **verde** |
+
+### I sei criteri della milestone 1, uno per uno
+
+| # | criterio | esito | numeri |
+|---|---|---|---|
+| 1 | La porta è verde | **sì** | `GATE: 4/4`, exit `0` |
+| 2 | La scena si apre senza errori | **sì** | `--quit-after 300` exit `0`, zero `SCRIPT ERROR` / `Parse Error` |
+| 3 | 200 nemici vivi, senza un nodo per nemico | **sì** | `horde.count == 200` con `node_count` **27** in scena (tetto 120); nel test di -orda `node_count == 3` |
+| 4 | Il player spara e uccide | **sì** | HP scende di **un** colpo e resta fermo 30 frame con `pierce=3`; knockback runner **0.311**, grunt **0.356** (tetto 0.3), brute 0.196 e boss 0.055 **esclusi per progetto** (§5.4) |
+| 5 | Si sente il "bonk" | **sì** | `assets/sfx/bonk.wav` 44100 Hz mono, 0.18 s (tetto 0.6) |
+| 6 | Niente binari nel Git normale | **sì** | `git lfs ls-files` elenca 13 file: 6 `.glb` + 7 `.wav` |
+
+### Come w2 è finita: sette difetti reali, e due miei
+
+**Il vertice ha sbagliato due volte, ed è il fatto più utile di questa onda.**
+
+1. **§5 prescribeva una registrazione ineseguibile.** `Game.nearest_enemy = self._nearest_enemy` è rifiutato da GDScript e **interrompe il `_ready()`**: tre foglie avrebbero prodotto codice morto. Trovato da -scheletro in w1, emendato in §5.1.
+2. **§5 contraddiceva la propria regola 1.** `nearest_enemy -> Node3D` e `spawn_projectile -> Node3D` sono irrealizzabili proprio perché "nessun nodo per nemico" vieta l'oggetto da restituire. Trovato da -orda e -gameplay, emendato in §5.2.
+3. **§5.1 prescriveva `_ready()` per un dato che i figli leggono al proprio avvio.** Il `_ready()` del padre gira **dopo** quello dei figli: il dato è sempre fuori tempo. Misurato da -arena: muri da 152 m invece di 352. Emendato in §5.1, ora `_enter_tree()` idempotente.
+
+E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identificatore `Game` non risolve sotto `--script`, basandomi su una sola testimonianza**, mentre il codice di -orda lo usava e contraddiceva la frase. L'ho corretto prima che si propagasse a tre agenti. Il pattern è ricorruto con il margine del knockback: l'ho dichiarato «fragile, aspetta di fallire» quando la misura è a passo fisso e quindi **deterministica**, e l'ho corretto. **Da una testimonianza sola non si scrive una regola.**
+
+**Difetti trovati nelle foglie, tutti con numeri:**
+
+- **`const preload` e gli autoload**: un `const preload` in un file lanciato con `--script` risolve gli script **prima** che gli autoload siano registrati → `Identifier not found: Game`. Caricare a runtime dentro `_process()` funziona. Trovato da -gameplay.
+- **`OS.execute` su Windows** restituisce tutta la stdout come **un solo elemento**, non una riga per elemento: un gate che cerca una riga nell'array la trova una volta sola. Trovato e risolto da -scheletro in w1.
+- **Pool di proiettili**: `_release()` faceva `_items[count] = null` e distruggeva i record, quindi **dopo ~85 colpi ogni sparo crashava**. Trovato da -gameplay.
+- **Pool di oggetti**: `acquire()` non svuotava lo slot, dal secondo ciclo ritornava `null` e `_live` cresceva a 32. Trovato da -orda.
+- **Griglia spaziale**: `Dictionary.get` su cella assente lanciava e **interrompeva la funzione**. Trovato da -orda.
+- **`KNOCKBACK` tarato su una fisica inesistente**: -gameplay lo aveva alzato 14→18 perché il **suo finto** misurava 0.2985. Il finto non aveva né resistenza per specie né smorzamento. Tolta l'asserzione: il tetto si asserva sulla scena vera.
+- **Il gate era passato a `GATE: 4/4` e poi è tornato a `3/4`**: -gameplay ha lasciato mezzo migrazione che referenziava un `drag` **inesistente** (l'orda non ha `drag`, usa smorzamento di primo ordine). Il piano §5.4 lo documentava già, scritto a partire dalla stessa segnalazione: **l'informazione c'era, non è stata letta.**
+
+### Debiti dichiarati, non nascosti
+
+- **Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**, che è lo stesso valore di `KNOCKBACK`. Se la velocità del nemico è saturata, alzare il knockback potrebbe non spostare niente: **non è stato verificato**, perché l'esperimento è stato interrotto e poi il tentativo ha rotto il gate. Il criterio **passa** comunque (runner 0.311, grunt 0.356), in modo deterministico.
+- **XP e potenziamenti non sono tra i criteri della milestone** e non sono coperti da una porta dedicata: sono implementati (`src/player/progression.gd`) e provati sul percorso reale, ma senza criterio di accettazione dichiarato. Milestone 2.
+- **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
+- **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. Scelta consapevole.
+- **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi.
 
 ### Come w1 è finita, e cosa è costato
 

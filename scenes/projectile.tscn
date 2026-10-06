@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3]
+
+; -gameplay. La forma di un proiettile.
+;
+; Questa scena non viene istanziata nel ciclo di gioco: i proiettili sono
+; record in array (piano §5, regola 1) e li disegna UNA MultiMeshInstance3D.
+; Qui c'e' solo il modello, e `projectile_pool.gd` lo legge una volta sola
+; all'avvio per riempirne la MultiMesh. Nessun nodo per proiettile, quindi il
+; conteggio dei nodi non cresce sparando.
+
+[sub_resource type="BoxMesh" id="BoxMesh_bullet"]
+size = Vector3(0.18, 0.18, 0.44)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_bullet"]
+shading_mode = 0
+albedo_color = Color(1, 0.86, 0.3, 1)
+emission_enabled = true
+emission = Color(1, 0.5, 0.09, 1)
+
+[node name="Projectile" type="Node3D"]
+
+[node name="Bullet" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("BoxMesh_bullet")
+surface_material_override/0 = SubResource("StandardMaterial3D_bullet")

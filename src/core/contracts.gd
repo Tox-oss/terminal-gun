@@ -102,27 +102,41 @@ func has_impl(api: String) -> bool:
 # fallback deliberato, è un rumore esplicito: un test che lo chiama deve
 # fallire con un messaggio che dice chi deve registrarla.
 
-## -orda. Nemico vivo più vicino a `from` entro `radius`, o null se non ce n'è.
-func nearest_enemy(from: Vector3, radius: float) -> Node3D:
+## -orda. **Indice** del nemico vivo piu vicino a `from` entro `radius`, oppure
+## -1 se non c'e' nessuno. Restituisce l'indice, NON un nodo: la regola "nessun
+## nodo per nemico" (piano sez. 5, regola 1) rende un Node3D qualcosa che non
+## esiste da restituire. E l'indice e' esattamente quello che `damage_enemy` si
+## aspetta, cosi si spara a un nemico senza trasformare la referenza in un nodo.
+func nearest_enemy(from: Vector3, radius: float) -> int:
 	if _impl.has("nearest_enemy"):
-		return _impl["nearest_enemy"].call(from, radius) as Node3D
+		return _impl["nearest_enemy"].call(from, radius) as int
 	_missing("nearest_enemy", "terminal-gun-orda")
-	return null
+	return -1
 
-## -orda. Applica `amount` di danno al nemico di indice `index` e gli impartisce
-## `knockback` (spinta già calcolata e normalizzata dal chiamante).
-func damage_enemy(index: int, amount: float, knockback: Vector3) -> void:
+## -orda. Applica `amount` di danno al nemico di indice `index` e gli somma
+## `knockback` alla velocita'. Restituisce `true` se il nemico e' morto: e' l'unico
+## modo per sapere di aver ucciso qualcosa senza aggiungere un segnale, e serve a
+## -gameplay per l'XP.
+##
+## `knockback` e' un **impulso in m/s, gia' scalato dal chiamante, non
+## normalizzato qui**: sommato cosi' alla velocita' del nemico, il suo modulo non
+## dice gli metri spostati. Per verificare il criterio n. 4 ("knockback >= 0.3
+## unita'") si simula un passo di tempo fisso e si misura la delta di posizione.
+func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 	if _impl.has("damage_enemy"):
-		_impl["damage_enemy"].call(index, amount, knockback)
-		return
+		return _impl["damage_enemy"].call(index, amount, knockback) as bool
 	_missing("damage_enemy", "terminal-gun-orda")
+	return false
 
-## -gameplay. Crea un proiettile che viaggia da `pos` in `dir` a `speed`.
-func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> Node3D:
+## -gameplay. Tira un proiettile da `pos` verso `dir` alla velocita' `speed`.
+## Restituisce `true` se ha ottenuto uno slot dal pool, `false` se il pool era
+## pieno. Come `nearest_enemy`, non restituisce un nodo: i proiettili non sono
+## nodi, sono record come i nemici.
+func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool:
 	if _impl.has("spawn_projectile"):
-		return _impl["spawn_projectile"].call(pos, dir, speed) as Node3D
+		return _impl["spawn_projectile"].call(pos, dir, speed) as bool
 	_missing("spawn_projectile", "terminal-gun-gameplay")
-	return null
+	return false
 
 ## -orda. Punto di arrivo casuale dentro l'arena, a una distanza comoda dal
 ## giocatore. Non va mai restituito come origine: Vector3.ZERO è ambiguo, è

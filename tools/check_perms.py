@@ -42,6 +42,7 @@ LEAVES = [
     "terminal-gun-gameplay",
     "terminal-gun-arena",
     "terminal-gun-assets",
+    "terminal-gun-ui",
 ]
 ALL_AGENTS = [VERTICE] + LEAVES
 
@@ -88,6 +89,16 @@ SCOPE = {
         "src/ui/**",
         "tests/test_arena.gd",
     ],
+    # Foglia nuova di m2 (piano sez. 3.3 e 4.1). `scenes/hud.tscn` e `src/ui/**`
+    # sono anche nel scope di -arena: non e' un conflitto, e' il **passaggio** di
+    # proprieta' di m2, dichiarato in DECLARED_OVERLAP sotto. -arena non lavora in
+    # m2, quindi le due foglie non scrivono mai nello stesso file nella stessa
+    # onda: e' quello che rende la cosa sicura invece che solo dichiarata.
+    "terminal-gun-ui": [
+        "scenes/hud.tscn",
+        "src/ui/**",
+        "tests/test_ui.gd",
+    ],
     "terminal-gun-assets": [
         "tools/gen_sfx.py",
         "tools/blender/gen_models.py",
@@ -104,6 +115,11 @@ DECLARED_OVERLAP = {
     ("terminal-gun-scheletro", "src/core/contracts.gd"),
     ("terminal-gun-scheletro", "scenes/arena_main.tscn"),
     ("terminal-gun-arena", "scenes/arena_main.tscn"),
+    # Passaggio di proprieta' di m2: l'HUD passa da -arena a -ui (piano sez. 4.1).
+    ("terminal-gun-arena", "scenes/hud.tscn"),
+    ("terminal-gun-ui", "scenes/hud.tscn"),
+    ("terminal-gun-arena", "src/ui/**"),
+    ("terminal-gun-ui", "src/ui/**"),
 }
 
 # Sudo: tre comandi, ancorati alla root, solo ACL e proprieta'.
@@ -540,7 +556,43 @@ CHECKS = [
 ]
 
 
+def missing_agent_files():
+    """Agenti dichiarati in `LEAVES`/`ALL_AGENTS` ma senza file su disco.
+
+    Il perche' esiste come precondizione e non dentro `perm_mirror`: senza un
+    file, ogni check che chiama `load(agent)` solleva `FileNotFoundError` e la
+    porta stampava **tredici** `controllore rotto`, che nascondevano l'unica
+    causa vera. Una porta che non sa dire *perche'* e' rotta e' peggio di una
+    porta che non gira: qui si dice, e si dice una volta sola.
+    """
+    missing = []
+    for agent in ALL_AGENTS:
+        for label, base in (("mirror", MIRROR), ("installato", INSTALLED)):
+            path = os.path.join(base, agent + ".md")
+            if not os.path.exists(path):
+                missing.append((agent, label, path))
+    return missing
+
+
 def main():
+    missing = missing_agent_files()
+    if missing:
+        for agent, label, path in missing:
+            sys.stdout.write(
+                "FAIL perm_install: manca il file di %s (%s): %s\n"
+                % (agent, label, path)
+            )
+        sys.stdout.write(
+            "FAIL perm_install: un file di agente si installa a mano, in due\n"
+            "  posti: .opencode/agents/ (mirror, sorgente di verita') e\n"
+            "  ~/.config/opencode/agents/ (installazione). Poi riavvia opencode:\n"
+            "  i permessi si caricano all'avvio (piano sez. 10).\n"
+            "  Il vertice NON puo' farlo: ha `edit: * deny` su quel path\n"
+            "  (piano sez. 11.5).\n"
+        )
+        sys.stdout.write("PERM: 0/%d\n" % len(CHECKS))
+        sys.exit(1)
+
     total = len(CHECKS)
     passed = 0
     for name, fn in CHECKS:

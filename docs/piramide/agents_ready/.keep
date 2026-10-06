@@ -1,0 +1,2 @@
+placeholder — la directory e' creata dal `write`, poi
+`python docs/piramide/make_agent_files.py` ci scrive dentro i file di agente.

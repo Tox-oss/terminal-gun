@@ -94,7 +94,7 @@ In m1 la regola "un file, un proprietario" ha funzionato. In m2 tre file devono 
 |---|---|---|---|
 | `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/` (scala delle onde, `SPEED_MAX` se l'esperimento lo richiede), `tests/test_gameloop.gd` | `test_gameloop.gd` è suo perché wave e game over stanno nella simulazione, non nell'UI |
 | `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/` (XP, potenziamenti, stato `game_over`, restart), `src/weapons/`, `tests/test_progression.gd`, `tests/test_upgrades.gd` | è il suo lavoro: crescita del player è scope di gameplay, non di ui |
-| `terminal-gun-ui` (nuovo) | `space-bunny-free#max` | `scenes/hud.tscn`, `src/ui/`, `tests/test_ui.gd` | **foglia nuova in m2**: barra XP, contatore wave, schermata game over |
+| `terminal-gun-ui` (nuovo) | `space-bunny-free#max` | `scenes/hud.tscn`, `src/ui/`, `tests/test_ui.gd` | **foglia nuova in m2**: barra XP, contatore wave, schermata game over. `scenes/hud.tscn` e `src/ui/` sono anche nel scope di -arena: è il **passaggio di proprietà** di m2, non un conflitto (§4.1) |
 | `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/gate.gd` (timeout), `tools/env.sh`, `tools/check_perms.py` | il timeout del gate è suo: tocca il gate, che è di scheletro, e scheletro **non lavora in m2**. Anche la porta dei permessi è sua: verifica le allowlist, che nessun altro può scrivere |
 
 `terminal-gun-scheletro` e `terminal-gun-assets` **non lavorano in m2**. Il gate ha il timeout e `contracts.gd` è del vertice: è la riapertura più economica perché scheletro non ha altri file da difendere in questa ondata.
@@ -385,13 +385,36 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | **m2-w0** | vertice, solo shell | esperimento `KNOCKBACK` vs `SPEED_MAX` **misurato e scritto** (§1.2): l'ipotesi di m1 era **sbagliata**, nessuna saturazione al valore di codice, soglia vera ~24.6 m/s. `-arena` **provato con un lancio reale**: il provider lo blocca, il catalogo mentiva | `GATE: 4/4`, `PERM: 15/15` rieseguite dal vertice | **verde con due debiti aperti** |
-| **m2-w1** | orda ∥ gameplay ∥ ui | — | atteso `GATE: 7/7` | **non partita**: manca il file di `terminal-gun-ui`, vedi sotto |
+| **m2-w1** | orda ∥ gameplay ∥ ui | — | atteso `GATE: 7/7` | **pronta ma non lanciata**: i tre file di agente sono **scritti e verificati**, manca solo la copia (2 file × 2 posti) |
 | **m2-w2** | vertice | — | — | da fare |
 
-### I due debiti che m2-w0 ha lasciati aperti
+### m2-w0, seconda parte: i file di agente di m2 sono pronti
 
-1. **`terminal-gun-ui` non ha un file di agente, e il vertice non può crearlo.** §3.3 e §11.8 dicono che il file del nuovo ruolo si scrive in m2-w0. **Provato in m2-w0: `write` su `.opencode/agents/**` risponde `Permission denied: edit`**, che è il muro strutturale di §11.5, non una dimenticanza. Quindi **m2-w1 non può partire con tre foglie**: o l'utente crea `terminal-gun-ui.md` (nel repo **e** in `~/.config/opencode/agents/`, poi riavvia), o m2-w1 parte con due foglie e l'UI resta indietro. **Decide l'utente**, non il vertice: è un atto di governance (§11.5).
-2. **`terminal-gun-arena` non è eseguibile come tale**: il provider risponde `This model is not available in your country` su un lancio reale, nonostante il catalogo lo riporti `active`. Non blocca m2 (`-arena` non lavora in m2), ma il ruolo resta senza le garanzie della regola 7.4 finché non si decide. Vedi §8, "Debiti dichiarati".
+L'utente ha chiesto al vertice di fare lui l'agente. Il vertice ha potuto fare **tutto tranne la copia**, perché `write` su `.opencode/agents/**` è il muro di §11.5 (provato, non dichiarato).
+
+| file pronto | cosa cambia | da dove viene |
+|---|---|---|
+| `docs/piramide/agents_ready/terminal-gun-ui.md` | foglia nuova di m2 | blocco `permissions` di `-arena`, privato dei suoi `edit` + il path del test nuovo |
+| `docs/piramide/agents_ready/terminal-gun-arena.md` | `model: fledge-alpha-free#max` → `space-bunny-free#max` | una riga sola |
+
+**Il blocco dei permessi di `-ui` non è riscritto a mano**: è generato dal file di `-arena`, che è già verde, e il generatore si ferma se gli `edit` allow non sono esattamente `scenes/hud.tscn`, `src/ui/**`, `tests/test_ui.gd` o se uno di questi punta a un file di un altro agente.
+
+**Un difetto reale, preso dalla simulazione e non a occhio.** La prima versione lasciava a `-ui` anche `scenes/arena_main.tscn` e `src/render/**`, perche' il blocco ereditato li conteneva: `perm_scope` l'ha visto e ha detto `scope dei permessi [...] != scope dichiarato [...]`. Un allow in più del dichiarato è **un buco nella regola 1**: una foglia che puo' scrivere file di un'altra senza che nessuno lo dichiari. Il generatore ora lo dichiara e si ferma se torna.
+
+**Verificato prima di chiedere la copia**: `python docs/piramide/verify_agent_install.py` → **`SIMULAZIONE PERM: 15/15`**. Consegnare all'utente un file che al primo check è rosso è il modo più veloce per bruciare la fiducia in una porta.
+
+**Cosa deve fare l'utente, in quattro copie** (il vertice non può, §11.5):
+
+```sh
+cp docs/piramide/agents_ready/terminal-gun-ui.md    .opencode/agents/
+cp docs/piramide/agents_ready/terminal-gun-arena.md .opencode/agents/
+cp docs/piramide/agents_ready/terminal-gun-ui.md    ~/.config/opencode/agents/
+cp docs/piramide/agents_ready/terminal-gun-arena.md ~/.config/opencode/agents/
+```
+
+Poi **riavviare opencode** (i permessi si caricano all'avvio, §10) e lanciare `python tools/check_perms.py`, che deve dire `PERM: 15/15`. A quel punto m2-w1 può partire con `orda ∥ gameplay ∥ ui`.
+
+**`check_perms.py` è già registrato per `terminal-gun-ui`** (`LEAVES` e `SCOPE`, con il passaggio di `scenes/hud.tscn` e `src/ui/**` da `-arena` a `-ui` in `DECLARED_OVERLAP`). Finché i file non sono installati la porta dice **`PERM: 0/15` con `perm_install`**, che è il comportamento giusto: la piramide non è installata, e la porta lo dice una volta sola invece di tredici.
 
 ### I sei criteri della milestone 1, uno per uno
 
@@ -577,6 +600,9 @@ Quella prova ha anche trovato **un bug nel controllore**, non solo nei permessi:
 - **`winget` era su `winget install *`**, che poteva installare qualsiasi cosa. Ora è ancorato ai due pacchetti dichiarati in §2.
 - **L'unico path assoluto di macchina in un file di permessi** è il path di Blender, e per lo stesso motivo di `tools/env.sh`: winget lo installa sotto `Program Files` senza alias, quindi il path deve stare in un posto solo. `perm_absolute` lo controlla, con l'eccezione dichiarata in testa.
 - **`esecutore` non è più raggiungibile dal vertice.** Ha `action: "*" allow`, quindi un ruolo che gira lì ha allow su `read` ed `edit` ovunque e **perde le garanzie della regola 7.4** — il caso che §8 già registra per `-arena` in w2. In terminal-gun un ruolo senza file di agente è un difetto dell'onda: in m2 i file dei ruoli nuovi (`terminal-gun-ui` e gli altri) si scrivono **in m2-w0**, prima dell'onda che li usa. `esecutore` resta disponibile per gli altri progetti, intatto.
+- **Il vertice non puo' installare un file di agente, e in m2-w0 l'ha dimostrato** invece di dichiararlo: `write` su `.opencode/agents/**` risponde `Permission denied: edit`. Quindi in m2-w0 il vertice ha potuto **scrivere il contenuto** del file nuovo in `docs/piramide/agents_ready/` (il suo scope) e **non installarlo**. I due file pronti sono `terminal-gun-ui.md` (foglia nuova) e `terminal-gun-arena.md` (modello sostituito, vedi sez. 8). La copia e' un atto dell'utente, in **due** posti — `.opencode/agents/` (mirror, fonte di verita') e `~/.config/opencode/agents/` (installazione) — poi un riavvio, perche' i permessi si caricano all'avvio (sez. 10).
+- **`tools/verify_agent_install.py` simula l'installazione** e deve dire `SIMULAZIONE PERM: 15/15` **prima** che l'utente perda tempo a copiare: consegnare un file che al primo check e' rosso e' il modo piu' veloce per bruciare la fiducia in una porta. Il file di -ui e' generato da `docs/piramide/make_agent_files.py` a partire dal blocco `permissions` di -arena, che e' gia' verde: cosi' il blocco dei permessi differisce per **una** riga (il path del test), non per trenta righe riscritte a mano. Il generatore lo verifica e si ferma se le righe cambiate sono piu' di due.
+- **`check_perms.py` ha una precondizione, `perm_install`.** Un agente dichiarato in `LEAVES` senza file su disco produceva **tredici** `controllore rotto`, perche' tredici check chiamano `load(agent)` e sollevano `FileNotFoundError`: quattordici errori identici che nascondevano l'unica causa vera. Una porta che non sa dire *perche'* e' rotta e' peggio di una porta che non gira. Ora la precondizione gira **prima** dei check e dice il file mancante e il lato (mirror o installazione). Il numero resta `15`: `perm_install` non e' un sedicesimo check, e' la domanda "la piramide e' installata?", cui la risposta senza file e' no e basta.
 - **`.opencode/agents/` nel repo cambia la precedenza** di questo progetto (§11.6). Va detto all'utente, non scoperto da un agente a un'onda di distanza.
 - **`core.autocrlf=true` spezzava `perm_mirror` al primo clone**: git avrebbe convertito i file del mirror in CRLF al checkout, mentre la copia installata in `~/.config` resta LF, e il confronto byte per byte sarebbe diventato rosso per motivi che non hanno niente a che fare con i permessi. Risolto in `.gitattributes` con `.opencode/agents/*.md text eol=lf`, verificato con `git ls-files --eol` → `i/lf w/lf`. **È il motivo per cui `perm_mirror` confronta byte e non testo normalizzato**: normalizzare avrebbe nascosto il problema invece di registrarlo.
 

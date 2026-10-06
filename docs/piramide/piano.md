@@ -25,6 +25,21 @@ Milestone 1 — **vertical slice giocabile**. Deve valere tutto questo, verifica
 
 Fuori milestone 1, dichiarato: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
 
+### 1.1 Milestone 2 — il gioco è un gioco: progressione, fine onda, morte, restart
+
+Milestone 1 ha dimostrato che il motore gira e che il player uccide. **Non ha dimostrato che sia un gioco**: non c'è una fine, non c'è una morte, e l'XP non è governato da nessun criterio. Milestone 2 chiude il cerchio, scegliendo **una sola cosa**: che la partita abbia inizio, crescita e fine, misurabili dal gate.
+
+Fuori milestone 2, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | La porta è verde | `GATE: 7/7` (le 4 di w2 + 3 nuove), exit `0` |
+| 2 | L'XP fa salire di livello, e non è finta | `tests/test_progression.gd`: uccidere N nemici fa salire di livello; barra XP in `[0, next]` **sempre**, mai `NaN`/`INF`; l'XP di un ucciso **non** è perso al cambio onda |
+| 3 | Un potenziamento **cambia il comportamento misurabile** | `tests/test_upgrades.gd`: applicato un upgrade, il danno o la cadenza cambiano di **almeno il 2%**, misurato sulla scena vera. Un upgrade che non muove nessun numero è un upgrade decorativo e **fallisce** |
+| 4 | La partita ha una fine | `tests/test_gameloop.gd`: uccisi i nemici dell'onda corrente e la barra wave è a 0 → onda successiva con contatore++; player a 0 HP → stato `game_over`; **restart** → torni a `wave 1`, `horde.count` azzerato e ripopolato, **nessun nodo duplicato** |
+| 5 | Il criterio n. 4 di m1 non regredisce | knockback runner **≥ 0.3** resta verde dopo che m2 ha toccato XP e HUD: m2 non può alzare `KNOCKBACK` per stare comodo |
+| 6 | La porta non ha timeout | **debito di m1 chiuso**: `gate.gd` prende un timeout per test e un test che si blocca diventa FAIL, non un gate congelato |
+
 ## 2. Toolchain
 
 Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nessuno deve cercare i binari per conto proprio: legge `tools/env.sh`.
@@ -70,6 +85,19 @@ Un file, un proprietario. **Due agenti che toccano lo stesso file sono un bug di
 | `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/`, `tests/test_orda.gd` | tutto il resto del codice, `project.godot`, `.godot/` |
 | `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/`, `src/weapons/`, `scenes/player.tscn`, `scenes/projectile.tscn`, `tests/test_gameplay.gd` | `src/sim`, `src/render`, `src/ui`, `scenes/arena_main.tscn`, `.godot/` |
 | `terminal-gun-arena` | `fledge-alpha-free#max` | `scenes/arena_main.tscn`, `scenes/hud.tscn`, `src/render/`, `src/ui/`, `tests/test_arena.gd` | `src/sim`, `src/player`, `src/weapons`, `project.godot`, `.godot/` |
+
+### 3.3 Scope della milestone 2: una foglia nuova, tre scope che si riaprono
+
+In m1 la regola "un file, un proprietario" ha funzionato. In m2 tre file devono **cambiare proprietario o allargarsi**, e va detto prima, non dopo.
+
+| agente | modello | in m2 scrive | note |
+|---|---|---|---|
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/` (scala delle onde, `SPEED_MAX` se l'esperimento lo richiede), `tests/test_gameloop.gd` | `test_gameloop.gd` è suo perché wave e game over stanno nella simulazione, non nell'UI |
+| `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/` (XP, potenziamenti, stato `game_over`, restart), `src/weapons/`, `tests/test_progression.gd`, `tests/test_upgrades.gd` | è il suo lavoro: crescita del player è scope di gameplay, non di ui |
+| `terminal-gun-ui` (nuovo) | `space-bunny-free#max` | `scenes/hud.tscn`, `src/ui/`, `tests/test_ui.gd` | **foglia nuova in m2**: barra XP, contatore wave, schermata game over |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/gate.gd` (timeout), `tools/env.sh` | il timeout del gate è suo: tocca il gate, che è di scheletro, e scheletro **non lavora in m2** |
+
+`terminal-gun-scheletro` e `terminal-gun-assets` **non lavorano in m2**. Il gate ha il timeout e `contracts.gd` è del vertice: è la riapertura più economica perché scheletro non ha altri file da difendere in questa ondata.
 | `terminal-gun-assets` | `muse-spark-1.3-contributor-free#high` | `tools/gen_sfx.py`, `tools/blender/gen_models.py`, `tools/convert_assets.sh`, `assets/` | `src/`, `scenes/`, `project.godot`, `tools/env.sh`, non esegue mai `godot` |
 | `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/env.sh`, **`.gitattributes`** | il codice del gioco |
 
@@ -94,6 +122,20 @@ Servono in `.gitattributes`:
 
 Non LFS: sono artefatti di rilascio e non vale la pena spenderne il quota. `binary` serve a una cosa sola, ed è quella giusta: impedisce a git di tentare diff e merge testuali.
 
+### 3.4 L'eseguibile sul desktop: l'utente lo può provare
+
+Richiesto dall'utente il 2026-10-06: un modo per **giocare** senza aprire l'editor. Non è dentro i criteri di m2, perché non è un criterio di prodotto: è un modo per guardare.
+
+Un `.exe` non si può produrre da qui in modo onesto: **`export_presets.cfg` non esiste** e i template di esportazione di Godot 4.7 non sono installati su questa macchina. Scaricarli è una decisione dell'utente, non mia: sono ~1 GB e si installano dalla GUI di Godot.
+
+Quindi il percorso che resta, in ordine di onestà:
+
+1. **`godot --path .`** — apre l'editor con il progetto già caricato, si preme F5. Un comando, zero installazioni, ed è il modo **vero** di provarlo adesso.
+2. **`godot --path . scenes/arena_main.tscn`** — parte **senza editor**, gioco diretto. È il più vicino a "un eseguibile" che esiste oggi su questa macchina.
+3. **Export a `.exe`** — quando l'utente decide di scaricare i template. Va fuori `.gitignore` (ci è già, §3.2) e va costruito con `terminal-gun-scheletro` in un'onda dedicata, perché tocca `project.godot` e `export_presets.cfg`: nessuno dei due è scope di m2.
+
+Il comando del punto 2 è quello da usare, ed è **un comando solo**. Non prometto un `.exe` finché i template non ci sono: prometterlo sarebbe far annunciare a un agente un artefatto che non può produrre.
+
 **Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 
 **Riconfermato dal vertice il 2026-10-06**: `write` su `.gitattributes` risponde `Permission denied: edit`. Il file è quindi **in mano all'utente**, non al vertice. Le due righe ci sono (scritte a mano) ma erano **fuori da ogni commit**: il vertice le ha committate il 2026-10-06, il che è l'unico atto che gli resta su questo file. Manca solo il newline finale in fondo, che è cosmetico e non blocca nulla.
@@ -106,6 +148,29 @@ Non LFS: sono artefatti di rilascio e non vale la pena spenderne il quota. `bina
 | **w1** | scheletro ∥ assets | 2 agenti, una stessa risposta | `godot --headless --path . --import` esce 0 e il gate dice `GATE: 1/1` |
 | **w2** | orda ∥ gameplay ∥ arena | 3 agenti, una stessa risposta | gate dice `GATE: 4/4` e `--quit-after 300` è pulito |
 | **w3** | vertice | — | commit fatto e verdetto riportato all'utente |
+
+### 4.1 Onde della milestone 2
+
+Stessa struttura, con un cambio: **w2 ha tre foglie e un solo file di test per foglia**, quindi in m2 i file di test si contendono. Sono assegnati esplicitamente per evitare race su `tests/`.
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m2-w0** | vertice, solo shell | — | l'esperimento `KNOCKBACK` vs `SPEED_MAX` è **misurato e scritto** (§1.2), `terminal-gun-arena` è invocabile **come tale** col suo modello |
+| **m2-w1** | orda ∥ gameplay ∥ ui | 3 agenti, una stessa risposta | `GATE: 7/7`, e `--quit-after 300` pulito |
+| **m2-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+Perché `ui` è una foglia separata e non parte di `arena`: in m1 l'UI era dentro `src/ui/` di arena, e arena ha già finito il suo scope. Aggiungere HUD a un agente **che ha chiuso** il proprio file obbliga a riaprirlo e rompe la regola 1. In m2 l'UI ha bisogno della barra XP e del contatore wave: è lavoro suo, non accessorio di arena.
+
+### 1.2 L'esperimento `KNOCKBACK` vs `SPEED_MAX`: da debito a fatto
+
+Il debito più pesante di m1 era questo: `KNOCKBACK = 18.0` e `SPEED_MAX = 18.0` di -orda sono **lo stesso numero**. Se la velocità del nemico è saturata, alzare il knockback non sposta niente. Il piano lo dichiarava **non verificato** e l'esperimento era stato interrotto.
+
+**Il vertice lo misura in m2-w0, prima che le foglie lavorino**, perché se il numero è bloccato dalla saturazione, ogni altra discussione sul knockback è inutile. Il protocollo è scritto qui perché non venga rifatto a metà onda:
+
+1. Misura `KNOCKBACK` a **tre** valori (l'attuale, il doppio, la metà), non a uno: un solo punto non distingue "saturato" da "cresce".
+2. Usa la procedura già esatta di `tests/test_arena.gd` — 5 passi a passo fisso, **delta di posizione**, mai velocità letta prima dell'assestamento.
+3. Riporta i tre numeri e **dimostra la pendenza**. Se raddoppiare `KNOCKBACK` non muove il numero, la saturazione è confermata e il tetto 0.3 va ricalcolato su `SPEED_MAX`, non su `KNOCKBACK`.
+4. Se la pendenza è piatta, la correzione è di **-orda** (`SPEED_MAX` o l'ordinamento impulso/chase nell'integrazione), non di -gameplay: il tetto di m2-criterio n. 4 è sulla posizione, e la posizione la possiede l'orda.
 
 w1 e w2 hanno parallelismo **vero**: scope disgiunti e nessuna dipendenza di file. w2 ha una sola dipendenza (lo scheletro di w1): se `src/core/contracts.gd` non esiste, w2 non parte.
 

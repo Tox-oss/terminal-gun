@@ -161,16 +161,79 @@ Stessa struttura, con un cambio: **w2 ha tre foglie e un solo file di test per f
 
 Perché `ui` è una foglia separata e non parte di `arena`: in m1 l'UI era dentro `src/ui/` di arena, e arena ha già finito il suo scope. Aggiungere HUD a un agente **che ha chiuso** il proprio file obbliga a riaprirlo e rompe la regola 1. In m2 l'UI ha bisogno della barra XP e del contatore wave: è lavoro suo, non accessorio di arena.
 
-### 1.2 L'esperimento `KNOCKBACK` vs `SPEED_MAX`: da debito a fatto
+### 1.2 L'esperimento `KNOCKBACK` vs `SPEED_MAX`: FATTO, e l'ipotesi era sbagliata
 
-Il debito più pesante di m1 era questo: `KNOCKBACK = 18.0` e `SPEED_MAX = 18.0` di -orda sono **lo stesso numero**. Se la velocità del nemico è saturata, alzare il knockback non sposta niente. Il piano lo dichiarava **non verificato** e l'esperimento era stato interrotto.
+**MISURATO dal vertice in m2-w0 il 2026-10-06. Debito chiuso.**
 
-**Il vertice lo misura in m2-w0, prima che le foglie lavorino**, perché se il numero è bloccato dalla saturazione, ogni altra discussione sul knockback è inutile. Il protocollo è scritto qui perché non venga rifatto a metà onda:
+Strumento: `docs/piramide/probe_knockback.gd`, che riusa la procedura di
+`tests/test_arena.gd` sez. 7 sulla **scena vera** e varia `weapon.knockback`, che
+e' un **campo d'istanza** (inizializzato dalla `const`): nessun file di -gameplay
+e' stato toccato per fare l'esperimento.
 
-1. Misura `KNOCKBACK` a **tre** valori (l'attuale, il doppio, la metà), non a uno: un solo punto non distingue "saturato" da "cresce".
-2. Usa la procedura già esatta di `tests/test_arena.gd` — 5 passi a passo fisso, **delta di posizione**, mai velocità letta prima dell'assestamento.
-3. Riporta i tre numeri e **dimostra la pendenza**. Se raddoppiare `KNOCKBACK` non muove il numero, la saturazione è confermata e il tetto 0.3 va ricalcolato su `SPEED_MAX`, non su `KNOCKBACK`.
-4. Se la pendenza è piatta, la correzione è di **-orda** (`SPEED_MAX` o l'ordinamento impulso/chase nell'integrazione), non di -gameplay: il tetto di m2-criterio n. 4 è sulla posizione, e la posizione la possiede l'orda.
+```sh
+. tools/env.sh && godot --headless --path . --script res://docs/piramide/probe_knockback.gd
+```
+
+| `KNOCKBACK` | runner | grunt | \|v\| all'impatto | saturato? |
+|---|---|---|---|---|
+| 9.0 | 0.119 | 0.011 | 1.18 / 2.23 | no |
+| **18.0** (codice) | **0.312** | **0.356** | 8.97 / 8.45 | **no** |
+| 36.0 | 0.812 | 0.885 | **18.00** / **18.00** | **si** |
+| 72.0 | **0.812** | **0.885** | **18.00** / **18.00** | **si** |
+
+**Risposta: no, al valore di codice i due numeri NON sono bloccati insieme.**
+Il quarto punto (72.0, non richiesto dal piano) rende la risposta definitiva:
+`36 -> 72` da' numeri **identici al quarto decimale**, un pianoro vero.
+
+**Perche' l'ipotesi era sbagliata.** L'impulso e' **sommato alla velocita' di
+inseguimento**, che e' nel verso opposto: la velocita' netta dopo il colpo e'
+`KNOCKBACK x (1 - resistenza) - chase_speed`, e il tetto di -orda si applica a
+**quella** somma:
+
+| specie | soglia di saturazione | `KNOCKBACK` a 18.0 |
+|---|---|---|
+| runner (chase 6.6) | `> 24.6` m/s | 11.4 netti: **sotto** il tetto |
+| grunt (chase 4.0, res 0.20) | `> 27.5` m/s | 10.4 netti: **sotto** il tetto |
+
+Il valore di codice **18.0 sta a 11.4 m/s netti sotto un tetto di 18.0**: nessuna
+saturazione, margine ~37%. Il tetto morde solo sopra ~24.6, che oggi nessuno usa.
+
+**Il numero di grunt a 9.0 (0.011) e' fisica, non rumore.** La traccia di `|v|` e'
+`2.23 -> 1.40 -> 0.68 -> 0.05 -> 0.49 -> 0.96`: la spinta netta (3.2 m/s) e' quasi
+annullata dall'inseguimento entro 5 frame e la posizione residua e' la differenza
+di due spostamenti quasi uguali. Il vertice ha ipotizzato un artefatto di
+`EDGE_PUSH` e **si e' sbagliato**: la guardia anti-muro aggiunta al probe non ha
+cambiato il numero. E' la cancellazione, non il muro.
+
+**Determinismo.** Sul pianoro i valori sono **identici bit per bit** fra due
+esecuzioni (0.8120 / 0.8847). Sotto il pianoro oscillano di ~0.5% (runner a 18.0:
+0.3107, 0.3116, 0.3122) per la sola distanza di nascita casuale: dentro il
+margine del criterio n. 4 (0.011 su 0.3, cioe' 3.7%) con un ordine di grandezza
+di scarto.
+
+**Conseguenze, e sono decisioni di vertice:**
+
+1. **Nessuna correzione a -orda.** La pendenza non e' piatta al valore in gioco,
+   quindi il punto 4 del protocollo non si attiva: `SPEED_MAX` non va
+   ricalcolato e il tetto 0.3 resta sulla posizione. **Debito di m1 chiuso.**
+2. **`KNOCKBACK` non va alzato in m2.** Il margine lo permetterebbe (fino a
+   ~24.6), ma l'unico motivo sarebbe stare comodo, e il criterio n. 5 di m2 lo
+   vieta esplicitamente.
+3. **Il limite vero, se qualcuno lo volesse, e' ~24.6 m/s sul runner**: oltre,
+   il tetto di -orda morde e il colpo non diventa piu' forte. Scritto qui perche'
+   nessuno lo scopra con un esperimento.
+
+### 1.2b Il protocollo, per reference (era qui, ora e' fatto)
+
+Il testo originale, che il piano dichiarava non verificato e mai eseguito:
+
+1. Misura `KNOCKBACK` a **tre** valori (l'attuale, il doppio, la meta'), non a uno: un solo punto non distingue "saturato" da "cresce".
+2. Usa la procedura gia' esatta di `tests/test_arena.gd` — 5 passi a passo fisso, **delta di posizione**, mai velocita' letta prima dell'assetamento.
+3. Riporta i tre numeri e **dimostra la pendenza**. Se raddoppiare `KNOCKBACK` non muove il numero, la saturazione e' confermata e il tetto 0.3 va ricalcolato su `SPEED_MAX`, non su `KNOCKBACK`.
+4. Se la pendenza e' piatta, la correzione e' di **-orda** (`SPEED_MAX` o l'ordinamento impulso/chase nell'integrazione), non di -gameplay: il tetto di m2-criterio n. 4 e' sulla posizione, e la posizione la possiede l'orda.
+
+Il protocolso ha tenuto: i quattro punti sono esatti e li ho seguiti. Il quarto
+punto **non si e' attivato**, perche' la pendenza non e' piatta al valore in gioco.
 
 w1 e w2 hanno parallelismo **vero**: scope disgiunti e nessuna dipendenza di file. w2 ha una sola dipendenza (lo scheletro di w1): se `src/core/contracts.gd` non esiste, w2 non parte.
 
@@ -264,7 +327,7 @@ Due conclusioni, e sono una decisione di progetto, non un aggiustamento:
 1. **Il knockback è asseverato sulle specie su cui è progettato per funzionare**, cioè runner e grunt, che sono **l'80% dell'onda** con i pesi veri di `Spawner.KIND_WEIGHTS`. Brute e boss **resistono al knockback per progetto**: un nemico pesante che non scivola quando lo colpisci è giusto in un bullet heaven, e il boss con resistenza 0.90 è di fatto **non knockbackabile** — portarlo a 0.3 richiederebbe `KNOCKBACK` ≈ 170 e un'integrazione che regge. Non è un difetto, è una proprietà, e da ora è scritta qui perché nessuno la riscopra come un bug.
 2. **Il +3.7% sul runner è sottile ma non è fragile**, e la distinzione conta: la misura è su **passo di tempo fisso** (5 frame a DT=1/60), quindi è **deterministica** e non dipende dal framerate né dalla macchina. Non è la stessa cosa del benchmark di `tests/test_orda.gd`, che misura microsecondi di wall-clock e quelli oscillano davvero: quello sì era a rischio di fallire a caso.
 
-   Resta però un problema reale, diverso: **il margine è sottile e accoppiato alla regolazione di -orda**. Il tetto n. 4 è a 0.011 dal valore misurato, quindi chiunque tocchi `chase_speed`, `ACCEL`, `SPEED_MAX` o la tabella di resistenza spegne il criterio senza accorgersene. Il numero di `KNOCKBACK` è di -gameplay ma c'è un **accoppiamento non dichiarato**: `-orda` ha `SPEED_MAX = 18.0`, cioè la velocità del nemico è **limitata a 18 m/s**, che è esattamente il valore di `KNOCKBACK`. Alzare il knockback oltre quella soglia **potrebbe non muovere nulla**. Va verificato, non assunto: il vertice ha ordinato a -gameplay di alzarlo come **esperimento**, con l'obbligo di riportare se il numero si muove o resta fermo per la saturazione.
+   Resta però un problema reale, diverso: **il margine è sottile e accoppiato alla regolazione di -orda**. Il tetto n. 4 è a 0.011 dal valore misurato, quindi chiunque tocchi `chase_speed`, `ACCEL`, `SPEED_MAX` o la tabella di resistenza spegne il criterio senza accorgersene. Il numero di `KNOCKBACK` è di -gameplay ma c'è un **accoppiamento non dichiarato**: `-orda` ha `SPEED_MAX = 18.0`. **Misurato in m2-w0 (§1.2): l'accoppiamento esiste ma NON morde al valore di codice**, perché l'impulso si somma alla velocità di inseguimento e il tetto si applica alla somma: al netto il runner è a 11.4 m/s sotto un tetto di 18.0. La soglia vera è **~24.6 m/s** sul runner, non 18.
 
 Nota tecnica per chi rimisura: l'orda **non** usa un `drag`, usa smorzamento di primo ordine `v += (wanted - v) * min(1, dt*ACCEL)` con `ACCEL = 8.0` 1/s (τ = 0.125 s), più `SPEED_MAX = 18.0` e `ARRIVE_RADIUS = 3.0`. Due errori di misura che arena ha già commesso e documentato: leggere la velocità **prima** dell'assestamento (dà zero), e infilare la finestra di "nessun secondo colpo" **prima** della misura (a τ = 0.125 s l'impulso è già sparito e si misura l'inseguimento: 0.5382 ≈ 6.6 m/s × 5/60).
 
@@ -317,6 +380,19 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | w2 | orda, gameplay, arena | orda: `src/sim/` (horde, griglia spaziale, pool, spawner, tabelle specie). gameplay: player, armi, proiettili, XP e potenziamenti. arena: `MultiMeshInstance3D`, terreno, camera, HUD — **eseguito via `esecutore`** | `GATE: 4/4`, exit 0; `--quit-after 300` exit 0 con zero `SCRIPT ERROR` | **verde** |
 | w3 | vertice | piano emendato in §5.1 (ordine di registrazione), §5.2 (firme), §5.3 (identificatore `Game`), §5.4 (knockback per specie); stato e criteri aggiornati | entrambe le porte rieseguite dal vertice | **verde** |
 
+### Le onde della milestone 2
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m2-w0** | vertice, solo shell | esperimento `KNOCKBACK` vs `SPEED_MAX` **misurato e scritto** (§1.2): l'ipotesi di m1 era **sbagliata**, nessuna saturazione al valore di codice, soglia vera ~24.6 m/s. `-arena` **provato con un lancio reale**: il provider lo blocca, il catalogo mentiva | `GATE: 4/4`, `PERM: 15/15` rieseguite dal vertice | **verde con due debiti aperti** |
+| **m2-w1** | orda ∥ gameplay ∥ ui | — | atteso `GATE: 7/7` | **non partita**: manca il file di `terminal-gun-ui`, vedi sotto |
+| **m2-w2** | vertice | — | — | da fare |
+
+### I due debiti che m2-w0 ha lasciati aperti
+
+1. **`terminal-gun-ui` non ha un file di agente, e il vertice non può crearlo.** §3.3 e §11.8 dicono che il file del nuovo ruolo si scrive in m2-w0. **Provato in m2-w0: `write` su `.opencode/agents/**` risponde `Permission denied: edit`**, che è il muro strutturale di §11.5, non una dimenticanza. Quindi **m2-w1 non può partire con tre foglie**: o l'utente crea `terminal-gun-ui.md` (nel repo **e** in `~/.config/opencode/agents/`, poi riavvia), o m2-w1 parte con due foglie e l'UI resta indietro. **Decide l'utente**, non il vertice: è un atto di governance (§11.5).
+2. **`terminal-gun-arena` non è eseguibile come tale**: il provider risponde `This model is not available in your country` su un lancio reale, nonostante il catalogo lo riporti `active`. Non blocca m2 (`-arena` non lavora in m2), ma il ruolo resta senza le garanzie della regola 7.4 finché non si decide. Vedi §8, "Debiti dichiarati".
+
 ### I sei criteri della milestone 1, uno per uno
 
 | # | criterio | esito | numeri |
@@ -365,11 +441,15 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 
 ### Debiti dichiarati, non nascosti
 
-- **Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**, che è lo stesso valore di `KNOCKBACK`. Se la velocità del nemico è saturata, alzare il knockback potrebbe non spostare niente: **non è stato verificato**, perché l'esperimento è stato interrotto e poi il tentativo ha rotto il gate. Il criterio **passa** comunque (runner 0.311, grunt 0.356), in modo deterministico.
+- ~~**Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**~~ **CHIOSO in m2-w0**: l'esperimento di §1.2 l'ha **smentito**. Al valore di codice la saturazione non c'è (11.4 m/s netti sotto un tetto di 18.0): la pendenza esiste e `36 -> 72` è un pianoro. Dettaglio e numeri in §1.2.
 - **XP e potenziamenti non sono tra i criteri della milestone** e non sono coperti da una porta dedicata: sono implementati (`src/player/progression.gd`) e provati sul percorso reale, ma senza criterio di accettazione dichiarato. Milestone 2.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
 - **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. Scelta consapevole.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
+
+**PROVATO CON UN LANCIO REALE IL 2026-10-06 (m2-w0): il blocco si riproduce.** Un lancio di `terminal-gun-arena` come tale risponde `Error from provider (Console): This model is not available in your country`. Quindi "il catalogo lo riporta come `active`" era vero e **irrilevante**: il catalogo è metadati, il provider è la disponibilità reale. Il ruolo **non** è eseguibile oggi come `terminal-gun-arena` e la garanzia della regola 7.4 resta perduta per lui.
+
+**Non è aggirabile e non è aggirato**: né con `esecutore` (perde la 7.4 per costruzione, §11.8) né con un modello sostitutivo scritto di nascosto (sarebbe cambiare la piramide senza dirlo, §11.5). **Non blocca m2**: `-arena` **non lavora in m2** (§3.3), quindi m2-w1 (`orda ∥ gameplay ∥ ui`) non lo usa. Debito **aperto ma non bloccante**: resta aperto finché l'utente non decide se cambiare il modello di `-arena` o accettare che il ruolo resti non eseguibile finché il provider non lo abilita.
 
 ### Come w1 è finita, e cosa è costato
 

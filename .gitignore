@@ -1,8 +1,35 @@
+# --- Godot ---
+
 # Cache di import di Godot: di terminal-gun-scheletro, mai committata.
+# Rigenerabile con `godot --headless --path . --import`.
 .godot/
+
+# Configurazione di export: contiene path assoluti di macchina.
+export_presets.cfg
+
+# Esportazione: un export produce .pck e .exe, e nessuno dei due finirebbe in
+# LFS (vedi .gitattributes: solo *.glb, *.wav, *.ogg). Senza queste righe il
+# primo export dentro la cartella mette decine di MB di binari nel Git normale:
+# è il fallimento che il criterio n. 6 della milestone 1 esiste per prevenire.
+*.pck
+*.exe
+build/
+export/
+
+# --- NON ignorare: `.uid` e `.import` vanno committati ---
+
+# In Godot 4 i file .uid sono il riferimento di identità degli script: senza
+# quelli committati, scene e script smettono di linkarsi. I .import puntano a
+# .godot/imported/ (ignorato e fuori repo per progetto) ma il file .import
+# stesso va versionato. Non sono spazzatura: sono parte del progetto.
+!*.uid
+!*.import
+
+# --- Altro ---
 
 # File temporanei di qualunque agente.
 *.tmp
 
-# Configurazione di export: contiene path assoluti di macchina.
-export_presets.cfg
+# Cruscotto di Windows: compare da solo e su Windows finisce nel repo.
+desktop.ini
+Thumbs.db

@@ -300,6 +300,9 @@ permissions:
   - action: edit
     resource: "tests/test_orda.gd"
     effect: allow
+  - action: edit
+    resource: "tests/test_gameloop.gd"
+    effect: allow
   - action: shell
     resource: "python *"
     effect: allow

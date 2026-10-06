@@ -60,6 +60,79 @@ var horde: Node
 ## deve derivare dalla geometria della scena per evitare dipendenze circolari.
 var arena_radius: float = 28.0
 
+# --- Superficie di milestone 2 ----------------------------------------------------
+#
+# In m1 il contratto dichiarava i cinque metodi che le foglie si passavano. In m2
+# la partita ha un inizio, una crescita e una fine, quindi **tre** foglie hanno da
+# guardarsi negli occhi: -orda conta le uccisioni, -gameplay fa salire di livello
+# il giocatore, -ui mostra entrambe.
+#
+# Quei nomi, fino a m2, se li erano concordati **leggendo il codice dell'altra**:
+# -ui fa `Game.horde.wave` perche' -orda espone `wave` come campo e non come
+# metodo `wave()`, perche' a un certo punto l'HUD lo leggeva gia'. Funziona, ma
+# funziona per fortuna. Qui sotto e' **dichiarato**, con nomi e firme esatti: chi
+# lo cambia non sta piu' implementando un contratto, sta cambiando il contratto,
+# e il vertice deve saperlo.
+#
+# Queste voci **non** passano da `register_impl`: sono campi e metodi pubblici
+# gia' esposti da un oggetto che il contratto contiene gia' (`Game.horde`,
+# `Game.player`). Il contratto le dichiara, nessuno le registra.
+
+## Superficie di m2, per proprietario. I valori sono i **nomi esatti** dei membri:
+## `prop` e' il campo dati del contratto che contiene l'oggetto, `member` e' il
+## membro su quell'oggetto, `kind` dice se e' un campo o un metodo.
+const M2_SURFACE := [
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave", "kind": "field"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave_total", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave_remaining", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave_killed", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave_bar_ratio", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "wave_hp_scale", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "run_state", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "is_game_over", "kind": "method"},
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "restart_run", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "hp", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "max_hp", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "progression", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "health_ratio", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "grant_xp", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "level", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "xp", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "kills", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "offers", "kind": "field"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "progress", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "xp_to_next", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "pending", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "choose", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "apply", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "on_kill", "kind": "method"},
+]
+
+## L'oggetto di m2 che -gameplay registra. Non e' un nodo: e' il
+## `RefCounted` di `src/player/progression.gd`, che sta dietro il giocatore.
+## -ui lo raggiunge per contratto e non con `get_node("../..")`.
+var progression = null
+
+## La superficie di m2 che non e' ancora li'. Lista **vuota** = contratto rispettato.
+##
+## Non e' un controllo di stile: senza questo, un membro rinominato da una foglia
+## fa fallire le altre tre con un `Invalid get index` che non dice quale delle
+## quattro foglie ha rotto il contratto, e il messaggio arriva a un'onda di
+## distanza dal rename. Con questo arriva subito e con il nome del membro.
+func verify_m2_surface() -> Array[String]:
+	var missing: Array[String] = []
+	for row in M2_SURFACE:
+		var holder = self.get(row["prop"])
+		if holder == null or not is_instance_valid(holder):
+			missing.append("%s.%s manca: il contratto non ha ancora '%s'" % [row["owner"], row["member"], row["prop"]])
+			continue
+		var v: Variant = holder.get(row["member"])
+		if v == null:
+			missing.append("%s.%s non c'e'" % [row["owner"], row["member"]])
+		elif row["kind"] == "method" and not (holder.get(row["member"]) is Callable):
+			missing.append("%s.%s non e' un metodo" % [row["owner"], row["member"]])
+	return missing
+
 # --- Registrazione -------------------------------------------------------------
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non

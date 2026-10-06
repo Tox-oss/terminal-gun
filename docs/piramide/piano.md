@@ -95,11 +95,11 @@ In m1 la regola "un file, un proprietario" ha funzionato. In m2 tre file devono 
 | `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/` (scala delle onde, `SPEED_MAX` se l'esperimento lo richiede), `tests/test_gameloop.gd` | `test_gameloop.gd` è suo perché wave e game over stanno nella simulazione, non nell'UI |
 | `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/` (XP, potenziamenti, stato `game_over`, restart), `src/weapons/`, `tests/test_progression.gd`, `tests/test_upgrades.gd` | è il suo lavoro: crescita del player è scope di gameplay, non di ui |
 | `terminal-gun-ui` (nuovo) | `space-bunny-free#max` | `scenes/hud.tscn`, `src/ui/`, `tests/test_ui.gd` | **foglia nuova in m2**: barra XP, contatore wave, schermata game over |
-| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/gate.gd` (timeout), `tools/env.sh` | il timeout del gate è suo: tocca il gate, che è di scheletro, e scheletro **non lavora in m2** |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/gate.gd` (timeout), `tools/env.sh`, `tools/check_perms.py` | il timeout del gate è suo: tocca il gate, che è di scheletro, e scheletro **non lavora in m2**. Anche la porta dei permessi è sua: verifica le allowlist, che nessun altro può scrivere |
 
 `terminal-gun-scheletro` e `terminal-gun-assets` **non lavorano in m2**. Il gate ha il timeout e `contracts.gd` è del vertice: è la riapertura più economica perché scheletro non ha altri file da difendere in questa ondata.
 | `terminal-gun-assets` | `muse-spark-1.3-contributor-free#high` | `tools/gen_sfx.py`, `tools/blender/gen_models.py`, `tools/convert_assets.sh`, `assets/` | `src/`, `scenes/`, `project.godot`, `tools/env.sh`, non esegue mai `godot` |
-| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/env.sh`, **`.gitattributes`** | il codice del gioco |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/env.sh`, `tools/check_perms.py`, **`.gitattributes`** | il codice del gioco |
 
 Sovrascrittura **autorizzata e unica**: `scenes/arena_main.tscn`, segnaposto di scheletro (w1) → scena reale di arena (w2). È dichiarata qui perché ogni altro file è creato una volta sola.
 
@@ -287,7 +287,10 @@ Tre regole che tengono insieme i pezzi:
 . tools/env.sh && "$GODOT" --headless --path . --import          # w1, solo scheletro
 . tools/env.sh && "$GODOT" --headless --path . --script tools/gate.gd
 . tools/env.sh && "$GODOT" --headless --path . --quit-after 300
+python tools/check_perms.py                                      # permessi, vedi 11.7
 ```
+
+Il gate dei permessi è una porta **separata** e va eseguita **a parte**: `gate.gd` gira i `tests/test_*.gd` dentro Godot, e uno script Python non è un test Godot. Le due porte non si sommano in un unico numero: `GATE: 4/4` e `PERM: 15/15` sono due fatti distinti, e il vertice riporta entrambi.
 
 Il gate (`tools/gate.gd`) esegue ogni `tests/test_*.gd` in un **processo separato** e decide sul codice di uscita: `0` solo se tutti passano. Ogni test stampa `PASS <nome>` o `FAIL <nome>: <motivo>` e finisce con `quit(0)`/`quit(1)`; un test assente è `SKIP`, non un fallimento.
 
@@ -300,8 +303,8 @@ Cinque agenti scrivono nella stessa cartella **in parallelo**. Queste regole son
 1. **`.godot/` è di `terminal-gun-scheletro`.** Nessun altro esegue `--import`. In caso di cache corrotta: `rm -rf .godot` e re-import (solo scheletro, o vertice).
 2. **Il commit è del vertice.** Nessuna foglia esegue `git add` o `git commit`.
 3. **`winget` mai in parallelo**, e solo in w0: winget ha un lock globale.
-4. **Scope sui permessi, non sulle buone maniere.** Ogni foglia ha in `permissions` una deny su `edit *` e un allow sui propri file: se sfora, il sistema glielo blocca.
-5. **Niente path assoluti di macchina** nei file prodotti, con una sola eccezione: `tools/env.sh`, che esiste proprio perché i path stiano in un posto solo.
+4. **Scope sui permessi, non sulle buone maniere.** Ogni foglia ha in `permissions` una deny su `edit *` e un allow sui propri file: se sfora, il sistema glielo blocca. **Emendato da §11**: è vero per la *scrittura*, che è l'unica cosa bloccata davvero, perché `shell` non è una sandbox (§11.3) e `mkdir`/`cp`/`mv`/`rm`/`echo` sono assenti di proposito. Quello che **non** è più un blocco secco è l'accesso a una risorsa non enumerata in anticipo: quello chiede, e lo chiede all'utente (§11.2). Le invarianti di **proprietà** — `--import`, `rm -rf .godot`, `git add`/`commit` — restano `deny` per tutti, con l'unica eccezione dichiarata per scheletro e vertice.
+5. **Niente path assoluti di macchina** nei file prodotti, con una sola eccezione: `tools/env.sh`, che esiste proprio perché i path stiano in un posto solo. **Una seconda eccezione, dichiarata in §11.8:** il path assoluto di Blender in `permissions` degli agenti che lo eseguono, per lo stesso identico motivo.
 
 ## 8. Stato
 
@@ -383,6 +386,137 @@ Due round, perché il primo non era verde: lo scheletro esaurì i suoi step lasc
 
 **Limite dichiarato:** il gate non ha timeout (`OS.execute` è bloccante): un test che si blocca blocca il gate. Scelta consapevole, documentata in `tools/gate.gd`.
 
+## 11. Politica delle risorse
+
+`sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.
+
+La regola in una riga, richiesta dall'utente il 2026-10-06: **materiale di progetto → concesso in silenzio; tutto il resto → si chiede all'utente.**
+
+### 11.1 I tre tier, e perché non sono tre livelli di paranoia
+
+In opencode v2 «l'ultima regola che combacia vince». Nei file degli agenti l'ordine è **per specificità crescente**, non per importanza, quindi le eccezioni stanno dopo le allow che devono battere.
+
+| tier | effetto | chi decide | cosa contiene |
+|---|---|---|---|
+| **1 muro** | `deny` | nessuno, non chiede | `edit: *`, `subagent: *`, `shell: *`, `sudo *`, `git push/add/commit/clean/reset *`, `read` dei segreti |
+| **2 chiede** | `ask` | **l'utente** | i compositori (`bash *`, `sh *`, `tee *`, `sed -i *`, `perl -i *`, `tar *`), il mondo esterno (`curl *`, `wget *`, `webfetch *`, `websearch *`) |
+| **3 progetto** | `allow` | nessuno, silenzioso | sola lettura (`cat`, `head`, `tail`, `wc`, `grep`, `diff`, `ls`, `find`, `which`), `git status/diff/log/show/branch/stash list/ls-files`, gli strumenti del progetto, `. tools/env.sh` |
+
+**Il muro non chiede e non passa, anche con l'utente presente.** Non è un permesso che si può negare: sono confini, e il loro valore è il non accadere. Le foglie non possono lanciare foglie, non committano, non fanno push, non cancellano, non toccano `.godot/`.
+
+### 11.2 Il fallback: come si chiede, davvero
+
+In due vie, e servono entrambe:
+
+1. **`question`** — dichiarato esplicitamente in tutti e sei i file. Prima era solo ereditato dalla base: funzionava, ma nessuno lo leggeva e quindi nessuno lo sapeva. **Non è però provato che `question` funzioni in una sessione figlio**: la documentazione dice che serve un client che supporti il form interattivo, e non ho un lancio reale che lo dimostri.
+2. **Le tre righe del report** — `cosa fatto — file toccati — cosa resta` diventano `cosa chiedo` quando l'agente è fermo. È la via **garantita**, perché non dipende dal client.
+
+Un agente che è fermo su un permesso **non prova a aggirarlo**. Torna indietro e chiede. Questo è il comportamento esplicitamente richiesto, e sostituisce il vecchio "la foglia riceve un blocco secco e lo registra come fatto resta".
+
+### 11.3 `shell` non è una sandbox, e va detto
+
+La documentazione di opencode lo scrive: *«`shell` runs with the host user's filesystem, process, and network authority. Directory inference from command text is best effort, so prefer a narrow shell allowlist instead of patterns intended to recognize every dangerous command.»*
+
+Tradotto, con le misure prese:
+
+- **`shell` non è una sandbox.** Un allowlist limita *quali comandi* sono autorizzati, non *cosa quei comandi scrivono*: `godot`, `python` e `ffmpeg` possono scrivere ovunque. Il contenimento reale sui file è **`edit`/`write`/`patch`**, che sono gated dallo scope e hanno `edit: * deny` come default.
+- Per questo **`mkdir`, `cp`, `mv`, `rm`, `touch`, `echo`, `printf` sono assenti** da tutte le allowlist: `write` crea le directory mancanti, `patch` sposta e cancella, e con `>` una allowlist non può distinguere «stampo una riga» da «sovrascrivo il file di un altro agente». È il motivo per cui **nessuna foglia può creare o cancellare un file nemmeno nel proprio scope**, e va detto: è una scelta, non un dimenticanza.
+- I path fuori progetto sono negati **in entrambe le posizioni dell'argomento**, per `cat`, `grep` e `find`: `cat ~/.ssh/id_rsa` e `grep -r password C:/Users/bisco`. Costo dichiarato: un falso positivo su un pattern che contiene uno spazio prima di una slash.
+- **Il contenimento è a tre livelli, e il primo è il più debole per costruzione:** regola `shell` → `external_directory` in `ask` (la base di v2 lo chiede già per ogni path fuori progetto) → scope di `edit`. Una allowlist `shell` **non può contenere i `..`**: un pattern come `sudo icacls .*` combacia anche `sudo icacls ../..`. Lo dichiaro invece di fingere il contrario.
+
+### 11.4 `sudo`: allowlist minima, protocollo cieco
+
+**Prima cosa da sapere, e cambia la risposta:** `sudo config` su questa macchina riporta **modalità «forza nuova finestra»**, cioè l'elevato gira in una console separata. Quindi:
+
+- **l'agente non legge lo stdout** di un comando sudo;
+- **l'UAC è un prompt GUI** che l'agente non può rispondere.
+
+La modalità inline (`sudo config --enable enable`) renderebbe l'output leggibile, ma metterebbe **un prompt UAC bloccante su ogni comando**: per un agente non presidiato è **peggio**, non meglio. **La modalità resta quella di adesso**, e il piano la dichiara come scelta.
+
+**E comunque, oggi, l'elevazione non serve.** `icacls .` dà `NEUROCHAD\bisco:(I)(OI)(CI)(F)` su `.` e su `.godot`: l'utente ha il controllo pieno, e Godot, Blender, Python, ffmpeg e git girano senza privilegi. L'allowlist esiste per **un caso solo, ed è reale**: un ACL rotto renderebbe bloccato anche `rm -rf .godot`, cioè l'unica via di recupero dichiarata dalla regola 7.1, e l'agente che la possiede si troverebbe fermo con una diagnosi che non può produrre.
+
+| | allow | chi |
+|---|---|---|
+| `sudo icacls .*` | ACL | vertice, scheletro |
+| `sudo takeown .*` | proprietà | vertice, scheletro |
+| `sudo attrib .*` | attributi | vertice, scheletro |
+| **tutto il resto** | **deny** | tutti e sei |
+
+Solo i **due che possiedono `.godot/`**: sono gli unici che possono plausibilmente incappare in un ACL rotto, ed è la definizione stessa di «allowlist minima». Gli altri quattro hanno sudo negato e, se un ACL li blocca, **chiedono**.
+
+**Protocollo cieco, in tre passi:** esegui senza leggere l'output → **verifica senza privilegi** (`icacls .`, `ls`) → se la verifica non passa, riporta e chiedi. **Mai un `sudo` dentro una misura**: un numero che viene da un comando il cui output non ho letto non è una misura, è un ricordo.
+
+### 11.5 Un agente non può scrivere i propri permessi
+
+Il vertice ha `edit: * deny` e il suo scope non contiene `.opencode/agents/**`: **non può riscrivere la propria allowlist**, e non può farlo nessun altro agente. È strutturale, non è una buona maniera.
+
+Conseguenza operativa, che è anche il gate umano giusto: **aggiornare la piramide è un atto dell'utente** (o di una sessione `build`), non del vertice. Il vertice può proporre, il vertice non può applicare.
+
+### 11.6 Il mirror: il repo è la fonte di verità
+
+I sei file agente stanno ora **anche** in `.opencode/agents/`, e `tools/check_perms.py` verifica che la copia nel repo e quella installata in `~/.config/opencode/agents/` siano **identiche byte per byte** (`perm_mirror`).
+
+Precedenza: opencode fonda la configurazione scoperta dalla directory corrente e fa salire `.opencode` **sopra** il globale, quindi **in questo progetto vige la copia nel repo**. Il file globale è l'installazione. Prima di questo intervento la politica delle risorse viveva **fuori da git**: sette commit meticolosi sul progetto e **zero storia** sulle regole che governano gli agenti.
+
+### 11.7 La porta dei permessi: `tools/check_perms.py`
+
+`tools/gate.gd` misura il **codice** e non dice niente sui **permessi**: un agente può avere la allowlist sbagliata e il gate resta verde, perché il gate non guarda la allowlist. Questa è la porta di quello.
+
+```sh
+python tools/check_perms.py        # stampa PERM: N/15, exit 0/1
+```
+
+Quindici check, e ciascuno **risolve** le regole invece di leggerle: applica la semantica di v2 (fullmatch, `*` anche `/`, `?` uno, pattern che finisce in ` *` che combacia anche senza argomenti, case-insensitive su Windows) e prende **l'ultima che combacia**. Quindi verifica il comportamento, non la sintassi.
+
+| check | cosa dimostra |
+|---|---|
+| `perm_mirror` | copia nel repo e copia installata identiche |
+| `perm_ask` | `question` allow esplicito in tutti e sei: il fallback esiste |
+| `perm_secrets` | `read` negato su `.ssh`, `.aws`, `.gnupg`, `~/.local/share/opencode` (dove sta `opencode.db`) |
+| `perm_network` | `webfetch`/`websearch` non sono allow: la rete non è materiale di progetto |
+| `perm_sudo` | i tre ACL allow solo dove devono, il resto deny ovunque |
+| `perm_commit` | il vertice committa, le foglie no, `git push` negato a tutti |
+| `perm_godot` | `--import` e `rm -rf .godot` di scheletro e vertice (regola 7.1), negati alle altre quattro; `assets` non può eseguire `godot` |
+| `perm_env` | `. tools/env.sh` allow: la convenzione delle §2 e §6 è eseguibile |
+| `perm_blender` | l'allow sul path assoluto di Blender esiste (debito di w1, vedi sotto) |
+| `perm_escape` | `rm -rf ~`, `cat ~/.ssh/id_rsa`, `find C:/ -name *.pem`, `touch file`, `find . -delete` negati ovunque |
+| `perm_scope` | gli `edit` allow di ogni agente **eguagliano** lo scope dichiarato in §3, e nessuno può scrivere `.opencode/agents/**` |
+| `perm_overlap` | nessun file ha due proprietari non dichiarati |
+| `perm_piano` | **il piano nomina ogni path di scope e ogni agente**: prende il drift tra documento e permessi in entrambe le direzioni |
+| `perm_absolute` | nessun path assoluto in un allow, con la **una** eccezione dichiarata |
+| `perm_subagent` | il vertice lancia le foglie e **non** `esecutore`; le foglie non lanciano nessuno |
+
+**Una porta che non sa fallire non è una porta.** I check sono stati provati con cinque violazioni iniettate dentro il blocco `permissions:` di `terminal-gun-orda` (`git push *` allow, `sudo rm -rf ~` allow, `--import` allow, `cat ~/.ssh/id_rsa` allow, `src/player/**` in un agente che non è di -gameplay): **cinque su cinque rosse**, e nessuna rimasta in silenzio.
+
+Quella prova ha anche trovato **un bug nel controllore**, non solo nei permessi: implementavo male la regola «un pattern che finisce in ` *` combacia anche col comando senza argomenti» — toglievo `.*` lasciando lo spazio, quindi `git push` non combaciava con `git push *` e la violazione passava. Una porta con la semantica sbagliata è peggio di nessuna porta: dà verde su cose che non ha controllato.
+
+### 11.8 Debiti dichiarati su questa sezione
+
+- **`blender` non è su `PATH`** (`which blender` → exit 1) e l'invocazione reale è il path quotato che `env.sh` mette in `$BLENDER`. Un allow su `blender *` **non la combacia**. Eppure in w1 i 6 `.glb` sono stati prodotti davvero (`tools/blender/gen_models.py` importa `bpy`, e i file sono in git dal 6 ottobre): **qualcuno ha fatto girare Blender in un modo che la allowlist di allora non autorizzava, e non so quale.** Non ne scrivo la regola perché è una testimonianza sola, che è esattamente il caso in cui questo piano vieta di scrivere. Dichiaro il fatto, e `perm_blender` lo rende un invariante verificato da ora in poi.
+- **`question` in un subagent non è provato.** Se non funziona, la via 1 di §11.2 cade e resta la via 2, che è garantita. Va provato con un lancio reale, non dichiarato.
+- **`winget` era su `winget install *`**, che poteva installare qualsiasi cosa. Ora è ancorato ai due pacchetti dichiarati in §2.
+- **L'unico path assoluto di macchina in un file di permessi** è il path di Blender, e per lo stesso motivo di `tools/env.sh`: winget lo installa sotto `Program Files` senza alias, quindi il path deve stare in un posto solo. `perm_absolute` lo controlla, con l'eccezione dichiarata in testa.
+- **`esecutore` non è più raggiungibile dal vertice.** Ha `action: "*" allow`, quindi un ruolo che gira lì ha allow su `read` ed `edit` ovunque e **perde le garanzie della regola 7.4** — il caso che §8 già registra per `-arena` in w2. In terminal-gun un ruolo senza file di agente è un difetto dell'onda: in m2 i file dei ruoli nuovi (`terminal-gun-ui` e gli altri) si scrivono **in m2-w0**, prima dell'onda che li usa. `esecutore` resta disponibile per gli altri progetti, intatto.
+- **`.opencode/agents/` nel repo cambia la precedenza** di questo progetto (§11.6). Va detto all'utente, non scoperto da un agente a un'onda di distanza.
+- **`core.autocrlf=true` spezzava `perm_mirror` al primo clone**: git avrebbe convertito i file del mirror in CRLF al checkout, mentre la copia installata in `~/.config` resta LF, e il confronto byte per byte sarebbe diventato rosso per motivi che non hanno niente a che fare con i permessi. Risolto in `.gitattributes` con `.opencode/agents/*.md text eol=lf`, verificato con `git ls-files --eol` → `i/lf w/lf`. **È il motivo per cui `perm_mirror` confronta byte e non testo normalizzato**: normalizzare avrebbe nascosto il problema invece di registrarlo.
+
+### 11.9 Cosa è cambiato rispetto a prima, in una tabella
+
+Prima (w1–w2) le allowlist erano **un elenco di comandi**. Ora sono **una politica con tre tier, verificata da una porta**.
+
+| | prima | ora |
+|---|---|---|
+| fuori allowlist | `deny`, secco | `ask` se è materiale di progetto non enumerabile; `deny` se è un muro |
+| `mkdir`/`cp`/`mv`/`rm` | `rm -rf *`, `mv *`, `cp *` allow al vertice: `rm -rf ~` concesso | assenti ovunque; si scrive con `write`/`patch`, gated da `edit` |
+| `read` | zero regole, quindi allow ovunque (mitigato solo da `external_directory` in `ask`) | `read` negato esplicitamente su `.ssh`, `.aws`, `.gnupg`, `~/.local/share/opencode` |
+| rete | `webfetch`/`websearch` allow | entrambe in `ask` |
+| `sudo` | negato a tutti, e nessuno sapeva perché | tre ACL allow ai due che possiedono `.godot/`, resto negato, con il **perché** dichiarato |
+| `esecutore` | raggiungibile dal vertice | negato: perde la regola 7.4 |
+| `. tools/env.sh` | non eseguibile da nessun agente | allow esplicito: la convenzione del piano funziona |
+| `gitattributes` | allow scritto **`gitattributes`**, senza il punto: regola **morta** | `.gitattributes`, e `perm_piano` lega il vertice a quel file |
+| permessi | fuori git, senza history | mirror nel repo, `perm_mirror` ne verifica l'identità |
+| verifica | nessuna sui permessi | `tools/check_perms.py`, 15 check, exit 0/1 |
+
 ## 9. Tagli dichiarati
 
 Strumenti scartati e con che cosa sono stati sostituiti — per non reinventarli fra sei mesi:
@@ -400,9 +534,12 @@ Strumenti scartati e con che cosa sono stati sostituiti — per non reinventarli
 
 ## 10. Dopo il riavvio
 
-1. Riavvia opencode dalla root del progetto: gli agenti generati diventano invocabili solo dopo.
+1. Riavvia opencode dalla root del progetto: i agenti generati diventano invocabili solo dopo. **Anche i permessi si caricano all'avvio**: senza riavvio gli agenti in uso hanno ancora le allowlist di w1–w2.
 2. `/terminal-gun` apre il vertice. In alternativa Tab fino a `terminal-gun`.
 3. Il vertice esegue w0 da solo e poi ti chiederà il nulla prima di ogni ondata.
 
 Riferimenti: `~/.config/opencode/agents/terminal-gun*.md` e `~/.config/opencode/commands/terminal-gun.md`.
-Questi file **non** sono copiati dentro `.opencode/agents/` perché il progetto non specchia i propri agenti: se un giorno lo farà, vanno copiati lì identici per la portabilità.
+
+**Dal 2026-10-06 esiste anche il mirror nel repo**, `.opencode/agents/terminal-gun*.md`, che in questo progetto è la **fonte di verità**: la configurazione scoperta dalla directory corrente fa salire `.opencode` sopra il globale, quindi vale la copia nel repo e il file in `~/.config` ne è l'installazione. I due devono restare identici, e `tools/check_perms.py` lo verifica a ogni esecuzione (`perm_mirror`).
+
+**Un agente non può aggiornare la propria allowlist** (§11.5): il vertice non può, per costruzione. Cambiare la piramide è un atto tuo, o di una sessione `build`.

@@ -3,3 +3,10 @@
 *.ogg filter=lfs diff=lfs merge=lfs -text
 *.pck binary
 *.exe binary
+
+# I sei file di .opencode/agents/ sono confrontati byte per byte con la copia
+# installata in ~/.config/opencode/agents (tools/check_perms.py, perm_mirror).
+# Con core.autocrlf=true git li convertirebbe in CRLF al checkout, e allora
+# l'identita' si romperebbe al primo clone: qui il LF e' obbligato, non una
+# preferenza di stile.
+.opencode/agents/*.md text eol=lf

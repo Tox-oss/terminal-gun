@@ -385,8 +385,28 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | **m2-w0** | vertice, solo shell | esperimento `KNOCKBACK` vs `SPEED_MAX` **misurato e scritto** (§1.2): l'ipotesi di m1 era **sbagliata**, nessuna saturazione al valore di codice, soglia vera ~24.6 m/s. `-arena` **provato con un lancio reale**: il provider lo blocca, il catalogo mentiva | `GATE: 4/4`, `PERM: 15/15` rieseguite dal vertice | **verde con due debiti aperti** |
-| **m2-w1** | orda ∥ gameplay ∥ ui | — | atteso `GATE: 7/7` | **pronta ma non lanciata**: i tre file di agente sono **scritti e verificati**, manca solo la copia (2 file × 2 posti) |
+| **m2-w1** | orda, gameplay, ui | **parziale**: `-ui` finito (`tests/test_ui.gd`, HUD con 14/14/14 nodi su tre avvii, nessun duplicato). `-orda` ha scritto `src/sim/run.gd` e la scala delle onde ma **non ha potuto scrivere il suo test**. `-gameplay` **non ha scritto una riga** | `GATE: 5/5` (era 4/4), `PERM: 15/15`, `--quit-after 300` pulito, knockback runner **0.3122** | **mezza verde** |
 | **m2-w2** | vertice | — | — | da fare |
+
+### m2-w1: due foglie su tre bloccate, e il difetto è del vertice
+
+**Non è un difetto delle foglie.** Entrambe si sono fermate al primo file che il piano chiedeva di scrivere, con `Permission denied: edit`, e nessuna ha aggirato il permesso (che è il comportamento corretto, §11.2).
+
+**La causa è che in m2-w0 ho preparato solo metà del wave.** Ho creato il file della foglia **nuova** (`-ui`) e ho cambiato il modello di `-arena`, e ho dato per scontato che fosse sufficiente. Non lo era: il piano §3.3 assegna a `-orda` anche `tests/test_gameloop.gd` e a `-gameplay` anche `tests/test_progression.gd` e `tests/test_upgrades.gd`, e **quelle tre righe non erano in nessuna allowlist**. È l'errore che §3.1 chiama "file senza proprietario" fatto **al contrario**: non un file senza proprietario, ma un path che il piano assegna e che nessuno aveva messo nei permessi.
+
+**Perché `PERM: 15/15` non l'aveva preso, e questa è la parte che vale.** `perm_scope` confronta gli `edit` allow con `SCOPE` in `check_perms.py`, e anche `SCOPE` era rimasto quello di m1. Il gate confrontava due copie del **vecchio** scope e concludeva che erano d'accordo: era verde e aveva ragione su cio' che misurava, che non era quello che serviva. Una porta che verifica bene una cosa giusta non copre una cosa che non hai scritto.
+
+**Il difetto è già riparato e verificato**: `docs/piramide/fix_m2_test_scopes.py` aggiunge le tre righe e si ferma se gli `edit` allow non sono **esattamente** quelli del piano §3 e §3.3. Diff di `-orda`: **tre righe aggiunte, nient'altro**. `check_perms.py` ha guadagnato gli stessi tre path in `SCOPE`. Simulazione: **`SIMULAZIONE PERM: 15/15`**.
+
+### Cosa ha consegnato `-orda` che vale, e va nel piano
+
+`restart_run()` fa **solo la metà di -orda**: azzera e ripopola l'orda, ma **non tocca il giocatore**. Il restart di `-gameplay` deve chiamarla. Senza questo il criterio n. 4 si dimostra solo sul lato simulazione, e va detto.
+
+Un altro accoppiamento, **non dichiarato prima e trovato dalla collaborazione**: `-ui` legge `Game.horde.wave` **per nome**, e `-orda` espone `wave` come **campo** e non come metodo perche' quell'HUD lo legge gia'. Due foglie che lavorano in parallelo hanno quindi concordato un nome senza che nessuno lo avesse deciso: e' successo perche' una delle due lo aveva scritto e l'altra lo aveva letto nel codice dell'altra. Funziona, ma funziona per fortuna e non per contratto.
+
+### Il gate di m2 conta piu' test di quanti ne chiede
+
+`GATE: 5/5` con `test_ui` presente: il gate esegue **ogni** `tests/test_*.gd` che trova su disco (§6), quindi il conteggio di m2 che dice `7/7` sale a `8/8` quando anche `test_ui` c'è. Non è un fallimento: è il gate che fa il suo lavoro. Il `7/7` del criterio n. 1 va letto come "almeno 7".
 
 ### m2-w0, seconda parte: i file di agente di m2 sono pronti
 

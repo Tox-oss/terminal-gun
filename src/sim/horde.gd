@@ -18,6 +18,31 @@ extends Node3D
 ## `transforms.size() == colors.size() == count`, sempre: l'invariante e' quello
 ## che permette all'arena di non controllare nulla.
 ##
+## ## La partita non e' fra i tre campi
+##
+## Onda, barra e `game_over` stanno in `src/sim/run.gd`, un oggetto che questa
+## foglia tiene in un campo. Si leggono cosi':
+##
+##     horde.wave               # campo: numero dell'onda (lo legge anche l'HUD)
+##     horde.wave_total()       # uccisioni che chiudono l'onda
+##     horde.wave_remaining()   # la barra wave, in interi
+##     horde.wave_bar_ratio()   # la stessa barra, da 0 a 1
+##     horde.run_state()        # "playing" oppure "game_over"
+##     horde.is_game_over()     # la stessa domanda in booleano
+##     horde.restart_run()      # nuova partita: onda 1, orda ripopolata
+##
+## `wave` e' un campo e gli altri sono metodi perche' non sono la stessa cosa:
+## `wave` e' un numero che un'altra foglia legge gia' per nome
+## (`src/ui/hud.gd`), gli altri sono numeri **derivati** — la barra e'
+## `wave_total - wave_killed`, e se fossero campi pubblici qualcuno potrebbe
+## leggerne due in due momenti diversi e vedere una combinazione che non e' mai
+## vera. I tre campi di sopra sono dati grezzi e il lettore ne fa quello che
+## vuole; questi no.
+##
+## `population` resta il significato che aveva in m1: quanti nemici vivi
+## **contemporaneamente**. Quanti ne vanno ammazzati in tutto lo dice la barra,
+## e sono due numeri diversi (vedi `src/sim/run.gd`).
+##
 ## ## Le tre API del contratto (registrate in `_ready`)
 ##
 ##     Game.horde = self
@@ -45,6 +70,7 @@ extends Node3D
 const E = preload("res://src/sim/enemy.gd")
 const Grid = preload("res://src/sim/spatial_grid.gd")
 const Spawner = preload("res://src/sim/spawner.gd")
+const Run = preload("res://src/sim/run.gd")
 
 ## Capienza massima: decisa qui, una volta sola, e mai piu' cambiata.
 const MAX_ENEMIES := 200
@@ -96,6 +122,21 @@ var hit_kinds: PackedInt32Array = PackedInt32Array()
 ## Numero di celle mai viste dalla griglia: dopo il riscaldamento deve restare 0.
 var grid_unknown_cells: int = 0
 
+# --- La partita ---------------------------------------------------------------
+#
+# Senza tipo dichiarato, come `_grid`: l'oggetto lo crea `_build()`, e in GDScript
+# `:=` su una variabile senza tipo non compila. Si indica il tipo dove si legge.
+# `run` non e' nullo dopo `_build()`, che e' l'unico posto in cui si costruisce.
+
+## Stato della partita e scala delle onde. Oggetto, non nodo: un restart non
+## crea e non libera niente nell'albero.
+var run = null
+
+## Pesi delle specie dell'onda corrente. Ricalcolati **solo** al cambio d'onda e
+## in `_build()`: ogni spawn legge questo array e non ne costruisce uno, quindi lo
+## spawn non alloca nel ciclo di gioco.
+var _weights: PackedFloat32Array = PackedFloat32Array()
+
 # --- Interno ------------------------------------------------------------------
 
 var _grid = null
@@ -109,6 +150,9 @@ var _built: bool = false
 var _registered: bool = false
 var _grid_dirty: bool = true
 var _contract_node: Node = null
+## Il giocatore, tenuto dal dato `Game.player`. Si rivede solo se non e' piu'
+## valido: nel ciclo di gioco non si fa una ricerca per nome ogni frame.
+var _player_cache: Node = null
 
 func _ready() -> void:
 	_build()
@@ -156,14 +200,16 @@ func _build() -> void:
 	hit_positions.resize(HITS_KEPT)
 	hit_kinds.resize(HITS_KEPT)
 
-	_resize_arrays(MAX_ENEMIES)
+	# La partita esiste **prima** di qualunque spawn: `_apply_spawn` legge da
+	# `run` il moltiplicatore di vita dell'onda, quindi costruirlo dopo sarebbe
+	# un ordine in cui la prima generazione di nemici nasce con regole diverse
+	# dalla seconda.
+	run = Run.new()
+	_sync_wave()
+	_sync_weights()
 	population = clampi(population, 0, MAX_ENEMIES)
 	# Disposizione iniziale a pieno: 200 nemici vivi al primo frame.
-	for i in MAX_ENEMIES:
-		_apply_spawn(i, Spawner.layout_point(arena_radius, i, MAX_ENEMIES, _rng),
-			Spawner.pick_kind(_rng))
-	count = MAX_ENEMIES
-	_resize_arrays(count)
+	_populate(MAX_ENEMIES)
 	_rebuild_grid()
 
 func _register() -> void:
@@ -190,11 +236,43 @@ func _resize_arrays(n: int) -> void:
 	kinds.resize(n)
 	timers.resize(n)
 
+## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
+## nessun nodo**: si riscrivono array che hanno gia' la capienza.
+##
+## E' la stessa operazione del primo frame e quella del restart, ed e' voluto
+## che sia una sola: due versioni della stessa disposizione sarebbero due numeri
+## che possono divergere, e il primo frame e il restart devono essere la stessa
+## cosa vista due volte.
+func _populate(n: int) -> void:
+	var target := clampi(n, 0, MAX_ENEMIES)
+	count = target
+	_resize_arrays(count)
+	for i in count:
+		_apply_spawn(i, Spawner.layout_point(arena_radius, i, count, _rng), _pick_kind())
+	_grid_dirty = true
+
+## I pesi delle specie dell'onda in corso.
+func _sync_weights() -> void:
+	_weights = Spawner.wave_weights(1 if run == null else run.wave)
+
+## Una specie per lo spawn di adesso: un peso solo, non uno studio di insieme.
+func _pick_kind() -> int:
+	if _weights.is_empty():
+		return Spawner.pick_kind(_rng)
+	return Spawner.pick_kind_with(_rng, _weights)
+
+## La vita di un nemico appena nato: la tabella della specie per il
+## moltiplicatore dell'onda. Sull'onda 1 il moltiplicatore e' 1.0 esatto, quindi
+## i numeri di `src/sim/enemy.gd` sono quelli di sempre e il criterio n. 4 della
+## milestone 1 resta tarato su di loro.
+func _hp_scale() -> float:
+	return 1.0 if run == null else run.hp_scale()
+
 func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	transforms[i] = pos
 	velocities[i] = Vector3.ZERO
 	kinds[i] = kind
-	hp[i] = E.hp_of(kind)
+	hp[i] = E.hp_of(kind) * _hp_scale()
 	timers[i] = 0.0
 	colors[i] = E.color_of(kind)
 
@@ -205,6 +283,12 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 ##
 ## Nel corpo di questa funzione non c'e' `new()`, `instantiate()` o `queue_free()`:
 ## si scrive dentro array gia' di capienza e dentro la griglia gia' riscaldata.
+## ## Lo stato della partita si guarda PRIMA di muovere chiunque
+##
+## Non e' solo un ordine: a `game_over` la simulazione e' ferma, quindi un passo
+## non sposta nessuno e non riempie nessuno. E' la differenza fra "la partita e'
+## finita" e "la partita continua ma non si vede piu' niente", che e' la
+## confusione peggiore che un gioco possa fare a chi ci sta giocando.
 func step(delta: float) -> void:
 	if not _built or delta <= 0.0:
 		return
@@ -213,6 +297,10 @@ func step(delta: float) -> void:
 	# celle nuove costerebbero un'allocazione per frame.
 	_sync_grid()
 
+	_poll_run()
+	if run != null and run.is_game_over():
+		return
+
 	_rebuild_grid()
 	hit_count = 0
 	var focus := _player_focus()
@@ -220,7 +308,30 @@ func step(delta: float) -> void:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius)
 	_sweep_dead()
+	_wave_tick()
+
+## Fine dell'onda e riempimento, in un passo solo.
+func _wave_tick() -> void:
+	# La barra a zero e' l'unica condizione che chiude un'onda. Non si guarda
+	# anche che il campo sia vuoto: col riempimento continuo un'onda da 230
+	# uccisioni con 200 vivi non ha mai il campo vuoto al momento giusto, e
+	# l'onda non finirebbe mai.
+	if run != null and run.wave_cleared():
+		run.next_wave()
+		# I pesi delle specie cambiano con l'onda. Adesso, e non dentro
+		# `next_wave`: le specie sono di questa foglia, `run.gd` non sa cosa sia
+		# un runner.
+		_sync_wave()
+		_sync_weights()
 	_top_up()
+
+## Rende il campo pubblico `wave` uguale a quello di `run`. Chiamata dagli
+## **tre** punti in cui l'onda cambia, e da nessun altro: uno specchio
+## allineato in tre punti si puo' controllare a occhio, uno allineato "quando
+## capita" no.
+func _sync_wave() -> void:
+	if run != null:
+		wave = run.wave
 
 ## Rimette a posto i nemici rimasti senza vita. `damage_enemy` li toglie subito,
 ## quindi di norma non trova niente: e' la rete di sicurezza, non il caso normale.
@@ -266,7 +377,103 @@ func _kill(i: int) -> void:
 	count = last
 	_resize_arrays(count)
 	kills += 1
+	# Ogni morte e' un passo in avanti sulla barra dell'onda. Si conta qui e non
+	# in `damage_enemy`: `_kill` e' l'unico posto in cui un nemico sparisce davvero,
+	# e cosi' la barra non dipende da **come** e' morto.
+	if run != null:
+		run.register_kill()
 	_grid_dirty = true
+
+# --- La partita e le onde ------------------------------------------------------
+#
+# Superficie che l'interfaccia e i test usano. Tre campi pubblici (`count`,
+# `transforms`, `colors`) restano dati grezzi perche' sono la massa da disegnare;
+# qui sotto sono numeri **derivati**, quindi metodi: se fossero campi, una barra
+# letta a metà fra due aggiornamenti mostrerebbe una combinazione che non è mai
+# vera.
+
+## La partita e' in corso.
+const RUN_PLAYING := "playing"
+## La partita e' finita: il giocatore non ha piu' vite.
+const RUN_GAME_OVER := "game_over"
+
+## Numero dell'onda. **Campo**, e non metodo, perche' un altro file lo legge gia'
+## per nome: `src/ui/hud.gd`::_refresh_wave fa `Game.horde.get("wave")` e si
+## aspetta un intero, con un valore di riserva e un `push_warning` se non lo
+## trova. Un metodo `wave()` avrebbe fatto dire all'HUD che il campo non esiste,
+## e il contatore delle onde sarebbe rimasto fermo a 1 senza che nessuno lo
+## notasse.
+##
+## E' uno **specchio** di `run.wave`, tenuto allineato da `_sync_wave()`: un solo
+## punto in cui cambia, chiamato da `_build()`, dal cambio d'onda e dal restart.
+## `tests/test_gameloop.gd` confronta il campo con `run.wave` in ogni stato
+## raggiungibile, quindi uno specchio rotto diventa un test rosso e non un
+## contatore fermo.
+var wave: int = 1
+
+## Numero dell'onda corrente. 1 all'avvio e dopo un restart.
+func wave_total() -> int:
+	return 0 if run == null else run.wave_total
+
+## Quante uccisioni restano all'onda corrente: **la barra wave**. A zero l'onda
+## è finita. Non scende mai sotto zero: quando le uccisioni sorpassano il
+## bersaglio, l'onda è già finita e non "da un meno".
+func wave_remaining() -> int:
+	return 0 if run == null else run.wave_remaining()
+
+## Quante uccisioni sono cadute nell'onda corrente.
+func wave_killed() -> int:
+	return 0 if run == null else run.wave_killed
+
+## La barra wave come rapporto da 0 a 1, per l'interfaccia: 1.0 all'inizio
+## dell'onda, 0.0 quando è finita. Sono gli stessi due numeri di
+## `wave_remaining()`, quindi l'HUD non può mostrare una barra diversa da quella
+## che la simulazione conta.
+func wave_bar_ratio() -> float:
+	return 0.0 if run == null else run.bar_ratio()
+
+## `Run.PLAYING` o `Run.GAME_OVER`. Le due stringhe sono anche qui, perche' un
+## metodo che restituisce una costante di un altro file e' una costante che si
+## rompe da sola quando l'altro file la cambia: meglio due righe che una
+## dipendenza per un nome.
+func run_state() -> String:
+	return RUN_PLAYING if run == null else run.state
+
+## La partita è finita: il giocatore non ha più vite. Da solo non si torna
+## indietro, l'unica strada è `restart_run()`.
+func is_game_over() -> bool:
+	return run != null and run.is_game_over()
+
+## La vita relativa dei nemici di questa onda: 1.0 sull'onda 1, e cresce con le
+## onde. Le tabelle di `src/sim/enemy.gd` non si toccano mai, quindi il criterio
+## n. 4 della milestone 1 resta tarato su quei numeri: è la scala delle onde a
+## essere nuova, non la fisica.
+func wave_hp_scale() -> float:
+	return 1.0 if run == null else run.hp_scale()
+
+## Ricomincia la partita: **onda 1**, barra piena, niente `game_over`, e l'orda
+## di nuovo piena di `MAX_ENEMIES` nemici.
+##
+## Nessun nodo viene creato e nessuno viene liberato: si riscrivono gli array che
+## già esistono. Il criterio n. 4 chiede che un restart non lasci nodi
+## duplicati, e con questa forma il numero di nodi non *può* cambiare invece di
+## dover essere controllato.
+##
+## Il giocatore **non** è toccato: è di -gameplay, e rimetterlo in piedi (vite,
+## potenziamenti, arma) è la sua metà del restart. Chi chiama questo metodo deve
+## rimettere in piedi anche il giocatore: se le vite restano a zero, il passo di
+## simulazione successivo rilegge `game_over` e la partita si ferma di nuovo,
+## che è la cosa giusta da fare ma non è un restart riuscito.
+func restart_run() -> void:
+	if not _built:
+		return
+	run.restart()
+	population = MAX_ENEMIES
+	kills = 0
+	hit_count = 0
+	_sync_wave()
+	_sync_weights()
+	_populate(population)
 
 # --- Griglia ------------------------------------------------------------------
 
@@ -401,6 +608,43 @@ func _record_hit(pos: Vector3, kind: int) -> void:
 	hit_positions[slot] = pos
 	hit_kinds[slot] = kind
 	hit_count = mini(hit_count + 1, HITS_KEPT)
+
+## Lo stato della partita si aggiorna leggendo le vite del giocatore, e il
+## giocatore si raggiunge per il **contratto**: `Game.player` è un dato pubblico
+## che -gameplay registra, non un nodo che questa simulazione va a cercare
+## nell'albero con `get_node("../..")`. È la strada che usa già
+## `src/render/arena.gd` per la barra delle vite, e vale per la stessa ragione:
+## una foglia che si cerca fra le altre foglie è una dipendenza circolare.
+##
+## Un campo assente, o di un tipo diverso, vale "non lo so": niente errore e
+## niente `push_warning` ogni frame. Se un domani il giocatore smettesse di
+## esporre `hp`, il test che azzera le vite e poi chiede `is_game_over()` lo
+## direbbe subito — il che è meglio di un `game_over` che scatta da solo per un
+## motivo sbagliato.
+func _poll_run() -> void:
+	if run == null:
+		return
+	var hp := _player_hp()
+	if hp >= 0.0 and hp <= 0.0:
+		run.enter_game_over()
+
+## Le vite del giocatore, o -1.0 se il contratto non ha ancora un giocatore con
+## quel campo. -1.0 e non 0.0 perché "non lo so" e "è morto" sono due fatti
+## diversi e metterli nello stesso numero fa finire la partita a chi non lo sa.
+func _player_hp() -> float:
+	var game := _contract()
+	if game == null:
+		return -1.0
+	if _player_cache == null or not is_instance_valid(_player_cache):
+		_player_cache = null
+		var found = game.get("player")
+		if not (found is Node):
+			return -1.0
+		_player_cache = found
+	var v: Variant = _player_cache.get("hp")
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return -1.0
 
 ## Il bersaglio dei nemici. Se -gameplay ha registrato `player_position` si usa
 ## quella, altrimenti il centro dell'arena: nessuna dipendenza circolare, e

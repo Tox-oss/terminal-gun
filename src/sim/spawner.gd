@@ -1,5 +1,9 @@
 extends RefCounted
 ## Disposizione procedurale dell'arena e scelta dei punti di spawn.
+
+## Le tabelle delle specie. `enemy.gd` non preloada niente, quindi questo
+## preload non puo' diventare un riferimento circolare.
+const E = preload("res://src/sim/enemy.gd")
 ##
 ## Nessuna geometria qui dentro: questo file dice **dove mettere i nemici**,
 ## non che forma hanno. E' il posto giusto per la densita', perche' la densita'
@@ -16,6 +20,10 @@ const INNER_RING := 0.35
 ## quello che e' venuto.
 const PLACEMENT_TRIES := 8
 ## Pesi delle specie al momento dello spawn. Indice = specie.
+##
+## Sono i pesi dell'**onda 1** e restano tali per sempre: `wave_weights(w)` parte
+## da questi e li sposta con le onde. tenerli fermi e' quello che lascia i numeri
+## della milestone 1 uguali a prima.
 ## `static var` e non `const`: su Godot 4.7 un array compattato non e' un'espressione
 ## costante (vedi src/sim/enemy.gd, stessa cosa).
 static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0])
@@ -62,17 +70,51 @@ static func spawn_point(radius: float, focus: Vector3, rng: RandomNumberGenerato
 
 ## Specie a caso, pesata. Il boss resta raro perche' e' lento e grosso: 200
 ## nemici non possono essere 200 boss.
+##
+## Con i pesi dell'onda 1: e' la forma breve di `pick_kind_with`, e serve ai
+## chiamanti che non hanno un'onda (il test della griglia, il bootstrap).
 static func pick_kind(rng: RandomNumberGenerator) -> int:
+	return pick_kind_with(rng, KIND_WEIGHTS)
+
+## Specie a caso, pesata con i pesi dati. `weights` e' un `PackedFloat32Array`
+## di `KIND_COUNT` voci, indici allineati a `KIND_NAMES`.
+static func pick_kind_with(rng: RandomNumberGenerator, weights: PackedFloat32Array) -> int:
 	var total := 0.0
-	for w in KIND_WEIGHTS:
+	for w in weights:
 		total += w
+	# Una tabella tutta nulla non e' un caso da gestire con un errore: si risponde
+	# col runner, che e' la specie piu' comune e la piu' fragile, cosi' nessun
+	# spawn va perso e nessuna funzione va interrotta a meta'.
+	if total <= 0.0:
+		return 0
 	var roll := rng.randf() * total
 	var acc := 0.0
-	for k in KIND_WEIGHTS.size():
-		acc += KIND_WEIGHTS[k]
+	for k in weights.size():
+		acc += weights[k]
 		if roll <= acc:
 			return k
 	return 0
+
+## I pesi delle specie dell'onda `w`: la **scala delle onde** sul lato di chi
+## nasce. Sull'onda 1 sono esattamente `KIND_WEIGHTS`, quindi i numeri della
+## milestone 1 restano quelli che erano.
+##
+## Il verso della scala e' uno solo e non e' una scelta di estetica: colla
+## crescere dell'onda il campo si riempie di cose che reggono il colpo. Il
+## runner scende (e' la specie piu' fragile: 14 HP e resistenza 0 al
+## knockback), il brute e il boss salgono (110 e 900 HP, resistenza 0.55 e
+## 0.90, cioe' non si spostano sotto i colpi). I due pesi hanno un tetto, quindi
+## un'onda non diventa "tutti boss": un'onda di soli boss non e' piu' difficile,
+## e' solo piu' lenta.
+static func wave_weights(wave: int) -> PackedFloat32Array:
+	var n := float(maxi(wave, 1) - 1)
+	var out := PackedFloat32Array()
+	out.resize(KIND_WEIGHTS.size())
+	out[E.RUNNER] = maxf(5.0, KIND_WEIGHTS[E.RUNNER] - 2.5 * n)
+	out[E.GRUNT] = KIND_WEIGHTS[E.GRUNT]
+	out[E.BRUTE] = KIND_WEIGHTS[E.BRUTE] + minf(18.0, 1.8 * n)
+	out[E.BOSS] = KIND_WEIGHTS[E.BOSS] + minf(27.0, 2.0 * n)
+	return out
 
 ## Quanti nemici per specie in un'onda. La coda e' lunga `total` e ogni specie
 ## occupa la sua fetta: e' lo stesso effetto di `pick_kind` ma senza casualita',

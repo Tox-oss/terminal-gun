@@ -35,8 +35,17 @@ sys.path.insert(0, os.path.join(REPO, "tools"))
 sys.dont_write_bytecode = True
 import check_perms as cp  # noqa: E402
 
-# I due file che l'utente deve installare, e da dove arrivano.
-TO_INSTALL = ["terminal-gun-ui.md", "terminal-gun-arena.md"]
+# I file che l'utente deve installare, e da dove arrivono.
+#   terminal-gun-ui.md / -arena.md       -> preparati in m2-w0
+#   terminal-gun-orda.md / -gameplay.md   -> riparati in m2-w1 (i `tests/` di m2
+#                                           mancavano nelle allowlist: difetto
+#                                           del vertice, vedi il messaggio)
+TO_INSTALL = [
+    "terminal-gun-ui.md",
+    "terminal-gun-arena.md",
+    "terminal-gun-orda.md",
+    "terminal-gun-gameplay.md",
+]
 
 tmp = tempfile.mkdtemp(prefix="tg-agents-")
 try:

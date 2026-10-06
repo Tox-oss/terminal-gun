@@ -74,6 +74,9 @@ SCOPE = {
     "terminal-gun-orda": [
         "src/sim/**",
         "tests/test_orda.gd",
+        # m2 (piano sez. 3.3): wave e game_over stanno nella simulazione, non
+        # nell'UI, quindi il test del game loop e' suo.
+        "tests/test_gameloop.gd",
     ],
     "terminal-gun-gameplay": [
         "src/player/**",
@@ -81,6 +84,9 @@ SCOPE = {
         "scenes/player.tscn",
         "scenes/projectile.tscn",
         "tests/test_gameplay.gd",
+        # m2 (piano sez. 3.3): crescita del player e' scope di gameplay, non di ui.
+        "tests/test_progression.gd",
+        "tests/test_upgrades.gd",
     ],
     "terminal-gun-arena": [
         "scenes/arena_main.tscn",

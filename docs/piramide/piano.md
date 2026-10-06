@@ -71,9 +71,30 @@ Un file, un proprietario. **Due agenti che toccano lo stesso file sono un bug di
 | `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/`, `src/weapons/`, `scenes/player.tscn`, `scenes/projectile.tscn`, `tests/test_gameplay.gd` | `src/sim`, `src/render`, `src/ui`, `scenes/arena_main.tscn`, `.godot/` |
 | `terminal-gun-arena` | `fledge-alpha-free#max` | `scenes/arena_main.tscn`, `scenes/hud.tscn`, `src/render/`, `src/ui/`, `tests/test_arena.gd` | `src/sim`, `src/player`, `src/weapons`, `project.godot`, `.godot/` |
 | `terminal-gun-assets` | `muse-spark-1.3-contributor-free#high` | `tools/gen_sfx.py`, `tools/blender/gen_models.py`, `tools/convert_assets.sh`, `assets/` | `src/`, `scenes/`, `project.godot`, `tools/env.sh`, non esegue mai `godot` |
-| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/env.sh` | il codice del gioco |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd`, `tools/env.sh`, **`.gitattributes`** | il codice del gioco |
 
 Sovrascrittura **autorizzata e unica**: `scenes/arena_main.tscn`, segnaposto di scheletro (w1) → scena reale di arena (w2). È dichiarata qui perché ogni altro file è creato una volta sola.
+
+### 3.1 `.gitattributes` era senza proprietario: dichiarato al vertice
+
+Il vertice lo crea in w0 (con `git lfs track`), ma nella tabella sopra non compariva: **nessuna delle cinque foglie poteva scriverlo e il vertice non aveva l'`edit` allow**. Un file senza proprietario dichiarato è un file che nessuno toccerà mai e nessuno guarderà mai: è stato il buco dietro il caso `*.pck` / `*.exe` di §3.2.
+
+Ora è **di proprietà del vertice**. Manca però ancora la regola: in `.gitattributes` ci sono solo `*.glb`, `*.wav`, `*.ogg` in LFS.
+
+### 3.2 Due righe fuori, finché il vertice non ha il permesso
+
+`.gitignore` esclude `*.pck`, `*.exe`, `build/`, `export/`, quindi quei file **non entrano nel repo**: il criterio n. 6 è soddisfatto per costanza, non per merito. Se qualcuno li forza dentro, git tenta un diff **testuale** su contenuto binario.
+
+Servono in `.gitattributes`:
+
+```
+*.pck binary
+*.exe binary
+```
+
+Non LFS: sono artefatti di rilascio e non vale la pena spenderne il quota. `binary` serve a una cosa sola, ed è quella giusta: impedisce a git di tentare diff e merge testuali.
+
+**Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 
 ## 4. Onde
 

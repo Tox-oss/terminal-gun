@@ -1,0 +1,8 @@
+# Cache di import di Godot: di terminal-gun-scheletro, mai committata.
+.godot/
+
+# File temporanei di qualunque agente.
+*.tmp
+
+# Configurazione di export: contiene path assoluti di macchina.
+export_presets.cfg

@@ -88,7 +88,7 @@ w1 e w2 hanno parallelismo **vero**: scope disgiunti e nessuna dipendenza di fil
 
 ## 5. Contratto di interfacce
 
-Vive in `src/core/contracts.gd` (autoload `Game`). **Il contratto dichiara, le implementazioni si registrano**: ogni foglia scrive `Game.<campo> = self` una volta sola nel proprio `_ready()`, e non chiama mai il costruttore di un'altra foglia.
+Vive in `src/core/contracts.gd` (autoload `Game`). **Il contratto dichiara, le implementazioni si registrano**: ogni foglia si registra una volta sola nel proprio `_ready()` e non chiama mai il costruttore di un'altra foglia. Ma **dati e metodi si registrano in due modi diversi**: vedi §5.1, non è una questione di stile.
 
 ```gdscript
 var player: Node3D
@@ -100,6 +100,34 @@ func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> Node3D
 func random_spawn_point() -> Vector3
 func player_position() -> Vector3
 ```
+
+### 5.1 Come ci si registra davvero
+
+Emendato dal vertice in w1, dopo che `terminal-gun-scheletro` ha trovato che la formulazione precedente **non funziona**. `Game.nearest_enemy = self._nearest_enemy` è **rifiutato da GDScript** (`Invalid assignment of property or key ... with value of type 'Callable'`), e l'errore **interrompe il `_ready()`**: la foglia crede di aver registrato e non ha registrato niente. Se w2 fosse partito con il testo precedente, tutte e tre le foglie avrebbero prodotto codice morto e nessun errore lo avrebbe detto.
+
+**Dati**, nel proprio `_ready()`, assegnazione diretta:
+```gdscript
+Game.player = self
+Game.horde = self
+Game.arena_radius = 28.0
+```
+
+**Metodi**, nel proprio `_ready()`, una volta sola:
+```gdscript
+Game.register_impl("nearest_enemy", self._nearest_enemy)   # forma lunga
+Game.register_impl("player_position", self)                # forma corta
+```
+
+- **forma lunga**: esplicita, vale per ogni nome di metodo.
+- **forma corta**: risolve a `self.player_position()`, cioè il metodo **omonimo** all'API.
+- **La forma corta non è compatibile con il prefisso `_`.** `register_impl("player_position", self)` su una foglia che espone `_player_position` va in `push_error` e **non registra**. O forma lunga con `self._player_position`, o forma corta con metodo senza underscore: **le due convenzioni non si mescolano.**
+- **Chiamate**: come funzioni, `Game.nearest_enemy(pos, 12.0)`. **Mai** `Game.nearest_enemy.call(...)`.
+
+Già nel contratto, se serve: `Game.has_impl("nearest_enemy") -> bool` per verificare prima di chiamare; un nome fuori contratto passato a `register_impl` viene **rifiutato** con `push_error` invece di registrarsi in silenzio.
+
+Proprietari, come nei commenti di `contracts.gd`: `nearest_enemy`, `damage_enemy`, `random_spawn_point` → **-orda**; `spawn_projectile`, `player_position` → **-gameplay** (`player_position` può essere anche di -orda, ma **uno solo** dei due la registra).
+
+Stringhe a schermo: **ASCII only** nei `print`/`push_warning`/`push_error`. La console Windows e le pipe di `OS.execute` stanno in codepage e mangiano gli accenti. I commenti invece possono accentedersi: non passano dalla pipe.
 
 Il lato "massa" dell'orda non passa da funzioni ma da tre campi pubblici, perché disegnarli non è una query:
 
@@ -138,14 +166,29 @@ Cinque agenti scrivono nella stessa cartella **in parallelo**. Queste regole son
 
 ## 8. Stato
 
-Da aggiornare a fine onda. **w0 fatta. w1 in attesa.**
+Da aggiornare a fine onda. **w0 e w1 verdi. w2 in attesa.**
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | w0 | vertice | Godot 4.7.2 + Blender 5.2.2 installati, `tools/env.sh` scritto, `git init` + LFS su `*.glb`/`*.wav`/`*.ogg`, identità git impostata **localmente** (`bisco <bisco@localhost>`: non c'era nessuna, né locale né globale) | — | **verde** |
-| w1 | scheletro, assets | — | — | da fare |
+| w1 | scheletro, assets | `project.godot`, `contracts.gd`, `gate.gd`, `test_harness.gd`, `test_smoke.gd`, `.gitignore`; 7 SFX + 6 modelli generati e deterministici | `GATE: 1/1`, exit 0, verificato dal vertice | **verde** |
 | w2 | orda, gameplay, arena | — | — | da fare |
 | w3 | vertice | — | — | da fare |
+
+### Come w1 è finita, e cosa è costato
+
+Due round, perché il primo non era verde: lo scheletro esaurì i suoi step lasciando nel test la riga `h.fail("PROVA TEMPORANEA: ...")` con cui stava provando che il gate sapesse fallire. Il gate aveva fatto bene il suo lavoro; la riga di debug no. Il secondo round l'ha rimossa e ha reso ASCII-only le stringhe a schermo.
+
+**Asset verificati a occhio non bastava, quindi a dati:** 6 `.glb` tutti sotto il tetto di 20 KB (max `enemy_boss.glb` 12.3 KB); 7 `.wav`, il più lungo `gameover.wav` 0.55 s (tetto 0.6 s); `bonk.wav` 44100 Hz mono, criterio n. 5 della milestone.
+
+**Difetti trovati in w1, che valgono per w2 e w3:**
+- la formulazione originale di §5 non era eseguibile in GDScript → **emendata in §5.1**, e le tre foglie di w2 vanno istruite con il meccanismo di registrazione reale;
+- `OS.execute` su Windows restituisce tutta la stdout come **un solo elemento**, non una riga per elemento: un gate che cerca una riga di testo nell'array la trova una volta sola o non la trova. Ora si appiattisce in righe. Vale per chiunque scriva tooling che catturi output di Godot;
+- il gate rifiuta `GATE: 0/0` (il falso verde peggiore: nessun test eseguito) e tratta qualunque `SCRIPT ERROR`/`ERROR:` nello stdout del figlio come FAIL **anche con exit 0**.
+
+**Debito noto, non risolto:** `scenes/arena_main.tscn` **non esiste**. Lo scheletro non ha l'`edit` allow su `scenes/**` e non l'ha aggirato: è di `terminal-gun-arena` in w2 (sovrascrittura già autorizzata in §3). Fino ad allora `--import` logga `ERROR: Cannot open file 'res://scenes/arena_main.tscn'` — innocuo per w1, ma **va riletto in w2** perché riguarda il criterio n. 2 della milestone.
+
+**Limite dichiarato:** il gate non ha timeout (`OS.execute` è bloccante): un test che si blocca blocca il gate. Scelta consapevole, documentata in `tools/gate.gd`.
 
 ## 9. Tagli dichiarati
 

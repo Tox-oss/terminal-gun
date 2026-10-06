@@ -1,0 +1,30 @@
+; terminal-gun — file di progetto Godot 4.7.
+; Scritto da terminal-gun-scheletro in w1. Nessun'altra foglia lo tocca:
+; se serve una riga nuova, si chiede al vertice (docs/piramide/piano.md §3).
+
+config_version=5
+
+[application]
+
+config/name="terminal-gun"
+config/description="Bullet heaven 3D low-poly. Vertical slice."
+; La scena vive in scenes/arena_main.tscn, proprietà di terminal-gun-arena (w2).
+; w1 lascia questo path dichiarato anche se il file non esiste ancora.
+run/main_scene="res://scenes/arena_main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+; Il contratto di interfacce. Dichiara, non implementa: vedi src/core/contracts.gd.
+Game="*res://src/core/contracts.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[rendering]
+
+; gl_compatibility: va su schede integrate, costa meno di Vulkan per un progetto
+; low-poly. Non cambiarlo per mettere z-fighting sotto una macchina.
+renderer/rendering_method="gl_compatibility"

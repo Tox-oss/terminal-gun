@@ -33,3 +33,12 @@ export/
 # Cruscotto di Windows: compare da solo e su Windows finisce nel repo.
 desktop.ini
 Thumbs.db
+
+# --- Python ---
+
+# Bytecode generato: tools/__pycache__/*.pyc è finito dentro al repo perché
+# la cartella non era ignorata. Le due righe sotto chiudono il "dopo": nessun
+# altro .pyc entra. Non rimuovono però il .pyc già tracciato, per quello serve
+# `git rm -r --cached tools/__pycache__` (manuale, vedi docs/piramide/piano.md sez. 8).
+__pycache__/
+*.pyc

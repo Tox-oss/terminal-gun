@@ -590,12 +590,48 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
 - **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. **Dichiarato in m1 come scelta consapevole, e m1 lo ha lasciato aperto**; m2 lo ha promesso a criterio n. 6 e **il rimedio è pronto** in `docs/piramide/gate_timeout.md`, ma **non applicabile**: `tools/gate.gd` non è nel mio scope `edit`. **È l'unico criterio di m2 non raggiunto, ed è bloccato da una riga di permesso, non dal codice.**
-- **`tools/__pycache__/check_perms.cpython-314.pyc` è ancora tracciato nel repo**: `git rm --cached` è negato al vertice (stessa famiglia di `git clean`/`git reset`) e `.gitignore` è scope di `-scheletro`. Lo toglie l'utente, o `-scheletro` in un'onda dedicata con `__pycache__/` e `*.pyc`. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo.
+- **`.pyc`: il "dopo" è chiuso, il file tracciato no.** `-scheletro` ha aggiunto `__pycache__/` e `*.pyc` a `.gitignore` (righe 37-44, con il commento che dice che le due righe non rimuovono un file già tracciato). **Resta `tools/__pycache__/check_perms.cpython-314.pyc` nel tracking**, perché `git rm --cached` è negato al vertice (stessa famiglia di `git clean`/`git reset`) e a `-scheletro`. L'unico atto che lo chiude è `git rm -r --cached tools/__pycache__` **dell'utente**. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
 
 **PROVATO CON UN LANCIO REALE IL 2026-10-06 (m2-w0): il blocco si riproduce.** Un lancio di `terminal-gun-arena` come tale risponde `Error from provider (Console): This model is not available in your country`. Quindi "il catalogo lo riporta come `active`" era vero e **irrilevante**: il catalogo è metadati, il provider è la disponibilità reale. Il ruolo **non** è eseguibile oggi come `terminal-gun-arena` e la garanzia della regola 7.4 resta perduta per lui.
 
 **Non è aggirabile e non è aggirato**: né con `esecutore` (perde la 7.4 per costruzione, §11.8) né con un modello sostitutivo scritto di nascosto (sarebbe cambiare la piramide senza dirlo, §11.5). **Non blocca m2**: `-arena` **non lavora in m2** (§3.3), quindi m2-w1 (`orda ∥ gameplay ∥ ui`) non lo usa. Debito **aperto ma non bloccante**: resta aperto finché l'utente non decide se cambiare il modello di `-arena` o accettare che il ruolo resti non eseguibile finché il provider non lo abilita.
+
+### 2026-10-11: la piramide era avviata da `C:\Windows\System32`, e nessuna allowlist c'entra
+
+**Il vertice non riusciva a scrivere, e la ragione non era un permesso mancante.** Sessione
+aperta con working directory `C:\Windows\System32`: fuori dal progetto. `-scheletro`,
+mandato a aggiungere due righe a `.gitignore`, si e' fermato con `Permission denied` al
+primo file — il suo file di scope.
+
+Il sospetto giusto era "manca la riga nella allowlist", ed e' **falsificabile**:
+`.gitignore` era in `terminal-gun-scheletro.md` riga 322, `effect: allow`, e la copia in
+`~/.config/opencode/agents/` era identica **byte per byte** alla del repo (verificato, non
+supposto). La regola c'era. Il path relativo `.gitignore` semplicemente non risolveva
+contro la root del progetto, perche' la root non era quella.
+
+Dopo `session_move` alla root, **lo stesso identico prompt e' passato al primo tentativo**.
+Nessun file di permessi e' stato toccato per ottenere questo.
+
+**Perche' merita una sezione e non una riga.** E' la stessa classe dei tre difetti di
+governance gia' registrati (§3.1 `.gitattributes` senza proprietario, i path di test di m2
+fuori dalle allowlist, `tools/gate.gd` fuori dalla mia), ma con una differenza che la rende
+piu' insidiosa: **li altri tre si vedono leggendo le allowlist, questo no.** Una allowlist
+corretta e completa produce lo stesso identico `Permission denied` di una allowlist
+mancante. Il sintomo e' lo stesso e la causa e' opposta, quindi la diagnosi ovvia
+("manca un permesso, chiedi all'utente") porta a chiedere una riga che non serve, e il
+permesso sembra comunque non funzionare.
+
+**La regola che ne segue, e che il piano aveva gia' scritto ma non sapeva di dover
+citare:** `docs/piramide/piano.md` intestazione dice gia' «opencode va avviato da questa
+cartella: i path relativi funzionano solo da qui». Era scritto, e non era stato letto come
+un prerequisito di funzionamento: era sembrato un consiglio di comodita' per i path
+relativi, mentre e' una **precondizione degli scope `edit`**, che sono tutti relativi.
+
+**Da mettere in conto a ogni sessione che riapre la piramide**: prima di `w0`, il vertice
+deve trovarsi con il workspace root sulla root del progetto. Se `pwd` non e' la root, va
+spostato **prima** di lanciare la prima foglia, altrimenti si paga la stessa onda per
+scoprirlo, e la prima cosa che una foglia scrive e' quasi sempre un file di scope.
 
 ### Come w1 è finita, e cosa è costato
 

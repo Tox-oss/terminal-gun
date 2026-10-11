@@ -58,6 +58,11 @@ SCOPE = {
     VERTICE: [
         "docs/piramide/**",
         "src/core/contracts.gd",
+        # m2 (piano sez. 3.3): il timeout del gate e' del vertice. In w1 il file
+        # e' di `-scheletro`: e' il **passaggio** di proprieta' di m2, dichiarato
+        # in DECLARED_OVERLAP sotto. `-scheletro` non lavora in m2, quindi le due
+        # foglie non scrivono mai lo stesso file nella stessa onda.
+        "tools/gate.gd",
         "tools/env.sh",
         "tools/check_perms.py",
         ".gitattributes",
@@ -119,6 +124,10 @@ SCOPE = {
 DECLARED_OVERLAP = {
     ("terminal-gun", "src/core/contracts.gd"),
     ("terminal-gun-scheletro", "src/core/contracts.gd"),
+    # Passaggio di proprieta' di m2: il timeout del gate passa a `terminal-gun`
+    # (piano sez. 3.3), che lo condivide con l'ex proprietario `-scheletro`.
+    ("terminal-gun", "tools/gate.gd"),
+    ("terminal-gun-scheletro", "tools/gate.gd"),
     ("terminal-gun-scheletro", "scenes/arena_main.tscn"),
     ("terminal-gun-arena", "scenes/arena_main.tscn"),
     # Passaggio di proprieta' di m2: l'HUD passa da -arena a -ui (piano sez. 4.1).

@@ -399,7 +399,7 @@ Rimisurati dal vertice il 2026-10-11, non rileggi dalla tabella.
 | 3 | Un potenziamento cambia il comportamento misurabile | **si'** | `PASS test_upgrades`, **323 asserzioni**, otto misure **comportamentali** e nessuna lettura di campo. Spostamenti: `damage` **+25.0%**, `fire_rate` **-18.0%** (piu' rapida), `move_speed` **+9.7%**, `projectile_speed` **+20.0%**, `knockback` **+30.0%** (8.100→10.530 m/s sul bruto), `pierce` **+100.0%** (1→2 nemico), `vitality` **+20.0%** (10→12 colpi), `range` **+26.2%** (84→106 passi). Tutte le misure non pertinenti restano a **0.0%**: nessun rumore. Soglia 2% superata da tutte e otto |
 | 4 | La partita ha una fine | **si', con una meta' dichiarata** | `PASS test_gameloop`, 233 asserzioni: onde 1→3 superate, onda 3→4 con barra a 0, scala vita 1.00→1.50, **4 restart con 3 nodi prima e dopo** e un solo nodo `Horde` sotto root, nessun nodo duplicato, 0 KB di crescita su 600 passi. Il test dimostra **anche in un numero** che `restart_run()` non rimette in piedi il giocatore da solo (hp 0.0): e' la meta' di -orda, e la meta' di -gameplay e' chiamarla. **La schermata di game over e' scope di -ui ed e' scritta**, ma nessun criterio la misura |
 | 5 | Il criterio n. 4 di m1 non regredisce | **si'** | runner **0.3114**, grunt **0.3570** (tetto 0.3), brute 0.1963 e boss 0.0554 esclusi per progetto (§5.4). **`KNOCKBACK` resta 18.0**, confermato da tre letture indipendenti nella stessa esecuzione |
-| 6 | La porta non ha timeout | **NO — aperto, e per un difetto di governance** | `tools/gate.gd:149` chiama ancora `return OS.execute(exe, args, output, true, false)`, bloccante e senza scadenza (riverificato il 2026-10-11). **Il rimedio è scritto e pronto** in `docs/piramide/gate_timeout.md`. **Non applicabile senza una riga dell'utente**: §3.3 mi assegna il timeout di quel file, ma la mia allowlist non lo contiene e §11.5 mi vieta di scriverla da solo. La riga da aggiungere è **più sotto**, in §10. E attenzione: il blocco **non si è riprodotto** nella sessione del 2026-10-11, quindi non va dichiarato ma **provato** — §11.10 |
+| 6 | La porta non ha timeout | **SI', il codice — chiuso il 2026-10-11; resta mezza riga di governance** | `tools/gate.gd` non usa più `OS.execute`: `_run()` lancia il test con `OS.execute_with_pipe(..., false)`, sorveglia pid e pipe leggendo a pezzi, e oltre `TEST_TIMEOUT_MS` (120 s) **uccide** il figlio con `OS.kill` e lo dichiara `FAIL <nome>: timeout: ...`. **Provato, non dichiarato**: un test che si blocca e' diventato FAIL a **120 s esatti**, con zero processi rimasti; il gate normale e' identico (`GATE: 8/8`, exit 0) e la stderr del figlio continua ad arrivare al gate (una `PASS` con uno `SCRIPT ERROR` su stderr resta un FAIL). **Mezza riga aperta**: `perm_scope` e' **rosso** (`PERM: 14/15`) finche' l'utente non aggiunge `edit tools/gate.gd` alla allowlist del vertice — §11.11. E una scoperta nuova, dichiarata li': **il rimedio «pronto» da giorni non compilava** |
 
 ### m2-w1 ripreso il 2026-10-11: `GATE: 6/6` non vuol dire m2 chiusa
 
@@ -589,9 +589,10 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - ~~**Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**~~ **CHIOSO in m2-w0**: l'esperimento di §1.2 l'ha **smentito**. Al valore di codice la saturazione non c'è (11.4 m/s netti sotto un tetto di 18.0): la pendenza esiste e `36 -> 72` è un pianoro. Dettaglio e numeri in §1.2.
 - ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
-- **Il gate non ha timeout, ed è l'unico criterio di m2 non raggiunto.** Verificato di nuovo il 2026-10-11, riga per riga: `tools/gate.gd:149` è ancora `return OS.execute(exe, args, output, true, false)`. **Il rimedio è pronto e il problema non è il codice**: il diff è in `docs/piramide/gate_timeout.md`. Lo tengono fermo due regole, entrambe di governance: §11.5 (nessun agente riscrive la propria allowlist, quindi la riga che sblocca il file è dell'utente) e §11.10 (il contenimento vale **solo** per una sessione che gira come `terminal-gun` — nella sessione del 2026-10-11 il blocco **non si è riprodotto**, quindi «sono bloccato» va **provato**, non dichiarato).
+- ~~**Il gate non ha timeout, ed era l'unico criterio di m2 non raggiunto**~~ **CHIUSO il 2026-10-11.** `tools/gate.gd` non chiama più `OS.execute` bloccante: `_run()` usa `OS.execute_with_pipe(..., false)`, sorveglia pid e pipe leggendo a pezzi, e oltre `TEST_TIMEOUT_MS` (120 s) uccide il figlio e lo dichiara FAIL. Provato con un test che si blocca, **non lasciato nel repo**. **Il codice non era il problema: il rimedio non compilava** — tre righe sbagliate, dichiarate in §11.11. E **resta mezza riga di governance**: `perm_scope` va rosso finché l'utente non aggiunge `tools/gate.gd` alla allowlist del vertice.
+- **`test_gameloop` è raramente instabile (~0,6% dei lanci), e nessuno lo sapeva.** L'asserzione `not horde.grid_overflowed()` (in `tests/test_gameloop.gd`, riga 241) dipende dal **ripopolamento casuale** dell'orda: quando i nemici si addensano abbastanza da riempire un secchiello, l'onda che doveva passare fallisce e il gate scende a `7/8` **senza alcuna regressione nel codice**. Misurato il 2026-10-11: **1 fallimento in 175 esecuzioni** — 52 lanci diretti + 60 `--only` col gate nuovo + 60 col vecchio, questi ultimi 120 a **0** — quindi **non è causato dal timeout** e non è riproducibile a comando. Il test resta deterministico nel passo (`const DT`): l'unica variabile è il RNG globale, non seminato. **Da chiudere prima di fidarsi di un `7/8`**: un seme fisso nel ripopolamento lo renderebbe riproducibile, oppure l'asserzione va spostata su un caso costruito invece che sul caso.
 - **`check_perms.py` non verifica che opencode applichi le allowlist** (§11.10). I quindici check risolvono le regole **come testi** e ne controllano la coerenza col piano: nessuno chiede se il runtime le usi. `PERM: 15/15` è vero e **insufficiente**, perché è compatibile con due mondi diversi — «la politica è scritta bene» e «la politica è scritta bene e ignorata» — e il 2026-10-11 il secondo si è presentato. Il rimedio è un `perm_runtime` che **provochi** un'azione negata e **pretenda un rifiuto**, invece di leggere una allowlist.
-- **`.pyc`: il "dopo" è chiuso, il file tracciato no.** `-scheletro` ha aggiunto `__pycache__/` e `*.pyc` a `.gitignore` (righe 37-44, con il commento che dice che le due righe non rimuovono un file già tracciato). **Resta `tools/__pycache__/check_perms.cpython-314.pyc` nel tracking**, perché `git rm --cached` è negato al vertice (stessa famiglia di `git clean`/`git reset`) e a `-scheletro`. L'unico atto che lo chiude è `git rm -r --cached tools/__pycache__` **dell'utente**. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo.
+- ~~**`.pyc`: il "dopo" è chiuso, il file tracciato no**~~ **CHIUSO il 2026-10-11.** `-scheletro` aveva messo `__pycache__/` e `*.pyc` in `.gitignore` (righe 37-44), ma con il solo `gitignore` il file **già tracciato resta tracciato**: `git rm -r --cached tools/__pycache__` lo ha tolto dall'indice, e il `.pyc` resta su disco, ora ignorato. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne nascono altri**: il danno era uno e solo, ed è chiuso.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
 
 **PROVATO CON UN LANCIO REALE IL 2026-10-06 (m2-w0): il blocco si riproduce.** Un lancio di `terminal-gun-arena` come tale risponde `Error from provider (Console): This model is not available in your country`. Quindi "il catalogo lo riporta come `active`" era vero e **irrilevante**: il catalogo è metadati, il provider è la disponibilità reale. Il ruolo **non** è eseguibile oggi come `terminal-gun-arena` e la garanzia della regola 7.4 resta perduta per lui.
@@ -852,6 +853,40 @@ riscrive le proprie regole**, e la regola regge **a prescindere da chi ha access
 altrimenti non è una regola ma una convenzione per i giorni comodi. Nel modo in cui si è
 svolto, questo file di agente lo scrive l'utente due volte, e la seconda non è mai stata
 tanto poco formale.
+
+### 11.11 Il rimedio che non era un rimedio: scritto, citato, mai compilato
+
+**Un fatto, prima di tutto.** Dal 2026-10-06 `docs/piramide/gate_timeout.md` dice, in testa,
+«Stato: scritto e non applicato». Il piano lo ha citato come **«il rimedio è pronto»** (§8,
+§11.10), e per giorni è stato trattato come una cosa che esisteva. Il 2026-10-11 è stato
+applicato, e **non compilava**. Tre righe sbagliate, tutte nella stessa chiamata:
+
+| riga del diff, com'era scritta | perché è sbagliata |
+|---|---|
+| `OS.execute_with_pipe(exe, args, false, true)` | in Godot 4.7.2 la firma ha **tre** argomenti — `(path, args, blocking)`. Un quarto parametro `read_stderr` **non esiste** |
+| `handle[0]`, `handle[1]` | il ritorno è un **Dictionary**, non un Array: le chiavi sono `"pid"`, `"stdio"`, `"stderr"` |
+| si leggeva **una sola** pipe, quella di stdout | **stdout e stderr sono due pipe separate.** Leggerne una sola avrebbe reso `_engine_errors` **cieca**: il gate avrebbe smesso di vedere gli `SCRIPT ERROR` e avrebbe creduto `PASS` a test che non hanno girato |
+
+Nessuna delle tre si vede **leggendo**: due sono parse error, e la terza è una perdita
+silenziosa di una funzione che nessun test avrebbe più coperto.
+
+**Perché conta più della modifica.** La sequenza che si stava preparando era: l'utente
+aggiunge la riga di allowlist, il vertice applica il diff, **il gate si rompe**. La riga di
+permesso avrebbe sbloccato una modifica che **distrugge la porta**: un parse error non è un
+timeout, è un gate che non parte affatto — e `tools/gate.gd` è la porta su cui poggiano tutte
+le altre misure di questo piano. Il verde apparente sarebbe stato peggiore del rosso, perché
+il diff si chiamava «pronto».
+
+**La regola che ne esce, e vale per ogni rimedio futuro.** «Pronto» significa **eseguito
+almeno una volta nella forma esatta in cui verrà applicato**. Un diff non compilato è una
+**bozza**, e va chiamata bozza. La prova non è la prosa: è la porta che si sa far fallire — e
+qui la porta ha fatto esattamente questo, ha fallito, e la modifica è stata aggiustata
+**prima** di funzionare.
+
+**È la stessa forma di §11.10, in un altro materiale**: là un documento di permessi che non
+era in vigore, qui un documento di codice che non era in grado di girare. In entrambi i casi
+lo strumento che l'avrebbe detto esisteva già — `tools/gate.gd` qui, una prova di rifiuto là —
+e in nessuno dei due era stato usato **su se stesso**. Un rimedio non si cita: si esegue.
 
 ## 9. Tagli dichiarati
 

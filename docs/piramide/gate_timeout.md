@@ -1,209 +1,103 @@
-# `tools/gate.gd`: timeout per test — applicazione pronta, in attesa del permesso
+# `tools/gate.gd`: timeout per test — applicato il 2026-10-11
 
-**Stato: scritto e non applicato.** Il vertice ha ricevuto `Permission denied: edit`
-su `tools/gate.gd`, che il piano §3.3 gli assegna. Per §11.5 il vertice non puo'
-riscrivere la propria allowlist, quindi **la riga che abilita questa modifica e'
-dell'utente** (vedi in fondo).
+**Stato: applicato e verificato, con tre correzioni al diff originale.** Il vertice ha
+applicato la modifica al gate il 2026-10-11. Il **diff che questo file conteneva dal
+2026-10-06 non compilava**: tre righe sbagliate, tutte descritte sotto. Le correzioni sono
+in `tools/gate.gd` (vedi git), non in questo file.
 
-Questo file contiene **la modifica esatta**, non un'idea: e' un diff unificato su
-`tools/gate.gd`. Serve a chiudere il **criterio n. 6 di m2** e il debito di m1
-«il gate non ha timeout».
+Questo documento chiude il **criterio n. 6 di m2** e il debito di m1 «il gate non ha
+timeout». Resta **una mezza riga di governance**, in fondo: la allowlist del vertice.
 
-## Perche' serve e perche' non basta un `if` qualsiasi
+## Il diff originale, e perché non compilava
 
-Oggi il gate chiama `OS.execute`, che e' **bloccante e senza scadenza**: un test che
-si blocca blocca il gate, e il vertice non distingue «il test e' lento» da «il test
-e' impiantato». La soluzione non e' un timeout intorno a `OS.execute`, perche' durante
-l'attesa non si puo' ne' leggere l'output ne' sapere se il figlio e' vivo.
+Il diff del 2026-10-06 partiva da un'API che **non è quella di Godot 4.7.2**. Applicato
+così com'era, `tools/gate.gd` non si caricava: **`Parse error`**, gate assente, non un
+timeout mancato. Tre errori, tutti nella stessa chiamata:
 
-`OS.execute_with_pipe(exe, args, blocking=false, read_stderr=true)` restituisce
-`[pid, pipe]`: con il **pid** si puo' sorvegliare `OS.is_process_running`, e con la
-**pipe** si puo' leggere l'output a pezzi mentre si aspetta. Le due cose che
-`OS.execute` faceva — catturare la stdout per il **motivo** di un FAIL e usare il
-**codice di uscita** come verdetto — restano intatte. Sul timeout si chiama
-`OS.kill(pid)` e il test diventa un **FAIL dichiarato**.
+| com'era scritto | com'è davvero (Godot 4.7.2) |
+|---|---|
+| `OS.execute_with_pipe(exe, args, false, true)` | la firma ha **tre** argomenti: `execute_with_pipe(path, args, blocking = true)`. **Nessun** `read_stderr` |
+| `var pid = handle[0]`, `var pipe = handle[1]` | il ritorno è un **Dictionary**: `{ "pid": int, "stdio": FileAccess, "stderr": FileAccess }` |
+| si leggeva solo la pipe di stdout | **stdout e stderr sono due pipe separate.** Leggerne una sola rende `_engine_errors` cieca: il gate smette di vedere gli `SCRIPT ERROR` e crede `PASS` a test che non hanno girato |
 
-## Il diff
+Le prime due sono parse error (si vedono subito). La terza è **silenziosa**: sarebbe passata
+le prove di un gate verde, togliendo di nascosto il controllo più importante che il gate ha.
+Per questo qui sotto la stderr si legge **dalla sua pipe** ed è provata con un test che
+emette un errore.
 
-```diff
---- a/tools/gate.gd
-+++ b/tools/gate.gd
-@@ -12,10 +12,15 @@
- ## né falsare i test successivi. Il verdetto di un test è il suo codice di uscita;
- ## il motivo di un FAIL è la sua stdout.
- ##
--## NOTA: `OS.execute` è bloccante e senza timeout. Un test che si blocca
--## blocca il gate: è una scelta consapevole, perché il gate deve poter
--## stampare il perché di un fallimento e `OS.execute` è l'unica API che
--## cattura la stdout. Se un test si blocca, il rimedio è nel test.
-+## TIMEOUT PER TEST (criterio n. 6 di m2, debito di m1 chiuso). Un test che si
-+## blocca non blocca più il gate: il figlio viene sorvegliato e, superata la
-+## soglia, ucciso con `OS.kill` e riportato come FAIL dichiarato.
-+##
-+## Perché `OS.execute_with_pipe` e non `OS.execute`: `OS.execute` cattura la
-+## stdout ma è BLOCCANTE e senza timeout, quindi non può fare le due cose.
-+## `execute_with_pipe` in modo non bloccante restituisce sia il pid sia la pipe:
-+## si legge a pezzi mentre si sorveglia `OS.is_process_running`. Il verdetto
-+## resta il codice di uscita del figlio, il motivo resta la sua stdout.
- ##
- ## SKIP non è un fallimento: un test previsto e non ancora scritto non deve
- ## far fallire l'onda che sta costruendo le altre foglie. Il vertice legge
-@@ -27,6 +32,13 @@
- 
- const TESTS_DIR := "res://tests"
- const PREFIX := "test_"
-+
-+## Scadenza per un singolo test. Generosa abbastanza da non tagliare un test
-+## legittimamente lento su una macchina carica, e abbastanza stretta da non
-+## congelare un gate per sempre. I test di oggi durano da 0.16 s a pochi secondi:
-+## il margine e' di un ordine di grandezza, non di un soffio.
-+const TEST_TIMEOUT_MS := 120000
-+const POLL_MS := 5
+La lezione è registrata nel piano, §11.11: **un rimedio «pronto» che non è mai stato
+compilato è una bozza.** Questo lo era.
 
- ## I test che il piano (docs/piramide/piano.md §6) prevede. Un file scritto da
- ## una foglia e non qui dentro viene comunque eseguito: questa lista serve solo
- ## a poter dire SKIP su un test che non è ancora stato scritto.
-@@ -74,8 +86,10 @@
- 			continue
- 
- 		var output: Array = []
--		var code := _run(path, output)
-+		var result := _run(path, output)
-+		var code: int = result[0]
-+		var timed_out: bool = result[1]
- 		var lines := _lines(output)
- 		var verdict := _verdict(lines)
- 		var errors := _engine_errors(lines)
- 		var reason := ""
- 
--		if not errors.is_empty():
-+		if timed_out:
-+			# Un test che si blocca è un FAIL dichiarato, non un gate congelato:
-+			# il figlio è stato ucciso e il motivo è il timeout, non il codice.
-+			reason = "timeout: il test non e' terminato entro %.1f s, processo ucciso" % (TEST_TIMEOUT_MS / 1000.0)
-+		elif not errors.is_empty():
- 			# Un errore di GDScript in un test è un FAIL anche se il test ha
- 			# stampato PASS ed è uscito 0: l'errore runtime aborta il resto della
- 			# funzione, quindi le asserzioni successive non girano e il verdetto
-@@ -134,19 +148,52 @@
- 	names.sort()
- 	return names
- 
--## Un test, un processo. `output` accumulates le righe di stdout (e stderr,
--## perché un SCRIPT ERROR deve finire nel motivo di un FAIL).
--func _run(path: String, output: Array) -> int:
-+## Un test, un processo, con una scadenza. `output` accumula le righe di stdout
-+## (e stderr, perché un SCRIPT ERROR deve finire nel motivo di un FAIL).
-+##
-+## Restituisce `[codice_uscita, scaduto]`. `scaduto` è vero solo se il figlio ha
-+## superato `TEST_TIMEOUT_MS` ed è stato ucciso: in quel caso il codice di uscita
-+## non significa niente e il ciclo principale deve usare il timeout come motivo.
-+func _run(path: String, output: Array) -> Array:
- 	var exe := OS.get_executable_path()
- 	var args := PackedStringArray([
- 		"--headless",
- 		"--path", ProjectSettings.globalize_path("res://"),
- 		"--script", path,
- 	])
- 	# Doppio vincolo anti-ricorsione, indipendenti: il test di fumo lancia il
- 	# gate che lo rilancia, e i due canali non possono fallire insieme.
- 	if _gate_child:
- 		args.append_array(["--", "--gate-child"])
--	return OS.execute(exe, args, output, true, false)
-+
-+	var handle := OS.execute_with_pipe(exe, args, false, true)
-+	if handle.is_empty():
-+		# Nessun handle: la pipe non è disponibile su questa piattaforma.
-+		# Non si torna a `OS.execute` perché significherebbe rinunciare al
-+		# timeout, che è il punto di questa funzione: si esegue e si dichiara.
-+		output.append("gate: execute_with_pipe non ha restituito un handle")
-+		return [OS.execute(exe, args, output, true, false), false]
-+
-+	var pid: int = handle[0]
-+	var pipe: FileAccess = handle[1]
-+	var text := ""
-+	var deadline := Time.get_ticks_msec() + TEST_TIMEOUT_MS
-+	var timed_out := false
-+	var alive := true
-+
-+	while alive:
-+		# Si legge solo cio' che c'è: `get_buffer` su una pipe non bloccante
-+		# con 0 byte disponibili resterebbe in attesa, che è proprio la
-+		# scadenza che si sta cercando di evitare.
-+		if pipe != null:
-+			var avail := pipe.get_available_bytes()
-+			if avail > 0:
-+				text += pipe.get_buffer(avail).get_string_from_utf8()
-+		alive = OS.is_process_running(pid)
-+		if alive and Time.get_ticks_msec() > deadline:
-+			timed_out = true
-+			OS.kill(pid)
-+			alive = false
-+		elif alive:
-+			OS.delay_msec(POLL_MS)
-+
-+	# Ultimo giro: il processo è uscito, ma la pipe può avere ancora roba
-+	# in transito. Senza questo l'ultima riga del test — quella che decide
-+	# PASS o FAIL — può perdersi proprio nel caso limite.
-+	if pipe != null:
-+		while true:
-+			var avail := pipe.get_available_bytes()
-+			if avail <= 0:
-+				break
-+			text += pipe.get_buffer(avail).get_string_from_utf8()
-+		pipe.close()
-+
-+	if text != "":
-+		output.append(text)
-+	return [OS.get_process_exit_code(pid), timed_out]
-```
+## Cosa fa il codice applicato
 
-## Cosa va verificato dopo averlo applicato
+`tools/gate.gd`, funzione `_run()` (`return OS.execute(...)` non c'è più):
 
-Non basta che il gate resti verde: **una porta che non si sa far fallire non e' una
-porta**, e questa ne introduce un path nuovo. Quindi:
+- lancia il test con `OS.execute_with_pipe(exe, args, false)` — **non bloccante**;
+- dal `Dictionary` prende `pid`, `stdio` (stdout) e `stderr`, e **legge entrambe**, ogni
+  `POLL_MS = 5 ms`, mentre `OS.is_process_running(pid)` dice se il figlio è vivo;
+- oltre `TEST_TIMEOUT_MS = 120000` (120 s): `OS.kill(pid)` e il test diventa
+  `FAIL <nome>: timeout: il test non e' terminato entro 120.0 s, processo ucciso`;
+- il verdetto resta il **codice di uscita** del figlio, il motivo resta la sua **stdout +
+  stderr**;
+- i byte delle due pipe si accumulano e si decodificano **una volta sola** alla fine:
+  decodificare pezzo per pezzo spezzerebbe a metà un carattere multibyte sull'ultima riga,
+  che è quella che decide PASS o FAIL;
+- se `execute_with_pipe` non è disponibile (handle vuoto), si esegue con `OS.execute` e si
+  **dichiara** di aver rinunciato al timeout — non si finge.
 
-1. **Il gate normale deve restare identico**: stesso `GATE: N/N`, stesso verdetto per
-   ogni test, stessi motivi di FAIL. `execute_with_pipe` cambia il modo di leggere
-   l'output, e i motivi di FAIL passano da `output` come **array di elementi** a **un
-   solo blocco di testo**: `_lines()` gia' appiattisce su `\n`, quindi la forma e'
-   compatibile, ma va **controllata con un test che fallisce davvero**, non con uno
-   che passa.
-2. **Il timeout deve poter scattare**: un test che si blocca deve diventare
-   `FAIL <nome>: timeout: ...`, non un gate fermo. Il modo piu' onesto di provarlo e'
-   un test finto che dorme, eseguito una volta a mano con `--only`, **non** lasciato
-   nel repo: un test che dorme apposta e' un debito che qualcuno prima o poi dimentica
-   di togliere.
-3. **`OS.kill` va provato davvero**: se il figlio sopravvive, il gate dichiara un
-   timeout che non c'e'. Il controllo e' `OS.is_process_running(pid)` dopo il `kill`.
+## Cosa è stato verificato, e con che numeri
 
-## La riga che serve all'utente
+I tre controlli che il piano esigeva, tutti eseguiti il 2026-10-11:
 
-Nel blocco `edit` di **`terminal-gun.md`**, accanto agli altri allow di scrittura del
-vertice (quelli per `src/core/contracts.gd`, `tools/env.sh`, `tools/check_perms.py`):
+1. **Il gate normale è identico.** `GATE: 8/8`, exit `0`: gli stessi otto test, gli stessi
+   verdetti, gli stessi motivi di FAIL di prima della modifica.
+2. **Il timeout scatta.** Un test finto che si blocca (`tests/test_zz_probe_timeout.gd`,
+   scritto, eseguito una volta con `--only`, e **rimosso**: non è nel repo) è diventato
+   `FAIL test_zz_probe_timeout: timeout: il test non e' terminato entro 120.0 s, processo
+   ucciso`. Durata misurata: **120 s esatti**. `GATE: 0/1`, exit 1.
+3. **`OS.kill` uccide davvero.** Subito dopo il timeout, `tasklist` non mostra **nessun**
+   processo `godot` rimasto: il figlio è morto, non abbandonato. Senza questa prova il gate
+   avrebbe potuto dichiarare un timeout che non c'era.
+
+E una quarta prova, che è la correzione al diff originale — **la stderr arriva al gate**: un
+test finto che stampa `PASS`, esce `0` e **prima** emette uno `SCRIPT ERROR` su stderr
+(`tests/test_zz_probe_stderr.gd`, anche questo rimosso) è stato riportato come
+`FAIL test_zz_probe_stderr: SCRIPT ERROR durante il test: ...`, con
+`anche: il test diceva PASS ma non puo' aver girato tutto`. La pipe `"stderr"` è letta.
+
+## La mezza riga che manca, ed è dell'utente
+
+La modifica al codice è di §3.3 (il timeout del gate è del vertice). Perché il vertice possa
+**anche** dichiarare quel file nel proprio scope, la allowlist deve contenerlo: **finché non
+lo contiene, `perm_scope` è rosso** (`PERM: 14/15`) e lo **deve** essere — è il piano §3.3 che
+assegna il file al vertice, non la allowlist. Quel rosso è la porta che dice la verità su un
+drift che c'era già.
+
+Nel blocco `edit` di **`terminal-gun.md`**, accanto agli altri allow di scrittura del vertice:
 
 ```yaml
   - action: edit
     resource: "tools/gate.gd"
 ```
 
-Poi **gli stessi due passi del 2026-10-06**, perche' `perm_mirror` confronta byte e
-non testo normalizzato:
+Poi **gli stessi due passi del 2026-10-06**, perché `perm_mirror` confronta byte e non testo
+normalizzato:
 
 ```sh
-# nel repo (mirror, fonte di verità)
-# poi in ~/.config/opencode/agents/ (installazione)
+# nel repo (.opencode/agents/terminal-gun.md, mirror: fonte di verità)
+# poi in ~/.config/opencode/agents/terminal-gun.md (installazione)
 # poi: riavviare opencode, i permessi si caricano all'avvio
 ```
 
-E **insieme** la stessa riga in `SCOPE` dentro `tools/check_perms.py`, che e' scope
-del vertice: senza quella, `perm_scope` confronta l'allow nuovo contro uno `SCOPE` che
-non lo contiene e va rosso al primo check. Il vertice puo' applicare quella meta' da
-solo, appena la prima meta' e' a terra.
+`SCOPE` in `tools/check_perms.py` **è già aggiornato** (con la sovrapposizione dichiarata in
+`DECLARED_OVERLAP`, perché il file resta anche di `-scheletro`): appena la riga qui sopra è a
+terra, `PERM: 15/15`. Fino a quel momento il rosso è **corretto**, non un difetto da
+nascondere.
 
-**Verifica finale, due numeri separati e non uno:**
+## Un debito trovato per strada, e non è questo
 
-```sh
-godot --headless --path . --script tools/gate.gd   # GATE: N/N
-python tools/check_perms.py                          # PERM: 15/15
-```
+Applicando la modifica è emerso che **`test_gameloop` è raramente instabile**: l'asserzione
+`not horde.grid_overflowed()` dipende dal ripopolamento casuale dell'orda, e ogni tanto
+fallisce da sola. Misura: **1 fallimento in 175 esecuzioni** (52 dirette, 60 `--only` col gate
+nuovo, 60 col gate vecchio — questi 120 a 0), quindi **non è un effetto del timeout**. È in
+§8 del piano, tra i debiti dichiarati.

@@ -12,10 +12,15 @@ extends SceneTree
 ## il gate né falsare i test successivi. Il verdetto di un test è il suo
 ## codice di uscita; il motivo di un FAIL è la sua stdout.
 ##
-## NOTA: `OS.execute` è bloccante e senza timeout. Un test che si blocca
-## blocca il gate: è una scelta consapevole, perché il gate deve poter
-## stampare il perché di un fallimento e `OS.execute` è l'unica API che
-## cattura la stdout. Se un test si blocca, il rimedio è nel test.
+## TIMEOUT PER TEST (criterio n. 6 di m2, debito di m1 chiuso). Un test che si
+## blocca non blocca più il gate: il figlio viene sorvegliato e, superata la
+## soglia, ucciso con `OS.kill` e riportato come FAIL dichiarato.
+##
+## Perché `OS.execute_with_pipe` e non `OS.execute`: `OS.execute` cattura la
+## stdout ma è BLOCCANTE e senza timeout, quindi non può fare le due cose.
+## `execute_with_pipe` in modo non bloccante restituisce sia il pid sia la pipe:
+## si legge a pezzi mentre si sorveglia `OS.is_process_running`. Il verdetto
+## resta il codice di uscita del figlio, il motivo resta la sua stdout.
 ##
 ## SKIP non è un fallimento: un test previsto e non ancora scritto non deve
 ## far fallire l'onda che sta costruendo le altre foglie. Il vertice legge
@@ -27,6 +32,13 @@ extends SceneTree
 
 const TESTS_DIR := "res://tests"
 const PREFIX := "test_"
+
+## Scadenza per un singolo test. Generosa abbastanza da non tagliare un test
+## legittimamente lento su una macchina carica, e abbastanza stretta da non
+## congelare un gate per sempre. I test di oggi durano da 0.16 s a pochi secondi:
+## il margine e' di un ordine di grandezza, non di un soffio.
+const TEST_TIMEOUT_MS := 120000
+const POLL_MS := 5
 
 ## I test che il piano (docs/piramide/piano.md §6) prevede. Un file scritto da
 ## una foglia e non qui dentro viene comunque eseguito: questa lista serve solo
@@ -74,13 +86,19 @@ func _initialize() -> void:
 			continue
 
 		var output: Array = []
-		var code := _run(path, output)
+		var result := _run(path, output)
+		var code: int = result[0]
+		var timed_out: bool = result[1]
 		var lines := _lines(output)
 		var verdict := _verdict(lines)
 		var errors := _engine_errors(lines)
 		var reason := ""
 
-		if not errors.is_empty():
+		if timed_out:
+			# Un test che si blocca è un FAIL dichiarato, non un gate congelato:
+			# il figlio è stato ucciso e il motivo è il timeout, non il codice.
+			reason = "timeout: il test non e' terminato entro %.1f s, processo ucciso" % (TEST_TIMEOUT_MS / 1000.0)
+		elif not errors.is_empty():
 			# Un errore di GDScript in un test è un FAIL anche se il test ha
 			# stampato PASS ed è uscito 0: l'errore runtime aborta il resto della
 			# funzione, quindi le asserzioni successive non girano e il verdetto
@@ -133,9 +151,13 @@ func _plan() -> Array[String]:
 	names.sort()
 	return names
 
-## Un test, un processo. `output` accumulates le righe di stdout (e stderr,
-## perché un SCRIPT ERROR deve finire nel motivo di un FAIL).
-func _run(path: String, output: Array) -> int:
+## Un test, un processo, con una scadenza. `output` accumula la stdout e la
+## stderr del figlio (un SCRIPT ERROR su stderr deve finire nel motivo di un FAIL).
+##
+## Restituisce `[codice_uscita, scaduto]`. `scaduto` è vero solo se il figlio ha
+## superato `TEST_TIMEOUT_MS` ed è stato ucciso: in quel caso il codice di uscita
+## non significa niente e il ciclo principale deve usare il timeout come motivo.
+func _run(path: String, output: Array) -> Array:
 	var exe := OS.get_executable_path()
 	var args := PackedStringArray([
 		"--headless",
@@ -146,11 +168,73 @@ func _run(path: String, output: Array) -> int:
 	# gate che lo rilancia, e i due canali non possono fallire insieme.
 	if _gate_child:
 		args.append_array(["--", "--gate-child"])
-	return OS.execute(exe, args, output, true, false)
+
+	# Godot 4.7: `execute_with_pipe(path, args, blocking)` NON ha un parametro
+	# `read_stderr` e restituisce un Dictionary, non un Array:
+	#     { "pid": int, "stdio": FileAccess (stdin+stdout), "stderr": FileAccess }
+	# stdout e stderr sono quindi DUE pipe separate: vanno lette ENTRAMBE,
+	# altrimenti `_engine_errors` smette di vedere gli SCRIPT ERROR e il gate
+	# perde il controllo piu' importante che ha. (Il diff in
+	# docs/piramide/gate_timeout.md le assumeva fuse: era la sua seconda lacuna.)
+	var handle := OS.execute_with_pipe(exe, args, false)
+	if handle.is_empty():
+		# Nessun handle: la pipe non è disponibile su questa piattaforma.
+		# Non si torna a `OS.execute` perché significherebbe rinunciare al
+		# timeout, che è il punto di questa funzione: si esegue e si dichiara.
+		output.append("gate: execute_with_pipe non ha restituito un handle")
+		return [OS.execute(exe, args, output, true, false), false]
+
+	var pid: int = handle["pid"]
+	var out_pipe: FileAccess = handle["stdio"]
+	var err_pipe: FileAccess = handle["stderr"]
+	var raw := PackedByteArray()
+	var deadline := Time.get_ticks_msec() + TEST_TIMEOUT_MS
+	var timed_out := false
+	var alive := true
+
+	while alive:
+		_drain_into(out_pipe, raw)
+		_drain_into(err_pipe, raw)
+		alive = OS.is_process_running(pid)
+		if alive and Time.get_ticks_msec() > deadline:
+			timed_out = true
+			OS.kill(pid)
+			alive = false
+		elif alive:
+			OS.delay_msec(POLL_MS)
+
+	# Ultimo giro: il processo è uscito, ma le pipe possono avere ancora roba
+	# in transito. Senza questo l'ultima riga del test — quella che decide
+	# PASS o FAIL — può perdersi proprio nel caso limite.
+	_drain_into(out_pipe, raw)
+	_drain_into(err_pipe, raw)
+	if out_pipe != null:
+		out_pipe.close()
+	if err_pipe != null:
+		err_pipe.close()
+
+	if raw.size() > 0:
+		output.append(raw.get_string_from_utf8())
+	return [OS.get_process_exit_code(pid), timed_out]
+
+## Legge tutto cio' che una pipe NON BLOCCANTE ha già pronto e lo accumula,
+## senza mai attendere. In `blocking=false` una lettura torna subito, quindi un
+## giro a vuoto è un giro a vuoto e non una scadenza mancata. I byte si
+## accumulano e si decodificano una volta sola, alla fine: decodificare pezzo
+## per pezzo spezzerebbe a metà un carattere multibyte sull'ultima riga, che è
+## esattamente quella che decide PASS o FAIL.
+func _drain_into(pipe: FileAccess, raw: PackedByteArray) -> void:
+	if pipe == null:
+		return
+	while true:
+		var chunk := pipe.get_buffer(65536)
+		if chunk.is_empty():
+			break
+		raw.append_array(chunk)
 
 ## La stdout del test, divisa in righe.
 ##
-## `OS.execute` NON garantisce un elemento per riga: su Windows arriva un unico
+## `execute_with_pipe` NON garantisce un elemento per riga: su Windows arriva un unico
 ## elemento con tutto il testo, con dentro i ritorni a capo. Se si scandisce
 ## `output` direttamente, una riga `FAIL ...` dentro quel blocco non è mai
 ## riconosciuta e il gate perde il motivo di ogni fallimento. Qui si appiattisce

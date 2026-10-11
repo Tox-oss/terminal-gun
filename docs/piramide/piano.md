@@ -389,6 +389,31 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | **m2-w2** | vertice | commit, piano aggiornato, verdetto; `.godot/` ricostruita dal vertice (13 asset) | `GATE: 8/8`, `PERM: 15/15`, `--quit-after 300` rieseguite dal vertice | **verde** |
 | **m2-w3** | orda | `test_gameloop` reso riproducibile: seme fisso **177** sull'orda isolata, scelto da uno sweep 1..240 dentro la banda tipica (picco 28 su 32) perche' l'asserzione conservi i denti; i denti provati due volte e rimossi (seme 148 e `BUCKET_SLOTS` 12, entrambi `FAIL`); nessun altro file toccato | `GATE: 8/8` exit 0, **120 esecuzioni consecutive** di `test_gameloop` (60 foglia + 60 vertice) tutte PASS | **verde** |
 
+### Riapertura del 2026-10-12: nessuna wave pendente, un atto di governance fuori da ogni commit
+
+**Non c'era una wave da riprendere, e il vertice non ne ha rilanciata nessuna.** w0–w3 e
+m2-w0–m2-w3 erano verdi da prima; il piano non definisce m3, quindi aprire una milestone nuova
+sarebbe stato inventare scope, non eseguire un'onda. Le porte sono state **rieseguite**, non
+rilette: `GATE: 8/8`, `--quit-after 300` pulito, `PERM: 15/15`, `git lfs ls-files` 13 file.
+
+**Il pendente era un altro, e non era un codice**: `.opencode/agents/terminal-gun.md` era
+**modificato e non committato**. La riga `edit tools/gate.gd` c'era già, scritta dall'utente
+(§11.5), e `perm_mirror` era verde: le due copie — repo e installazione — erano allineate. Mancava
+solo la **storia**, e per §11.6 il mirror nel repo è la fonte di verità: una riga di governance non
+committata è una riga che al prossimo clone sparisce. Commit del vertice, come la regola 7.2.
+
+| fatto | misura |
+|---|---|
+| `perm_scope` | **verde**: `PERM: 15/15`, il `14/15` dichiarato aperto è chiuso |
+| allowlist **applicate** (§11.10) | `edit .gitignore` → `Permission denied: edit` |
+| allowlist nuova **viva** | `edit tools/gate.gd` → nessun rifiuto, arriva alla ricerca |
+| working directory | root del progetto, non `C:\Windows\System32` (la trappola di §8) |
+
+Il verde di `PERM: 15/15` da solo non bastava a dichiarare il debito chiuso: senza la seconda e
+la terza riga sarebbe stato lo stesso numero di una sessione **non governata**, che è
+compatibile con `15/15`. La differenza tra le due è un `Permission denied`, e il piano la
+dichiarava non misurata da nessuna parte.
+
 ### m2-w3 (debito): `test_gameloop` riproducibile — specifica
 
 **CHIUSA il 2026-10-11, verificata dal vertice, non riletta dalla tabella.** `-orda` ha
@@ -641,7 +666,7 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - ~~**Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**~~ **CHIOSO in m2-w0**: l'esperimento di §1.2 l'ha **smentito**. Al valore di codice la saturazione non c'è (11.4 m/s netti sotto un tetto di 18.0): la pendenza esiste e `36 -> 72` è un pianoro. Dettaglio e numeri in §1.2.
 - ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
-- ~~**Il gate non ha timeout, ed era l'unico criterio di m2 non raggiunto**~~ **CHIUSO il 2026-10-11.** `tools/gate.gd` non chiama più `OS.execute` bloccante: `_run()` usa `OS.execute_with_pipe(..., false)`, sorveglia pid e pipe leggendo a pezzi, e oltre `TEST_TIMEOUT_MS` (120 s) uccide il figlio e lo dichiara FAIL. Provato con un test che si blocca, **non lasciato nel repo**. **Il codice non era il problema: il rimedio non compilava** — tre righe sbagliate, dichiarate in §11.11. E **resta mezza riga di governance**: `perm_scope` va rosso finché l'utente non aggiunge `tools/gate.gd` alla allowlist del vertice.
+- ~~**Il gate non ha timeout, ed era l'unico criterio di m2 non raggiunto**~~ **CHIUSO il 2026-10-11.** `tools/gate.gd` non chiama più `OS.execute` bloccante: `_run()` usa `OS.execute_with_pipe(..., false)`, sorveglia pid e pipe leggendo a pezzi, e oltre `TEST_TIMEOUT_MS` (120 s) uccide il figlio e lo dichiara FAIL. Provato con un test che si blocca, **non lasciato nel repo**. **Il codice non era il problema: il rimedio non compilava** — tre righe sbagliate, dichiarate in §11.11. **La mezza riga di governance è CHIUSA il 2026-10-12**: l'utente ha aggiunto `edit tools/gate.gd` alla allowlist del vertice (atto suo, §11.5) e `PERM: 15/15` è verde reale — policy **e** runtime, misurati entrambi: vedi §11.10 e la riapertura in §8.
 - ~~**`test_gameloop` è raramente instabile (~0,6% dei lanci), e nessuno lo sapeva.**~~ **CHIUSO in m2-w3 il 2026-10-11.** Il caso della riga 241 ha ora un **seme fisso** (177): 120 esecuzioni consecutive tutte PASS (60 foglia + 60 vertice) e i denti dell'asserzione provati (seme 148 o `BUCKET_SLOTS` 12 → `FAIL`) e rimossi. Dettaglio nella specifica di m2-w3 qui sopra. L'asserzione `not horde.grid_overflowed()` (in `tests/test_gameloop.gd`, riga 241) dipende dal **ripopolamento casuale** dell'orda: quando i nemici si addensano abbastanza da riempire un secchiello, l'onda che doveva passare fallisce e il gate scende a `7/8` **senza alcuna regressione nel codice**. Misurato il 2026-10-11: **1 fallimento in 175 esecuzioni** — 52 lanci diretti + 60 `--only` col gate nuovo + 60 col vecchio, questi ultimi 120 a **0** — quindi **non è causato dal timeout** e non è riproducibile a comando. Il test resta deterministico nel passo (`const DT`): l'unica variabile è il RNG globale, non seminato. **Da chiudere prima di fidarsi di un `7/8`**: un seme fisso nel ripopolamento lo renderebbe riproducibile, oppure l'asserzione va spostata su un caso costruito invece che sul caso.
 - **`check_perms.py` non verifica che opencode applichi le allowlist** (§11.10). I quindici check risolvono le regole **come testi** e ne controllano la coerenza col piano: nessuno chiede se il runtime le usi. `PERM: 15/15` è vero e **insufficiente**, perché è compatibile con due mondi diversi — «la politica è scritta bene» e «la politica è scritta bene e ignorata» — e il 2026-10-11 il secondo si è presentato. Il rimedio è un `perm_runtime` che **provochi** un'azione negata e **pretenda un rifiuto**, invece di leggere una allowlist.
 - ~~**`.pyc`: il "dopo" è chiuso, il file tracciato no**~~ **CHIUSO il 2026-10-11.** `-scheletro` aveva messo `__pycache__/` e `*.pyc` in `.gitignore` (righe 37-44), ma con il solo `gitignore` il file **già tracciato resta tracciato**: `git rm -r --cached tools/__pycache__` lo ha tolto dall'indice, e il `.pyc` resta su disco, ora ignorato. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne nascono altri**: il danno era uno e solo, ed è chiuso.
@@ -895,6 +920,24 @@ rimedio è un check che **provochi** un'azione negata e **pretenda un rifiuto** 
 un path fuori scope, come le prime due righe della tabella qui sopra — invece di leggere una
 allowlist. Finché non c'è, `perm_escape` resta l'unica prova di **semantica** e non esiste
 nessuna prova di **applicazione**.
+
+**E un fatto architetturale, dichiarato perché qualcuno ci perda mezz'ora:** un `perm_runtime`
+**non può vivere in `tools/check_perms.py`**, che è uno script Python e non un agente — non ha
+`edit`, non ha una allowlist, non può provocare un rifiuto che lo riguardi. Può al massimo
+leggere il **verbale** di una prova fatta altrove, e un verbale è una dichiarazione, non una
+misura. Quindi il rimedio è un **rito**, non un check: due `edit` a sentinella fissa all'avvio di
+ogni sessione — uno **fuori** scope che deve essere **rifiutato**, uno **dentro** scope che deve
+**passare** — e i due esiti riportati qui. I due risultati devono essere complementari: se
+entrambi passano la sessione non è governata (caso §11.10 sopra), se entrambi sono rifiutati
+l'allowlist è troppo stretta, e un numero solo non distingue i due.
+
+**Eseguiti il 2026-10-12, e sono verdi.** `edit .gitignore` → `Permission denied: edit`
+(`.gitignore` **non** è nello scope del vertice: è di `-scheletro`, §3). `edit tools/gate.gd`
+(sentinella inesistente, per non scrivere nulla) → nessun rifiuto, la richiesta arriva alla
+ricerca della stringa. Quindi **le allowlist sono applicate in questa sessione**, che è
+esattamente il caso che la tabella qui sopra dichiara rotto. Il debito resta **aperto come
+check** e **chiuso come fatto**: la prova esiste, è manuale, e va ripetuta, perché una sessione
+non governata non ha sintomi.
 
 **E un atto che non ho compiuto, che vale più della scoperta.** La via più corta era usare i
 diritti larghi di quella sessione per scrivere la riga di `tools/gate.gd` **e** per

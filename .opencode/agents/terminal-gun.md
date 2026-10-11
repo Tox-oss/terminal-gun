@@ -380,6 +380,9 @@ permissions:
   - action: edit
     resource: ".gitattributes"
     effect: allow
+  - action: edit
+    resource: "tools/gate.gd"
+    effect: allow
   # Un agente non scrive i propri permessi: `.opencode/agents/**` resta fuori
   # dallo scope per costruzione (edit: * deny al blocco 1). Aggiornare la
   # piramide e' un atto dell'utente, non del vertice.

@@ -63,6 +63,49 @@ const NODO_HORDE := "Horde"
 ## Tetto del criterio n. 3 della milestone 1, con 200 nemici vivi.
 const TETTO_NODI := 120
 
+## Seme della disposizione dell'orda **isolata** di questo test.
+##
+## ## Perche' un seme e non il dado
+##
+## Senza questo numero `horde.seed` resta 0, e in `horde.gd::_build()` questo
+## vuol dire `_rng.randomize()`: la disposizione dei 200 nemici e' diversa a
+## ogni lancio. Quando il ripopolamento addensa piu' di `BUCKET_SLOTS` (32,
+## `src/sim/spatial_grid.gd`) nemici in una cella, `grid_overflowed()` va a
+## vero e l'asserzione «nessun secchiello traboccato» piu' sotto cade: il
+## fallimento era misurato **1 volta in 175 esecuzioni**, senza alcuna
+## regressione del codice. Il seme non rende l'orda piu' sicura: rende il caso
+## **riproducibile**, e con esso la riga e' verde o rossa per una ragione che si
+## puo' dire ad alta voce invece che per un lancio sfortunato.
+##
+## Va impostato **prima** di `add_child`: e' `_ready()` -> `_build()` a seminare
+## `_rng`, quindi un seme messo dopo entrerebbe troppo tardi.
+##
+## ## Perche' 177 e non un altro
+##
+## Misurati i semi da 1 a 240 sulla sequenza esatta di questa parte 1 (le due
+## onde svuotate di `_onde`, poi i 600 passi di `_rientro_in_gioco` con
+## un'uccisione ogni due), guardando `worst_bucket()`, il **picco** di nemici
+## in una sola cella su tutto quel percorso:
+##
+##     min 24, mediana 29, max 32, e un solo seme trabocca: il 148 (picco 33).
+##
+## Il 177 ha picco **28**. E' il numero giusto per tre ragioni, e tutte e tre
+## si leggono nei numeri sopra:
+##
+## 1. **Non trabocca**, ed e' verificato, non sperato: 28 < 32 con 4 slot di
+##    margine.
+## 2. **E' rappresentativo**, non sorteggiato a piacere: 28 sta dentro la
+##    banda tipica (mediana 29) e i semi vicini danno 28, 29 e 28: la sua
+##    densita' e' quella normale della partita, non un caso limite.
+## 3. **L'asserzione conserva i denti**: 4 slot di margine vuol dire che se
+##    l'orda si addensa davvero la riga va rossa. Non si e' scelto il seme col
+##    picco minimo (24, il 158): quello renderebbe la guardia immune a
+##    qualunque densita' e sarebbe un'asserzione che non misura piu' niente.
+##
+## Il caso traboccante e' comunque a portata di mano: il seme **148** e' quello
+## che fa fallire la riga, e serve a provare che la riga sa ancora fallire.
+const SEME := 177
+
 var _horde: HORDE = null
 
 func _initialize() -> void:
@@ -73,6 +116,9 @@ func _initialize() -> void:
 	# frame, in `_process`.
 	_horde = HORDE.new()
 	_horde.name = "OrdaDiTest"
+	# Il seme va messo **qui**, prima di `add_child`: e' `_ready()` -> `_build()`
+	# a seminare `_rng`, e un seme impostato dopo entrerebbe troppo tardi.
+	_horde.seed = SEME
 	# Il passo di simulazione lo guida il test, a mano. Senza questo, un tick di
 	# fisica fra `_initialize()` e `_process()` sposterebbe i nemici una volta
 	# senza che nessuno l'abbia chiesto, e il test misurerebbe un mondo diverso

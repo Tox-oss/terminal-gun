@@ -387,6 +387,58 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | **m2-w0** | vertice, solo shell | esperimento `KNOCKBACK` vs `SPEED_MAX` **misurato e scritto** (§1.2): l'ipotesi di m1 era **sbagliata**, nessuna saturazione al valore di codice, soglia vera ~24.6 m/s. `-arena` **provato con un lancio reale**: il provider lo blocca, il catalogo mentiva | `GATE: 4/4`, `PERM: 15/15` rieseguite dal vertice | **verde con due debiti aperti** |
 | **m2-w1** | orda, gameplay, ui | **chiusa al secondo giro**: `-orda` `test_gameloop` + `BUCKET_SLOTS` 12→32; `-gameplay` `test_progression`, `test_upgrades`, `Game.progression` cablato; `-ui` era gia' finita | `GATE: 8/8` exit 0, `--quit-after 300` pulito, knockback runner **0.3114** | **verde** |
 | **m2-w2** | vertice | commit, piano aggiornato, verdetto; `.godot/` ricostruita dal vertice (13 asset) | `GATE: 8/8`, `PERM: 15/15`, `--quit-after 300` rieseguite dal vertice | **verde** |
+| **m2-w3** | orda | `test_gameloop` reso riproducibile: seme fisso **177** sull'orda isolata, scelto da uno sweep 1..240 dentro la banda tipica (picco 28 su 32) perche' l'asserzione conservi i denti; i denti provati due volte e rimossi (seme 148 e `BUCKET_SLOTS` 12, entrambi `FAIL`); nessun altro file toccato | `GATE: 8/8` exit 0, **120 esecuzioni consecutive** di `test_gameloop` (60 foglia + 60 vertice) tutte PASS | **verde** |
+
+### m2-w3 (debito): `test_gameloop` riproducibile — specifica
+
+**CHIUSA il 2026-10-11, verificata dal vertice, non riletta dalla tabella.** `-orda` ha
+consegnato un seme fisso e ha **dimostrato** il seme, non sorteggiato: sweep dei semi 1..240
+sulla sequenza esatta della parte 1 del test, picco di cella min 24 / mediana 29 / max 32,
+un solo seme trabocca (il **148**, picco 33 — tasso 0,4%, coerente col ~0,6% misurato). Ha
+scelto il **177** (picco 28): non trabocca (4 slot di margine su 32), e' nella banda tipica
+(mediana 29, vicini 28/29/28), e conserva i **denti** dell'asserzione — non il minimo 24 (seme
+158), che renderebbe la guardia immune a qualunque densita'. I denti **provati due volte e poi
+rimossi**: seme 148 → `FAIL test_gameloop: nessun secchiello traboccato`, exit 1; e
+`BUCKET_SLOTS` 32→**12** con seme 177 → stesso FAIL, exit 1. Nessun probe su disco, `git status`
+pulito su `src/sim/**`. **Porte rieseguite dal vertice**: `GATE: 8/8` exit 0; **120 esecuzioni
+consecutive** di `test_gameloop` tutte PASS — 60 della foglia, **60 del vertice** (non la stessa
+misura letta due volte). Nota dichiarata da -orda: l'orda della **scena vera** in `_scena_vera`
+resta `seed = 0`, ma nessuna asserzione guarda la sua `grid_overflowed`; e' li' che il
+traboccamento vero puo' ancora accadere e va guardato in m3 (ed e' quello che il criterio n. 3
+di m1 misura gia' sulla scena vera).
+
+**Perche' questa onda esiste.** Misurato il 2026-10-11, non dichiarato: `test_gameloop` e'
+caduto **1 volta in 175 esecuzioni**. L'asserzione che cade e' `tests/test_gameloop.gd:241`
+(`not horde.grid_overflowed()`), e la causa **non** e' un difetto del codice. L'orda
+**isolata** del test nasce con `seed = 0` (`src/sim/horde.gd:92`), cioe' `_rng.randomize()`:
+la disposizione dei nemici cambia a ogni lancio. Quando il ripopolamento ne addensa
+abbastanza da superare `BUCKET_SLOTS` (**32**, `src/sim/spatial_grid.gd:46`) nella stessa
+cella, `overflowed` va a vero e il gate scende a `7/8` **senza alcuna regressione**. Non e'
+riproducibile a comando, ed e' esattamente cio' che §11.11 vieta di lasciare in giro: una
+porta la cui rossa non distingue «difetto» da «dado».
+
+**Un file, un proprietario.** Scope: `tests/test_gameloop.gd` (-orda, §3.3). Se e solo se il
+seme non bastasse, anche `src/sim/horde.gd` o `src/sim/spatial_grid.gd`, con la motivazione
+scritta; nessun altro file.
+
+**Cosa consegna `-orda`:**
+
+1. **Riproducibilita'.** Il caso che la riga 241 misura non dipende piu' dal dado: un **seme
+   fisso** per l'orda isolata del test (o, se motivato, un caso costruito). Il numero sta nel
+   file con un commento che dice **perche'** quello.
+2. **I denti dell'asserzione.** Una prova **temporanea, rimossa prima di finire** (come il
+   probe del timeout di §11.11): forzando il traboccamento — popolazione piu' densa, o
+   `BUCKET_SLOTS` abbassato di proposito — la riga 241 deve dire **FAIL**. Un'asserzione che
+   non sa fallire non e' un'asserzione.
+3. **La porta verde, e non per fortuna.** `GATE: 8/8`, exit 0, e **60 esecuzioni consecutive**
+   di `test_gameloop` (dirette o con `tools/gate.gd --only test_gameloop`) tutte PASS: e' il
+   numero che rende «riproducibile» una misura invece di un'impressione.
+4. **Report a tre righe**: cosa fatto — file toccati — cosa resta.
+
+**Cosa questa onda non e'.** Non e' un permesso da chiedere (il file e' gia' nello scope di
+-orda) e non e' una regressione da riparare: e' un debito di **misura**. Se al punto 2 la
+riga 241 restasse verde anche col traboccamento forzato, la scoperta non sarebbe «aggiustare
+il test»: sarebbe che la riga 241 **non ha mai misurato niente**.
 
 ### I sei criteri della milestone 2, uno per uno
 
@@ -590,7 +642,7 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
 - ~~**Il gate non ha timeout, ed era l'unico criterio di m2 non raggiunto**~~ **CHIUSO il 2026-10-11.** `tools/gate.gd` non chiama più `OS.execute` bloccante: `_run()` usa `OS.execute_with_pipe(..., false)`, sorveglia pid e pipe leggendo a pezzi, e oltre `TEST_TIMEOUT_MS` (120 s) uccide il figlio e lo dichiara FAIL. Provato con un test che si blocca, **non lasciato nel repo**. **Il codice non era il problema: il rimedio non compilava** — tre righe sbagliate, dichiarate in §11.11. E **resta mezza riga di governance**: `perm_scope` va rosso finché l'utente non aggiunge `tools/gate.gd` alla allowlist del vertice.
-- **`test_gameloop` è raramente instabile (~0,6% dei lanci), e nessuno lo sapeva.** L'asserzione `not horde.grid_overflowed()` (in `tests/test_gameloop.gd`, riga 241) dipende dal **ripopolamento casuale** dell'orda: quando i nemici si addensano abbastanza da riempire un secchiello, l'onda che doveva passare fallisce e il gate scende a `7/8` **senza alcuna regressione nel codice**. Misurato il 2026-10-11: **1 fallimento in 175 esecuzioni** — 52 lanci diretti + 60 `--only` col gate nuovo + 60 col vecchio, questi ultimi 120 a **0** — quindi **non è causato dal timeout** e non è riproducibile a comando. Il test resta deterministico nel passo (`const DT`): l'unica variabile è il RNG globale, non seminato. **Da chiudere prima di fidarsi di un `7/8`**: un seme fisso nel ripopolamento lo renderebbe riproducibile, oppure l'asserzione va spostata su un caso costruito invece che sul caso.
+- ~~**`test_gameloop` è raramente instabile (~0,6% dei lanci), e nessuno lo sapeva.**~~ **CHIUSO in m2-w3 il 2026-10-11.** Il caso della riga 241 ha ora un **seme fisso** (177): 120 esecuzioni consecutive tutte PASS (60 foglia + 60 vertice) e i denti dell'asserzione provati (seme 148 o `BUCKET_SLOTS` 12 → `FAIL`) e rimossi. Dettaglio nella specifica di m2-w3 qui sopra. L'asserzione `not horde.grid_overflowed()` (in `tests/test_gameloop.gd`, riga 241) dipende dal **ripopolamento casuale** dell'orda: quando i nemici si addensano abbastanza da riempire un secchiello, l'onda che doveva passare fallisce e il gate scende a `7/8` **senza alcuna regressione nel codice**. Misurato il 2026-10-11: **1 fallimento in 175 esecuzioni** — 52 lanci diretti + 60 `--only` col gate nuovo + 60 col vecchio, questi ultimi 120 a **0** — quindi **non è causato dal timeout** e non è riproducibile a comando. Il test resta deterministico nel passo (`const DT`): l'unica variabile è il RNG globale, non seminato. **Da chiudere prima di fidarsi di un `7/8`**: un seme fisso nel ripopolamento lo renderebbe riproducibile, oppure l'asserzione va spostata su un caso costruito invece che sul caso.
 - **`check_perms.py` non verifica che opencode applichi le allowlist** (§11.10). I quindici check risolvono le regole **come testi** e ne controllano la coerenza col piano: nessuno chiede se il runtime le usi. `PERM: 15/15` è vero e **insufficiente**, perché è compatibile con due mondi diversi — «la politica è scritta bene» e «la politica è scritta bene e ignorata» — e il 2026-10-11 il secondo si è presentato. Il rimedio è un `perm_runtime` che **provochi** un'azione negata e **pretenda un rifiuto**, invece di leggere una allowlist.
 - ~~**`.pyc`: il "dopo" è chiuso, il file tracciato no**~~ **CHIUSO il 2026-10-11.** `-scheletro` aveva messo `__pycache__/` e `*.pyc` in `.gitignore` (righe 37-44), ma con il solo `gitignore` il file **già tracciato resta tracciato**: `git rm -r --cached tools/__pycache__` lo ha tolto dall'indice, e il `.pyc` resta su disco, ora ignorato. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne nascono altri**: il danno era uno e solo, ed è chiuso.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.

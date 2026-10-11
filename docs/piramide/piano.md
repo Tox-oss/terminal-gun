@@ -399,7 +399,7 @@ Rimisurati dal vertice il 2026-10-11, non rileggi dalla tabella.
 | 3 | Un potenziamento cambia il comportamento misurabile | **si'** | `PASS test_upgrades`, **323 asserzioni**, otto misure **comportamentali** e nessuna lettura di campo. Spostamenti: `damage` **+25.0%**, `fire_rate` **-18.0%** (piu' rapida), `move_speed` **+9.7%**, `projectile_speed` **+20.0%**, `knockback` **+30.0%** (8.100→10.530 m/s sul bruto), `pierce` **+100.0%** (1→2 nemico), `vitality` **+20.0%** (10→12 colpi), `range` **+26.2%** (84→106 passi). Tutte le misure non pertinenti restano a **0.0%**: nessun rumore. Soglia 2% superata da tutte e otto |
 | 4 | La partita ha una fine | **si', con una meta' dichiarata** | `PASS test_gameloop`, 233 asserzioni: onde 1→3 superate, onda 3→4 con barra a 0, scala vita 1.00→1.50, **4 restart con 3 nodi prima e dopo** e un solo nodo `Horde` sotto root, nessun nodo duplicato, 0 KB di crescita su 600 passi. Il test dimostra **anche in un numero** che `restart_run()` non rimette in piedi il giocatore da solo (hp 0.0): e' la meta' di -orda, e la meta' di -gameplay e' chiamarla. **La schermata di game over e' scope di -ui ed e' scritta**, ma nessun criterio la misura |
 | 5 | Il criterio n. 4 di m1 non regredisce | **si'** | runner **0.3114**, grunt **0.3570** (tetto 0.3), brute 0.1963 e boss 0.0554 esclusi per progetto (§5.4). **`KNOCKBACK` resta 18.0**, confermato da tre letture indipendenti nella stessa esecuzione |
-| 6 | La porta non ha timeout | **NO — aperto, e per un difetto di governance** | `tools/gate.gd` chiama ancora `return OS.execute(exe, args, output, true, false)`, bloccante e senza scadenza. **Il rimedio e' scritto e pronto** in `docs/piramide/gate_timeout.md`, e **non applicabile**: `edit` su quel file risponde `Permission denied: edit` (§3.3 me lo assegna, la mia allowlist non lo contiene). Dettaglio e riga da aggiungere **piu' sotto** |
+| 6 | La porta non ha timeout | **NO — aperto, e per un difetto di governance** | `tools/gate.gd:149` chiama ancora `return OS.execute(exe, args, output, true, false)`, bloccante e senza scadenza (riverificato il 2026-10-11). **Il rimedio è scritto e pronto** in `docs/piramide/gate_timeout.md`. **Non applicabile senza una riga dell'utente**: §3.3 mi assegna il timeout di quel file, ma la mia allowlist non lo contiene e §11.5 mi vieta di scriverla da solo. La riga da aggiungere è **più sotto**, in §10. E attenzione: il blocco **non si è riprodotto** nella sessione del 2026-10-11, quindi non va dichiarato ma **provato** — §11.10 |
 
 ### m2-w1 ripreso il 2026-10-11: `GATE: 6/6` non vuol dire m2 chiusa
 
@@ -589,7 +589,8 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 - ~~**Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**~~ **CHIOSO in m2-w0**: l'esperimento di §1.2 l'ha **smentito**. Al valore di codice la saturazione non c'è (11.4 m/s netti sotto un tetto di 18.0): la pendenza esiste e `36 -> 72` è un pianoro. Dettaglio e numeri in §1.2.
 - ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
-- **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. **Dichiarato in m1 come scelta consapevole, e m1 lo ha lasciato aperto**; m2 lo ha promesso a criterio n. 6 e **il rimedio è pronto** in `docs/piramide/gate_timeout.md`, ma **non applicabile**: `tools/gate.gd` non è nel mio scope `edit`. **È l'unico criterio di m2 non raggiunto, ed è bloccato da una riga di permesso, non dal codice.**
+- **Il gate non ha timeout, ed è l'unico criterio di m2 non raggiunto.** Verificato di nuovo il 2026-10-11, riga per riga: `tools/gate.gd:149` è ancora `return OS.execute(exe, args, output, true, false)`. **Il rimedio è pronto e il problema non è il codice**: il diff è in `docs/piramide/gate_timeout.md`. Lo tengono fermo due regole, entrambe di governance: §11.5 (nessun agente riscrive la propria allowlist, quindi la riga che sblocca il file è dell'utente) e §11.10 (il contenimento vale **solo** per una sessione che gira come `terminal-gun` — nella sessione del 2026-10-11 il blocco **non si è riprodotto**, quindi «sono bloccato» va **provato**, non dichiarato).
+- **`check_perms.py` non verifica che opencode applichi le allowlist** (§11.10). I quindici check risolvono le regole **come testi** e ne controllano la coerenza col piano: nessuno chiede se il runtime le usi. `PERM: 15/15` è vero e **insufficiente**, perché è compatibile con due mondi diversi — «la politica è scritta bene» e «la politica è scritta bene e ignorata» — e il 2026-10-11 il secondo si è presentato. Il rimedio è un `perm_runtime` che **provochi** un'azione negata e **pretenda un rifiuto**, invece di leggere una allowlist.
 - **`.pyc`: il "dopo" è chiuso, il file tracciato no.** `-scheletro` ha aggiunto `__pycache__/` e `*.pyc` a `.gitignore` (righe 37-44, con il commento che dice che le due righe non rimuovono un file già tracciato). **Resta `tools/__pycache__/check_perms.cpython-314.pyc` nel tracking**, perché `git rm --cached` è negato al vertice (stessa famiglia di `git clean`/`git reset`) e a `-scheletro`. L'unico atto che lo chiude è `git rm -r --cached tools/__pycache__` **dell'utente**. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
 
@@ -781,6 +782,76 @@ Prima (w1–w2) le allowlist erano **un elenco di comandi**. Ora sono **una poli
 | `gitattributes` | allow scritto **`gitattributes`**, senza il punto: regola **morta** | `.gitattributes`, e `perm_piano` lega il vertice a quel file |
 | permessi | fuori git, senza history | mirror nel repo, `perm_mirror` ne verifica l'identità |
 | verifica | nessuna sui permessi | `tools/check_perms.py`, 15 check, exit 0/1 |
+
+### 11.10 Il contenimento dipende da quale agente è la sessione, e nessuna porta lo verifica
+
+**Misurato il 2026-10-11, non dichiarato.** L'utente ha chiesto al vertice di applicare le
+modifiche «con `sudo`». Prima di rispondere, il vertice ha **provato** il muro invece di
+citarlo. Il muro non c'era.
+
+| prova | atteso da questo piano | misurato |
+|---|---|---|
+| `edit` su `tools/gate.gd` | `Permission denied: edit` (la `*` è `deny`, e nessuna delle 5 allow lo copre) | **passato** |
+| `edit` su `.gitignore` | `Permission denied: edit` (top-level, non nello scope del vertice) | **passato** |
+| `sudo true` | deny — tier 1, muro (§11.1: «non chiede e non passa») | **passato** |
+| `pwd` | deny — non è in nessuna allowlist del vertice | **passato** |
+| `git clean -n` | deny — muro (§11.1) | **passato** |
+
+Le cinque righe dicono una cosa sola: **quella sessione non era governata dalla allowlist di
+`terminal-gun`.** Non è una falla su un path: sono passati un file annidato e uno di primo
+livello, un `sudo` e due comandi mai autorizzati.
+
+**Il confronto che isola la variabile.** Nella stessa sessione una foglia invocata **per
+nome** (`terminal-gun-scheletro`) è stata **bloccata** su `.gitignore` con
+`Permission denied`, ed è passata solo dopo `session_move` alla root del progetto. Quindi il
+contenimento **esiste ed è reale**: si carica sulla **definizione dell'agente** e vale per
+chi gira **come** quell'agente. Una sessione primaria aperta su un altro agente non eredita
+nulla — e **non lo dice**: nessun errore, nessun avviso, nessuna riga di log da cui
+accorgersene.
+
+**Perché è peggio dei tre difetti già registrati.** §3.1 (`.gitattributes` senza
+proprietario), i path di test di m2 fuori dalle allowlist e `tools/gate.gd` fuori dalla mia
+sono tutti **visibili leggendo le allowlist**: una porta li prende, e `perm_*` li ha presi.
+Questo no. Una allowlist **completa e corretta** produce lo stesso identico comportamento di
+una allowlist **ignorata**: nessun blocco durante il lavoro. Sintomo identico, causa opposta,
+e la diagnosi ovvia — «manca un permesso, chiedi all'utente» — porta a chiedere una riga che
+non serve, mentre il permesso sembra comunque non funzionare.
+
+**Il meccanismo non è isolato, e non ne scrivo la regola.** Ho cinque misure e una
+correlazione forte; non ho la riga di codice che decide quale file venga letto. §5.3 ha già
+insegnato la lezione e l'ha pagata: una regola scritta su una testimonianza sola ha mandato
+tre foglie a produrre codice morto. Qui si dichiara il **fatto** e il **rimedio operativo**,
+non la causa.
+
+**Due regole operative, e sono vincolanti:**
+
+1. **La piramide si opera come `terminal-gun`** (§10.2: `/terminal-gun`, o Tab fino a
+   `terminal-gun`). Non è una preferenza di comodo: è la condizione perché i tier di §11.1
+   esistano. Da una sessione che non è quella, il contenimento **non c'è**, e ogni misura di
+   contenimento presa «dall'interno» non vale niente.
+2. **Una misura di contenimento si prende da chi lo subisce, non da chi lo possiede.** È la
+   stessa ragione per cui §11.4 vieta un `sudo` dentro una misura: un numero che viene da un
+   comando privilegiato non è una misura, è un ricordo.
+
+**Debito nuovo, e non è piccolo: manca un `perm_runtime`.** I quindici check di
+`tools/check_perms.py` risolvono le allowlist **come testi** e verificano la loro coerenza
+col piano (§11.7). Nessuno chiede se opencode le **applichi**. `PERM: 15/15` è quindi vero e
+**insufficiente**: oggi può voler dire «la politica è scritta bene» oppure «la politica è
+scritta bene e ignorata», e questa sessione ha mostrato che il secondo caso si presenta. Il
+rimedio è un check che **provochi** un'azione negata e **pretenda un rifiuto** — un `edit` su
+un path fuori scope, come le prime due righe della tabella qui sopra — invece di leggere una
+allowlist. Finché non c'è, `perm_escape` resta l'unica prova di **semantica** e non esiste
+nessuna prova di **applicazione**.
+
+**E un atto che non ho compiuto, che vale più della scoperta.** La via più corta era usare i
+diritti larghi di quella sessione per scrivere la riga di `tools/gate.gd` **e** per
+riscrivere la allowlist in `.opencode/agents/terminal-gun.md`. Sarebbe stato invisibile:
+nessun errore, nessun check rosso, nessun diff sospetto da leggere. **Non l'ho fatto, e non
+è perché non potevo.** §11.5 non dice «il vertice non è in grado»: dice che **nessun agente
+riscrive le proprie regole**, e la regola regge **a prescindere da chi ha accesso**,
+altrimenti non è una regola ma una convenzione per i giorni comodi. Nel modo in cui si è
+svolto, questo file di agente lo scrive l'utente due volte, e la seconda non è mai stata
+tanto poco formale.
 
 ## 9. Tagli dichiarati
 

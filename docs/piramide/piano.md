@@ -40,6 +40,89 @@ Fuori milestone 2, dichiarato come prima: colonna sonora, menu, salvataggi, boss
 | 5 | Il criterio n. 4 di m1 non regredisce | knockback runner **≥ 0.3** resta verde dopo che m2 ha toccato XP e HUD: m2 non può alzare `KNOCKBACK` per stare comodo |
 | 6 | La porta non ha timeout | **debito di m1 chiuso**: `gate.gd` prende un timeout per test e un test che si blocca diventa FAIL, non un gate congelato |
 
+## 1.3 Milestone 3 — la disposizione dell'orda sulla scena vera è riproducibile
+
+Milestone 2 ha chiuso il cerchio della partita. m3 non aggiunge funzionalità: **chiude
+l'ultimo debito di misura**, quello che m2-w3 ha rimandato per iscritto e che nessuno ha
+misurato da allora.
+
+Il debito, con le parole di `spatial_grid.gd` (righe 32-39): la densità che fa traboccare
+un secchiello è **misurata sull'orda isolata** (`BUCKET_SLOTS` 12 → 32 sul picco di 19), ma
+l'orda della **scena vera** gira con `seed = 0` e **nessuna asserzione guarda la sua
+`grid_overflowed()`**. Quindi il traboccamento vero può accadere e nessuno lo saprebbe: non
+è un test che fallisce a caso, è un test che **non esiste**.
+
+La causa non è la casualità, è un **buco di API**, e l'ho verificato leggendo il codice:
+
+| fatto | dove |
+|---|---|
+| `seed` è un campo **pubblico**, documentato «0 = casuale, un numero = riproducibile» | `src/sim/horde.gd:91-92` |
+| ma `_build()` lo legge **una volta sola**, dentro `_ready()` | `src/sim/horde.gd:188-191` |
+| e sulla scena vera l'orda la crea `arena_main.tscn`, quindi nessun codice esterno scrive `seed` prima di `_build()` | `tests/test_arena.gd:154` |
+| `restart_run()` ripopola ma **non cambia il seme**: usa il `_rng` già in stato | `src/sim/horde.gd:467-476` |
+
+Il campo sembra la riproducibilità e sulla scena vera **è irraggiungibile**: `seed = 0`
+sempre, `randomize()` sempre. m3 non è «misurare meglio»: è **chiudere il buco**.
+
+Fuori m3, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi,
+multiplayer, mobile.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | La porta è verde | `GATE: 8/8` (il gate conta i file su disco, §6: m3 non aggiunge test) e `PERM: 15/15` rieseguite dal vertice |
+| 2 | La disposizione sulla scena vera è una **funzione del seme** | `tests/test_arena.gd`: stesso seme due volte → `transforms` **identici**; seme diverso → **diversi**. Entrambe le asserzioni, perché una sola è a denti nulli |
+| 3 | La griglia ha una **testata dichiarata e misurata** | sweep di N semi sulla scena vera: `min`/`mediana`/`max` di `worst_bucket()` stampati, e il tetto è una costante nel file **con il commento che dice come è stata derivata**. Nessun numero scritto qui prima della misura: è la lezione di §1.2 |
+| 4 | L'asserzione ha i **denti**, provati e rimossi | forzare il traboccamento sulla scena vera → l'asserzione deve dire `FAIL`; poi rimosso. Protocollo di m2-w3, stessa regola |
+
+### 3.5 Scope della milestone 3: due foglie, un oggetto condiviso
+
+m3 è la prima onda che mette **due foglie sullo stesso oggetto di simulazione**. Le scope
+restano disgiunte e sono già nelle allowlist: **nessuna riga di permesso nuova**, che è la
+ragione per cui questa onda non ha bisogno di un atto dell'utente.
+
+| agente | modello | in m3 scrive | note |
+|---|---|---|---|
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/horde.gd` | **solo** `reseed(s)` e la correzione della riga di documentazione di `worst_bucket()`. Se serve `src/sim/spatial_grid.gd`, non lo tocca: lo dice nel report e si ferma lì |
+| `terminal-gun-arena` | `space-bunny-free#max` | `tests/test_arena.gd` | la sezione nuova, sullo sweep. Nessun altro file |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | la superficie congelata di m3 |
+
+**L'interfaccia è congelata in `src/core/contracts.gd`, sezione «Supersficie di milestone 3»**:
+`horde.reseed(s)` con cinque punti di semantica scritti. -orda la scrive, -arena la chiama,
+e nessuno dei due può cambiarne il nome durante l'onda senza fermarsi.
+
+**Perché il vertice scrive il contratto e non le foglie.** Il piano registra già il caso: due
+foglie che hanno concordato un nome perché una lo aveva scritto e l'altra lo aveva letto nel
+codice dell'altra (`wave`, letto per nome dall'HUD). Funziona, ma funziona **per fortuna**. Qui
+sarebbe peggio: `reseed` non è un nome che si inventa due volte uguale.
+
+### 4.2 Onde della milestone 3
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m3-w0** | vertice | — | superficie congelata in `contracts.gd`, specifica scritta, `PERM: 15/15` confermata **prima** di lanciare (nessuna riga di permesso nuova) |
+| **m3-w1** | orda ∥ arena | 2 agenti, una stessa risposta | `GATE: 8/8` exit 0 e `--quit-after 300` pulito, rieseguiti **dal vertice** |
+| **m3-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+**m3-w1 ha un parallelismo vero con una dipendenza dichiarata.** I file sono disgiunti
+(`src/sim/horde.gd` / `tests/test_arena.gd`), ma il test chiama un metodo che il codice non ha
+ancora: è il caso che il gate diventa rosso **per il motivo giusto**. Non è una race da evitare,
+è un ordine di consegna, ed è il motivo per cui il nome è congelato prima e non durante.
+
+### 4.3 Un difetto di -orda che m3 deve chiudere: `worst_bucket()` non è quello che dice
+
+`src/sim/horde.gd:601` documenta «Il nemico più occupato in una cella, **in un frame**», e il
+codice non lo fa: `begin_frame()` azzera `overflowed` e **non** `worst_bucket`, che si azzera
+soltanto in `setup()` (`spatial_grid.gd:76`). Quindi è un **massimo storico** della sessione.
+
+La conseguenza è una trappola per chiunque asserisca: `worst_bucket()` dopo un reseed non
+descrive la disposizione appena scritta, descrive **tutto il massimo da `setup()` in poi**. Un
+test che lo legge come per-frame misura la storia e chiama "misura del frame" quello che è un
+massimo. -orda deve **scegliere** e **dichiarare** quale delle due cose è: correggere il
+commento e lasciare il massimo storico, oppure azzerare in `begin_frame()` e cambiare il
+significato. Sono due semantiche diverse e il vertice non le sceglie al posto suo: **la scelta
+è di -orda, il commento che la dichiara è obbligatorio**, e il criterio n. 3 di m3 vale con
+qualsiasi delle due purché il test sappia quale sta usando.
+
 ## 2. Toolchain
 
 Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nessuno deve cercare i binari per conto proprio: legge `tools/env.sh`.
@@ -413,6 +496,71 @@ Il verde di `PERM: 15/15` da solo non bastava a dichiarare il debito chiuso: sen
 la terza riga sarebbe stato lo stesso numero di una sessione **non governata**, che è
 compatibile con `15/15`. La differenza tra le due è un `Permission denied`, e il piano la
 dichiarava non misurata da nessuna parte.
+
+### Le onde della milestone 3
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m3-w0** | vertice | superficie di m3 **congelata** in `src/core/contracts.gd` (`reseed(s)`, cinque punti di semantica), specifica §1.3/§3.5/§4.2/§4.3 scritta, difetto di `worst_bucket()` trovato leggendo il codice | `PERM: 15/15` **prima** di lanciare: nessuna riga di permesso nuova | **verde** |
+| **m3-w1** | orda, arena | `-orda`: `reseed(s)` in `src/sim/horde.gd:517`, tutti e cinque i punti; `worst_bucket` reso per-frame **senza toccare `spatial_grid.gd`**. `-arena`: sezione 8 in `tests/test_arena.gd`, 126 → **169 asserzioni** | `GATE: 8/8` exit 0, `--quit-after 300` pulito, rieseguiti **dal vertice** | **verde** |
+| **m3-w2** | vertice | porte rieseguite, sweep verificato identico su 3 lanci, commit | `GATE: 8/8`, `PERM: 15/15`, `--quit-after 300` | **verde** |
+
+### I quattro criteri della milestone 3, uno per uno
+
+Rimisurati dal vertice il 2026-10-12, non rileggi dai report delle foglie.
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | La porta è verde | **sì** | `GATE: 8/8` exit `0`, `PERM: 15/15`. Il denominatore è **8**, non 9: m3 non aggiunge un file di test, mette le sue asserzioni dentro `test_arena.gd` |
+| 2 | La disposizione è una funzione del seme | **sì** | seme `4242` due volte → **0/200** posizioni diverse, somma `-487.136671` **identica**; seme `7311` → **200/200** diverse. Entrambe le direzioni asserite, e `colors` confrontati a parte |
+| 3 | Testata dichiarata e misurata | **sì** | sweep di **24 semi** (1, 11, … 231) sulla scena vera: `worst_bucket` **min 4, mediana 5, max 7**, **0 semi traboccati su 24**, **0 celle sconosciute**, **23/23** coppie di semi consecutivi con disposizione diversa. Tetto `GRID_CEILING = 11` |
+| 4 | I denti, provati e rimossi | **sì, due volte** | (1) 200 nemici in una cella → `worst_bucket` 32, `grid_overflowed()` vero, tre asserzioni `FAIL`, uscita 1. (2) **12** nemici in una cella → `worst_bucket` 13 con `grid_overflowed()` **falso**: a cadere è **solo** il tetto di densità. Il blocco che le forzava **non è nel file**, verificato con grep |
+
+**La seconda prova è quella che conta.** La prima dimostra che le asserzioni cadono; la
+seconda dimostra che il tetto di densità **non è portato** dalla segnalazione di traboccamento.
+Senza di essa, `GRID_CEILING` sarebbe un controllo che il flag di overflow tiene su in ogni
+caso in cui conta, cioè un'asserzione decorativa con tre cifre.
+
+**Come il tetto è stato derivato**, e perché è sulla misura e non sul codice: base = massimo
+misurato **7** (non il minimo 4, non la mediana 5: entrambi cadrebbero alla prima variazione
+normale di densità), **+4 slot** di margine dichiarato — maggiore dell'escursione dell'intero
+campione, che è di 3 — e **21 slot** di distanza da `BUCKET_SLOTS = 32`. Non `BUCKET_SLOTS - 1`:
+`insert()` aggiorna il contatore solo con `n < BUCKET_SLOTS`, quindi quel tetto sarebbe una
+**tautologia che non può fallire**. `-orda` e `-arena` sono arrivati alla stessa conclusione
+sulla tautologia **da soli, in due foglie diverse, senza dirmelo**: è il segnale che la
+documentazione di `spatial_grid.gd` lavora.
+
+**Il campione è deterministico per costruzione, non per fortuna.** I semi sono fissi,
+`_rng.seed` li fissa, `_populate` è la stessa funzione del primo frame: l'argomento è
+strutturale. Le **3 esecuzioni** del vertice hanno dato le linee di m3 **identiche byte per
+byte**, e sono **corroborazione, non prova** — a differenza di m2-w3, dove l'argomento non
+poteva essere strutturale (RNG globale non seminato) e i 120 lanci erano invece la prova.
+Unica cosa che oscilla fra un lancio e l'altro è il knockback del criterio n. 4 di m1
+(0.3109 / 0.3128 runner): comportamento noto di §1.2, dentro il tetto 0.3, **non introdotto
+da m3**.
+
+### Cosa m3 ha chiuso, e cosa ha lasciato com'era
+
+- ~~**Il traboccamento vero della griglia sulla scena vera non è guardato da nessuna
+  asserzione.**~~ **CHIUSO.** E la causa era un buco di API, non la casualità: `horde.seed`
+  era un campo pubblico documentato come riproducibile, ma `_build()` lo leggeva una volta
+  sola dentro `_ready()`, e sulla scena vera nessun codice poteva scriverlo prima. Il campo
+  **sembrava** la riproducibilità ed era irraggiungibile.
+- ~~**`worst_bucket()` diceva una cosa e ne faceva un'altra.**~~ **CHIUSO.** Il commento
+  promises «in un frame», il codice teneva un massimo storico. `-orda` ha scelto la
+  semantica per-frame e l'ha resa azzerando in `_rebuild_grid()`, **senza toccare
+  `spatial_grid.gd`**; `-arena` non gliel'ha accettata a parole, l'ha **verificata**
+  riscrivendo il seme peggiore (picco 7) e poi quello migliore, e asserendo che il numero
+  **scenda**. Quella riga è quella che cade se la semantica torna storica.
+- **Aperto, e dichiarato**: `BUCKET_SLOTS = 32` è tarato su un picco di **19** misurato
+  sull'orda **isolata**, mentre sulla scena vera il picco è **7**. La costante è quindi
+  **4,7 volte** più larga di quanto serva oggi. Non è un difetto — il fallback a scansione
+  lineare è corretto e il costo è ~84 KB presi una volta sola — ma è un margine che nessuno
+  ha chiesto e che nessuno ha misurato. **Non si tocca in m3**: cambiarlo è un esperimento
+  con un suo protocollo, non un ripulimento, e l'ipotesi «lo abbasso» va verificata come
+  l'ha verificata §1.2.
+- **Aperto**: nessun segnale `enemy_died` (rimandato da m2). Oggi l'XP usa il valore di
+  ritorno di `damage_enemy` e funziona.
 
 ### m2-w3 (debito): `test_gameloop` riproducibile — specifica
 

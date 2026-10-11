@@ -475,6 +475,56 @@ func restart_run() -> void:
 	_sync_weights()
 	_populate(population)
 
+## Ridispone l'orda su un altro seme: il **semplice** e' la disposizione, non
+## la partita. Chiamata dal contratto di m3 (`contracts.gd`, "Supersficie di
+## milestone 3"), che ne dichiara la semantica in cinque punti; qui la si
+## implementa senza aggiungere nomi nuovi.
+##
+## Serve perche' `seed` e' un campo pubblico ma lo leggeva **una volta sola**,
+## dentro `_build()`, che gira nel `_ready()`: sulla scena vera l'orda la crea
+## `arena_main.tscn`, quindi nessun codice esterno poteva scriverlo prima, e il
+## campo sembrava la riproducibilita' mentre era irraggiungibile (`seed = 0`
+## sempre, `_rng.randomize()` sempre).
+##
+## ## I cinque punti, e come sono resi qui
+##
+## 1. scrive il campo pubblico `seed` con `s` — una riga sotto.
+## 2. `s == 0` **mantiene il significato dichiarato del campo**: `randomize()`,
+##    cioe' casuale, e non "seme zero" (che Godot tratterebbe come seme fisso).
+## 3. con `s != 0` fissa `_rng` sul seme e ripopola **a `population`** con lo
+##    **stesso percorso del primo frame**: la funzione chiamata e' `_populate`,
+##    la stessa che chiama `_build()`, non un mestiere separato. Due versioni
+##    della stessa disposizione sarebbero due numeri che possono divergere, ed e'
+##    la lezione gia' scritta in `_populate`.
+## 4. **non tocca** `run`, `wave`, `kills` ne `population`: si leggono, non si
+##    scrivono. E' un'operazione di disposizione, non di stato di partita;
+##    `restart_run()` resta l'unica cosa che rimette a posto la partita. In
+##    particolare `_sync_wave()` e `_sync_weights()` **non** vengono chiamate:
+##    l'onda non e' cambiata, quindi pesi e scala della vita sono gia' quelli
+##    giusti e risincronizzarli sarebbe scrivere lo stato di partita.
+## 5. ricostruisce la griglia, cosi' `worst_bucket()` e `grid_overflowed()`
+##    parlano della disposizione **appena scritta** e non di quella precedente.
+##
+## Sia con `s == 0` sia con `s != 0` la disposizione viene riscritta: il nome e'
+## "ridisporre su un altro seme", e lasciare il campo com'e' a `s == 0` lascerebbe
+## al chiamante una disposizione vecchia travestita da casuale. La differenza fra
+## i due rami e' **solo** come `_rng` viene seminato.
+##
+## Nessun nodo viene creato e nessuno viene liberato, e nessuna allocazione
+## nuova: `_populate` riscrive array che hanno gia' la capienza e `_rebuild_grid`
+## riusa la griglia gia' riscaldata. Se `_built` e' falso e' un no-op, come
+## `restart_run()`: l'orda non e' nata, quindi non c'e' niente da disporre.
+func reseed(s: int) -> void:
+	if not _built:
+		return
+	seed = s
+	if s != 0:
+		_rng.seed = s
+	else:
+		_rng.randomize()
+	_populate(population)
+	_rebuild_grid()
+
 # --- Griglia ------------------------------------------------------------------
 
 ## Riscalda la griglia solo quando l'estensione cambia. `setup()` ricrea tutti i
@@ -490,6 +540,14 @@ func _sync_grid() -> void:
 
 func _rebuild_grid() -> void:
 	_grid.begin_frame()
+	# `worst_bucket` e' un **massimo storico** dentro `spatial_grid.gd`: si azzera
+	# in `setup()` e non in `begin_frame()`, quindi dopo questo punto direbbe ancora
+	# il picco della disposizione **precedente**. Il contratto di m3 pretende il
+	# contrario: dopo `reseed` il numero deve parlare della disposizione appena
+	# scritta (punto 5). Lo si azzera qui, dall'unico posto che ricostruisce la
+	# griglia: il campo e' pubblico e non serve toccare `spatial_grid.gd`. Dopo il
+	# ciclo di `insert` sotto, vale "picco del frame appena ricostruito".
+	_grid.worst_bucket = 0
 	for i in count:
 		_grid.insert(i, transforms[i])
 	grid_unknown_cells = _grid.unknown_cells
@@ -597,7 +655,37 @@ func occupied_cells() -> int:
 func grid_overflowed() -> bool:
 	return _grid != null and _grid.overflowed
 
-## Il nemico piu' occupato in una cella, in un frame.
+## Il nemico piu' occupato in una cella, **nel frame (griglia) appena
+## ricostruito**: il picco delle celle dell'ultima disposizione scritta nella
+## griglia, non un massimo storico.
+##
+## ## Perche' questo numero e' per-frame e non storico (scelta dichiarata)
+##
+## Dentro `spatial_grid.gd` il contatore e' un **massimo storico**: si azzera in
+## `setup()` e non in `begin_frame()`. Lasciandolo com'e', dopo un `reseed`
+## continuerebbe a dire il picco della disposizione **precedente**, e il
+## chiamante misurerebbe una griglia vera che pero' non risponde alla domanda
+## che ha fatto. Il contratto di m3 (punto 5) pretende esattamente il contrario:
+## dopo `reseed` il numero parla della disposizione appena scritta.
+##
+## Percio' `_rebuild_grid()` azzera il campo pubblico del contatore a ogni
+## ricostruzione: **non** serve modificare `spatial_grid.gd`. Il numero che
+## esce da qui e' quindi il picco **dell'ultimo frame ricostruito**, ed e' quello
+## che un test che asserisce deve sapere che sta usando.
+##
+## Nota per chi asserisce: non e' un massimo "da sempre". Un test che volesse il
+## picco di tutta una sequenza deve ricordare il massimo osservato frame per
+## frame, perche' questo numero torna giu' a ogni ricostruzione.
+##
+## ## Il numero e' limitato a `BUCKET_SLOTS`: non usarlo come guardia
+##
+## `spatial_grid.gd::insert` aggiorna il contatore solo con `n < BUCKET_SLOTS`,
+## quindi questo valore **non puo' superare 32**: `worst_bucket() <= BUCKET_SLOTS`
+## e' una tautologia che non puo' fallire, e un test che ci mette sopra una soglia
+## cosi' non sta misurando niente. Il segnale che il traboccamento e' avvenuto e'
+## `grid_overflowed()`. Per una **misura di densita'** questo numero va confrontato
+## con un tetto **proprio, sotto 32** (e quel tetto va derivato da una misura, non
+## scelto a piacere), che e' esattamente il tetto dichiarato che m3 chiede.
 func worst_bucket() -> int:
 	return 0 if _grid == null else _grid.worst_bucket
 

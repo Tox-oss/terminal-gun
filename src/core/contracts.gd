@@ -133,6 +133,58 @@ func verify_m2_surface() -> Array[String]:
 			missing.append("%s.%s non e' un metodo" % [row["owner"], row["member"]])
 	return missing
 
+# --- Superficie di milestone 3 ---------------------------------------------------
+#
+# **Non e' una API registrata.** `reseed` e `worst_bucket`/`grid_overflowed` sono
+# metodi pubblici di `src/sim/horde.gd`, che -arena raggiunge attraverso il nodo
+# `Horde` della scena vera, come gia' fa con `step()`, `damage_enemy()` e i tre
+# campi di massa. Non passano da `register_impl` perche' nessuna delle due
+# foglie li registra: sono la superficie **della simulazione**, non del contratto.
+#
+# Sono qui perche' m3 e' la prima onda che mette **due foglie sullo stesso
+# oggetto**: `horde.gd` e' di -orda e `tests/test_arena.gd` e' di -arena, e il
+# piano registra gia' il caso in cui due foglie hanno concordato un nome senza
+# che nessuno lo decidesse (il campo `wave` letto per nome dall'HUD). Il rimedio
+# non e' fidarsi, e' una riga scritta qui **prima** che le foglie lavorino.
+
+## Dichiarato dal vertice il 2026-10-12, **congelato**: i due nomi qui sotto sono
+## le uniche due firme che -orda scrive e -arena chiama. Cambiarne una durante
+## l'onda significa fermare l'onda e tornare dal vertice.
+##
+##     horde.reseed(s)              # -orda la scrive, -arena la chiama
+##     horde.worst_bucket()         # gia' esiste: il contratto ne dichiara il significato
+##     horde.grid_overflowed()      # gia' esiste
+##
+## `reseed(s)` e' l'API che manca e che rende questa onda possibile:
+##
+##   - `horde.seed` (campo pubblico, `src/sim/horde.gd:92`) e' letto **una volta
+##     sola**, dentro `_build()`, che gira nel `_ready()`. Sulla scena vera
+##     l'orda la crea `arena_main.tscn`: nessun codice esterno puo' scrivere
+##     `seed` prima che `_build()` giri. Il campo sembra la riproducibilita' e
+##     sulla scena vera e' **irraggiungibile**: `seed = 0` sempre, `_rng.randomize()`
+##     sempre. Il difetto di m3 e' questo, non la casualita'.
+##   - `reseed(s)` rende la disposizione una **funzione del seme** anche quando
+##     l'orda e' nata dentro una scena.
+##
+## Semantica congelata, in cinque punti. Ogni altro comportamento e' di -orda:
+##
+##   1. scrive il campo pubblico `seed` con `s`;
+##   2. `s == 0` mantiene il significato dichiarato del campo: `randomize()`, cioe'
+##      casuale a ogni avvio (non "seme zero");
+##   3. con `s != 0` fissa `_rng` sul seme e **ripopola a `population`** con
+##      **lo stesso percorso del primo frame** (`_populate`), non con un mestiere
+##      diverso: due versioni della stessa disposizione sarebbero due numeri che
+##      possono divergere, ed e' la lezione gia' scritta in `_populate`;
+##   4. **non tocca** `run`, `wave`, `kills` ne `population`. E' un'operazione di
+##      **disposizione**, non di stato di partita: `restart_run()` resta l'unica
+##      cosa che rimette a posto la partita, e le due non vanno confuse;
+##   5. ricostruisce la griglia, cosi' `worst_bucket()` e `grid_overflowed()`
+##      parlano della disposizione appena scritta e non di quella precedente.
+##
+## Perche' il punto 5 e' nel contratto e non un dettaglio: senza, il chiamante
+## misura la griglia della disposizione **precedente** e il numero che ne ricava
+## e' vero ma non risponde alla domanda che ha fatto.
+
 # --- Registrazione -------------------------------------------------------------
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non

@@ -94,6 +94,10 @@ func _run() -> void:
 	# regolazione dell'arma, e non deve trovarsi in mezzo a quelle che contano i
 	# nodi e le piastrelle.
 	_criterion_4(h, arena, game)
+	# m3: per ultima anche rispetto a `_criterion_4`, perche' riscrive la
+	# disposizione dell'orda della scena vera e crea e libera piu' copie della
+	# scena, quindi sposta `Game.horde` e `Game.player` su nodi diversi.
+	_milestone_3(h, arena)
 
 	_cleanup(arena)
 	quit(h.finish("test_arena"))
@@ -697,6 +701,364 @@ func _away_dir(horde, player) -> Vector3:
 ## Sul piano XZ: la `y` qui non c'entra, l'arena e' piatta e il nemico non vola.
 func _flat(v: Vector3) -> Vector3:
 	return Vector3(v.x, 0.0, v.z)
+
+# --- 8. Milestone 3: la disposizione dell'orda e' una funzione del seme ---------
+#
+# ## Il debito che questa sezione chiude
+#
+# `src/sim/spatial_grid.gd:32-39` dichiara che la densita' che fa traboccare un
+# secchiello e' stata misurata sull'orda **isolata** (`BUCKET_SLOTS` 12 -> 32 sul
+# picco di 19). Ma l'orda della **scena vera** gira con `seed = 0` e nessuna
+# asserzione guardava la sua `grid_overflowed()`: il traboccamento vero poteva
+# accadere e nessuno lo avrebbe saputo. Non era un test che fallisce a caso, era
+# un test che non esisteva.
+#
+# La causa non era la casualita', era un buco di API: `horde.seed` era un campo
+# pubblico documentato «0 = casuale, un numero = riproducibile», ma `_build()` lo
+# leggeva **una volta sola** dentro `_ready()`, e sulla scena vera l'orda la crea
+# `scenes/arena_main.tscn`: nessun codice esterno poteva scriverlo prima che la
+# disposizione fosse gia' nata. Il campo sembrava la riproducibilita' e sulla scena
+# vera era irraggiungibile. `horde.reseed(s)` chiude il buco.
+#
+# ## La semantica che questo test usa, e come l'ho letta
+#
+# `horde.worst_bucket()` e' dichiarato in `src/sim/horde.gd` come **il picco del
+# frame (griglia) appena ricostruito**, cioe' NON un massimo storico: dentro
+# `spatial_grid.gd` il contatore e' un massimo storico che si azzera solo in
+# `setup()`, e `_rebuild_grid()` lo azzera a ogni ricostruzione perche' altrimenti,
+# dopo un `reseed`, il numero direbbe ancora il picco della disposizione
+# **precedente** invece di quella appena scritta.
+#
+# Quindi qui: la lettura avviene **subito dopo `reseed`**, che per contratto (punto
+# 5) ricostruisce gia' la griglia, e il numero che ne esce e' il picco di **quel**
+# seme e non un massimo accumulato. Se un domani la semantica tornasse storica, le
+# letture di questo sweep continuerebbero a essere valide ma monotone: ogni valore
+# sarebbe il massimo di tutti i precedenti. Il numero di semi traboccati e la
+# somma delle posizioni, invece, resterebbero gli stessi. La differenza si vede,
+# quindi non e' una scelta invisibile.
+#
+# ## Perche' `BUCKET_SLOTS` non e' il tetto
+#
+# Il tetto NON puo' essere 32: `insert()` aggiorna il contatore solo con
+# `n < BUCKET_SLOTS`, quindi `worst_bucket() <= 32` e' una tautologia che non puo'
+# fallire. Il segnale che il traboccamento e' avvenuto e' `grid_overflowed()`, e la
+# **misura di densita'** va confrontata con un tetto **proprio, sotto 32**, derivato
+# da una misura. E' quello che c'e' sotto.
+
+## I tre membri che `src/core/contracts.gd` dichiara congelati nella sezione
+## "Supersficie di milestone 3". Non sono API registrate: sono metodi pubblici
+## dell'orda della scena vera, e il contratto li dichiara perche' m3 e' la prima
+## onda che mette due foglie sullo stesso oggetto di simulazione.
+const M3_SURFACE := ["reseed", "worst_bucket", "grid_overflowed"]
+
+## I due semi della riproducibilita'. Due numeri lontani e non consecutivi: con
+## `SEED_A` e `SEED_A + 1` un `reseed` che ignorasse il seme e producesse sempre
+## la stessa disposizione passerebbe lo stesso, perche' i due semi si somigliano
+## piu' di quanto credibile. `7311` non ha nessun rapporto con `4242`.
+const SEED_A := 4242
+const SEED_B := 7311
+
+## Quanti semi nello sweep, e come sono scelti. `SWEEP_COUNT` semi a passo
+## `SWEEP_STEP` da `SWEEP_FIRST`: 24 semi fra 1 e 231, cioe' la stessa banda che
+## `tests/test_gameloop.gd` aveva gia' percorso sull'orda isolata (semi 1..240),
+## ma qui sul mondo vero.
+##
+## Il passo serve a coprire la banda, non a fare un campione fitto: ogni coppia
+## di semi consecutivi **dello sweep** viene confrontata posizione per posizione e
+## il risultato e' stampato sotto (misurato 23 coppie diverse su 23), quindi non
+## si sta campionando ventiquattro volte la stessa disposizione. Il passo 1
+## costerebbe il doppio delle query di griglia per coprire 24 semi su metta' banda.
+const SWEEP_COUNT := 24
+const SWEEP_FIRST := 1
+const SWEEP_STEP := 10
+
+## Tetto dichiarato di `worst_bucket()` sulla scena vera.
+##
+## ## COME E' STATO DERIVATO (misura prima del numero)
+##
+## Sweep di 24 semi (1, 11, ..., 231) sulla **scena vera**, stampato dalla sezione
+## 8.2 di questo stesso file:
+##
+##     worst_bucket: min 4, mediana 5, max 7; semi traboccati 0 su 24
+##
+## Il tetto e' **11**, e si deriva in tre passi, tutti sul numero misurato:
+##
+##   1. base = 7, il **massimo misurato**. Non il minimo (4): un tetto poggiato
+##      sul minimo cadrebbe appena la densita' torna alla norma, e direbbe piu'
+##      del gioco di quanto il gioco sappia fare. Non la mediana (5): un tetto
+##      sulla mediana cadrebbe alla meta' dei semi, cioe' non piu' che rumore.
+##   2. margine dichiarato = **+4 slot**. L'escursione fra minimo e massimo
+##      misurati e' di 3 slot (4 -> 7), quindi il margine e' ** maggiore
+##      dell'escursione dell'intero campione**: anche dimezzandolo (tetto 9) tutti
+##      i 24 semi starebbero sotto. Il tetto non e' tarato sul caso peggiore, e'
+##      tarato su uno scarto che un cambiamento di densita' deve superare.
+##   3. coerenza col codice: `BUCKET_SLOTS` = 32, e 11 ne lascia **21 slot** di
+##      margine prima del punto in cui le query cadono davvero a scansione
+##      lineare. Un balzo della densita' deve quindi essere di quasi tre volte
+##      perche' questo tetto cada, e non e' un numero che si puo' spostare di un
+##      passo senza accorgersene.
+##
+## ## PERCHE' NON `BUCKET_SLOTS - 1`
+##
+## `spatial_grid.gd::insert` aggiorna il contatore solo con `n < BUCKET_SLOTS`,
+## quindi `worst_bucket()` **non puo' superare 32**: un tetto a 31 non puo' mai
+## fallire e non starebbe misurando niente. Il segnale che il traboccamento
+## e' avvenuto e' `grid_overflowed()`, ed e' un'asserzione separata qui sotto.
+##
+## ## I DENTI SONO STATI PROVATI, DUE VOLTE, E POI RIMOSSI
+##
+## Protocollo di m2-w3: una prova che non sa fallire non e' un'asserzione. Il
+## blocco che forza il traboccamento **non e' in questo file**: fu rimosso dopo.
+## Quello che faceva, con la sola API di massa che il piano dichiara
+## (`count`/`transforms`/`colors`, `horde.gd:94-101`), era scrivere posizioni e un
+## `count` piu' grande dentro una **sola cella da 4 m** e far ricostruire la griglia
+## chiamando `nearest_enemy_index(...)`, che passa da `_ensure_grid()`. `count`,
+## `transforms` e `colors` venivano salvati e rimessi **sempre**: `check()` non
+## interrompe, quindi un'asserzione fallita a meta' avrebbe lasciato l'orda sporca
+## per le sezioni successive.
+##
+## 1. **Tutti i 200 nemici in una cella** -> `worst_bucket` 32, `grid_overflowed()`
+##    a vero. Le tre asserzioni di 8.2 hanno detto **FAIL** una per una
+##    ("nessun seme deve traboccare...", "deve stare sotto il tetto dichiarato
+##    11: massimo misurato 32", e il controllo di semantica che ha visto che il
+##    seme 1 non riproduceva piu' 32). Uscita 1.
+## 2. **12 nemici in una cella** -> `worst_bucket` 13 e `grid_overflowed()` resta
+##    **falso**. E' la prova che conta per il tetto di densita': l'asserzione del
+##    traboccamento era green e **quella del tetto ha detto FAIL** lo stesso.
+##    Senza questo, il tetto 11 potrebbe essere portato dalla sola segnalazione di
+##    traboccamento e non starebbe misurando la densita'. Uscita 1.
+const GRID_CEILING := 11
+
+## Quante posizioni devono cambiare fra due semi **diversi**: il criterio n. 2 di
+## m3 dice "seme diverso -> diversi", e senza un numero minimo quella frase
+## accetterebbe anche una disposizione fissa con due nemici spostati.
+##
+## ## COME E' STATO DERIVATO (misura prima del numero)
+##
+## Misurato con `SEED_A` = 4242 contro `SEED_B` = 7311: **200 posizioni diverse
+## su 200**. La disposizione iniziale e' ad anelli e l'angolo di ogni nemico esce
+## da `_rng`, quindi con un altro seme si muove **tutti**: e' il massimo possibile,
+## non un caso.
+##
+## Il tetto e' **180**, cioe' il 90%. Non 200: un numero che pretende che tutti i
+## 200 si muovano rende l'asserzione fragile per un motivo che non c'entra (due
+## nemici che si toccano e restano fermi insieme). Non 1: quello e' la parola
+## "diversi" del criterio riscritta in codice, e non aggiunge niente.
+const REPRO_DIFF_MIN := 180
+
+func _milestone_3(h, arena: Node3D) -> void:
+	var horde = arena.get_node_or_null("Horde")
+	if not h.check(horde != null, "m3: la scena vera non ha il nodo Horde"):
+		return
+	# Superficie congelata: se uno dei tre non c'e', il resto della sezione
+	# misurerebbe un'altra cosa e fallirebbe con un messaggio che non dice quale
+	# dei tre manca. Non e' uno stub: e' la guardia che dice il numero giusto.
+	for m in M3_SURFACE:
+		if not h.check(horde.has_method(m),
+				"m3: l'orda della scena vera non espone \"%s()\": e' la superficie congelata in src/core/contracts.gd, sezione \"Supersficie di milestone 3\"" % m):
+			return
+	_riproducibilita(h, horde)
+	_sweep(h, horde)
+
+## ## 8.1 Riproducibilita': stesso seme due volte IDENTICO, seme diverso DIVERSO
+##
+## Entrambe le asserzioni, perche' una sola e' a denti nulli: la prima da sola
+## passerebbe anche con un `reseed` che riscrive sempre la stessa disposizione, la
+## seconda da sola passerebbe anche con un `reseed` che mette un rumore casuale
+## sopra una disposizione fissa. Insieme dicono "funzione del seme".
+func _riproducibilita(h, horde) -> void:
+	horde.reseed(SEED_A)
+	var a: PackedVector3Array = horde.transforms.duplicate()
+	var a_colors: PackedColorArray = horde.colors.duplicate()
+	h.eq(horde.count, ENEMY_TARGET,
+		"m3: dopo reseed l'orda deve avere 200 nemici vivi, come all'avvio")
+	h.eq(horde.transforms.size(), horde.count,
+		"m3: transforms.size() deve combaciare con count dopo un reseed")
+	h.eq(horde.colors.size(), horde.count,
+		"m3: colors.size() deve combaciare con count dopo un reseed")
+
+	# Stesso seme, di nuovo: il percorso e' lo stesso, quindi la disposizione
+	# deve tornare **identica**, non "vicina". Il confronto e' elemento per
+	# elemento, e sotto anche la somma delle coordinate: se un solo nemico
+	# differisse di un epsilon, il primo confronto lo prenderebbe, e la somma
+	# dice in che direzione si e' mosso.
+	horde.reseed(SEED_A)
+	var b: PackedVector3Array = horde.transforms.duplicate()
+	h.eq(b.size(), a.size(),
+		"m3: lo stesso seme due volte deve produrre lo stesso numero di nemici")
+	h.check(b == a,
+		"m3: stesso seme due volte -> transforms IDENTICI: %d posizioni su %d diverse"
+			% [_differing(a, b), mini(a.size(), b.size())])
+	h.near(_checksum(b), _checksum(a), 0.0,
+		"m3: stesso seme due volte -> la somma delle posizioni deve essere la stessa")
+	h.check(horde.colors == a_colors,
+		"m3: stesso seme due volte -> anche i colori devono essere identici")
+
+	# Seme diverso: la disposizione deve essere un'altra, e lo deve essere per
+	# gran parte dei nemici, non per uno.
+	horde.reseed(SEED_B)
+	var c: PackedVector3Array = horde.transforms.duplicate()
+	var moved := _differing(a, c)
+	h.check(moved >= REPRO_DIFF_MIN,
+		"m3: due semi diversi devono dare disposizioni DIVERSE: %d posizioni su %d diverse, tetto dichiarato %d"
+			% [moved, mini(a.size(), c.size()), REPRO_DIFF_MIN])
+
+	print("test_arena: m3 riproducibilita': seme %d due volte -> %d/%d posizioni diverse, somma %.6f; seme %d -> %d/%d diverse"
+		% [SEED_A, _differing(a, b), a.size(), _checksum(a), SEED_B, moved, mini(a.size(), c.size())])
+
+## ## 8.2 Lo sweep: N semi sulla scena vera, `worst_bucket()` misurato
+##
+## La misura che m2-w3 aveva rimandato per iscritto e che nessuno aveva fatta: il
+## traboccamento vero, sull'orda vera, dentro l'arena vera. Non su un'orda isolata
+## con una griglia costruita a mano.
+##
+## Il tetto e' `GRID_CEILING`, e sotto ne c'e' il commento che dice come e' stato
+## derivato dalla misura che questo sweep stampa. Nessun numero qui e' scritto
+## prima di averlo misurato: e' la lezione di piano 1.2, dove un'ipotesi sul margine
+## si e' rivelata sbagliata solo dopo misurata.
+func _sweep(h, horde) -> void:
+	var samples: Array[int] = []
+	var raw: Array[int] = []
+	var seeds: Array[int] = []
+	var overflowed: Array[int] = []
+	var dirty_cells: Array[int] = []
+	var steps_differ := 0
+	var steps_alike: Array = []
+	var prev: PackedVector3Array = PackedVector3Array()
+	for i in SWEEP_COUNT:
+		var s: int = SWEEP_FIRST + i * SWEEP_STEP
+		seeds.append(s)
+		horde.reseed(s)
+		# Il seme e' davvero un ingresso: due semi consecutivi dello sweep
+		# producono due disposizioni diverse, o il campione non sta misurando
+		# niente. Non e' una riga che si lascia supporre: sotto il numero e'
+		# contato, e sotto l'asserzione lo richiede **tutto**.
+		var here: PackedVector3Array = horde.transforms.duplicate()
+		if i > 0:
+			var d := _differing(prev, here)
+			if d >= REPRO_DIFF_MIN:
+				steps_differ += 1
+			else:
+				steps_alike.append("%d/%d:%d" % [seeds[i - 1], s, d])
+		prev = here
+		# `reseed` ricostruisce gia' la griglia (punto 5 del contratto di m3),
+		# quindi la lettura successiva parla della disposizione appena scritta.
+		# `nearest_enemy_index` passa comunque da `_ensure_grid()`: e' l'unica
+		# API pubblica che garantisce la ricostruzione, costa una query e rende
+		# la misura indipendente da **quando** -orda ha deciso di farlo. (Il
+		# nome sull'orda e' `nearest_enemy_index`: `nearest_enemy` e' il nome
+		# dell'API **del contratto**, che -orda registra su `Game`.)
+		horde.nearest_enemy_index(Vector3.ZERO, 12.0)
+		h.eq(horde.count, ENEMY_TARGET,
+			"m3: il seme %d deve lasciare 200 nemici vivi" % s)
+		var w: int = horde.worst_bucket()
+		if horde.grid_overflowed():
+			overflowed.append(s)
+		if int(horde.get("grid_unknown_cells")) != 0:
+			dirty_cells.append(s)
+		raw.append(w)
+
+	samples = raw.duplicate()
+	samples.sort()
+	var lo: int = samples[0]
+	var hi: int = samples[samples.size() - 1]
+	# Mediana = elemento di indice floor(n/2) della lista ordinata. Su n pari
+	# e' il medio-alto, non la media dei due centrali: la media dei due centrali
+	# sarebbe un numero che nessuna disposizione ha avuto, e qui si vuole
+	# riportare una disposizione **misurata**, non una sintesi.
+	var med: int = samples[samples.size() / 2]
+
+	print("test_arena: m3 sweep, %d semi sulla scena vera (%d, %d, ... %d): worst_bucket = %s"
+		% [SWEEP_COUNT, seeds[0], seeds[1], seeds[seeds.size() - 1], str(raw)])
+	print("test_arena: m3 sweep: min %d, mediana %d, max %d; semi traboccati %d su %d; celle sconosciute %d su %d"
+		% [lo, med, hi, overflowed.size(), SWEEP_COUNT, dirty_cells.size(), SWEEP_COUNT])
+	print("test_arena: m3 sweep: coppie di semi consecutivi con disposizione diversa %d su %d%s"
+		% [steps_differ, SWEEP_COUNT - 1, ("" if steps_alike.is_empty() else "; simili: %s" % str(steps_alike))])
+
+	# Il campione non sta misurando sempre la stessa disposizione sotto vestiti
+	# diversi. La soglia e' **tutte** le coppie: misurate 23 su 23, e sotto un
+	# seme diverso tutti i 200 nemici si muovono, quindi una coppia simile
+	# sarebbe un difetto di `reseed` e non una coincidenza.
+	h.check(steps_differ == SWEEP_COUNT - 1,
+		"m3: ogni coppia di semi consecutivi dello sweep deve dare una disposizione diversa (almeno %d posizioni su %d): %d su %d, e le coppie simili sono %s"
+			% [REPRO_DIFF_MIN, ENEMY_TARGET, steps_differ, SWEEP_COUNT - 1, str(steps_alike)])
+
+	# Il traboccamento e' il fatto vero, e la sua segnalazione e' dedicata:
+	# `worst_bucket()` non puo' superare `BUCKET_SLOTS` e non puo' dire da solo
+	# che un secchiello e' traboccato.
+	h.check(overflowed.is_empty(),
+		"m3: nessun seme deve traboccare la griglia sulla scena vera: traboccano i semi %s (picco %d su %d slot)"
+			% [str(overflowed), hi, 32])
+	h.check(dirty_cells.is_empty(),
+		"m3: la griglia non deve scaldare celle nuove nel ciclo di gioco: semi %s" % str(dirty_cells))
+	# E il tetto di densita', derivato dalla misura sopra e non da `BUCKET_SLOTS`.
+	h.check(hi <= GRID_CEILING,
+		"m3: worst_bucket sulla scena vera deve stare sotto il tetto dichiarato %d: massimo misurato %d sui semi %s"
+			% [GRID_CEILING, hi, str(seeds)])
+
+	_semantica_worst_bucket(h, horde, seeds, raw)
+
+## ## 8.3 La semantica dichiarata, verificata invece che supposta
+##
+## `worst_bucket()` e' dichiarato in `src/sim/horde.gd` come **il picco del frame
+## (griglia) appena ricostruito**: dentro `spatial_grid.gd` il contatore e' un
+## massimo storico che si azzera solo in `setup()`, e `_rebuild_grid()` lo azzera
+## a ogni ricostruzione perche' altrimenti direbbe ancora il picco della
+## disposizione precedente.
+##
+## Il modo economico per distinguere le due semantiche non e' leggerne il
+## commento: e' chiedere al numero di **scendere**. Si riscrive la disposizione
+## peggiore dello sweep e poi quella migliore: se il numero torna indietro sta
+## parlando dell'ultima disposizione scritta; se risale, o resta fermo al massimo,
+## sta accumulando da `setup()` e tutte le letture dello sweep sono una curva
+## sola. E' l'unica parte di questa sezione che puo' fallire se -orda cambia
+## idea sulla semantica senza dirlo, ed e' per questo che c'e'.
+func _semantica_worst_bucket(h, horde, seeds: Array[int], raw: Array[int]) -> void:
+	var i_hi := 0
+	var i_lo := 0
+	for i in raw.size():
+		if raw[i] > raw[i_hi]:
+			i_hi = i
+		if raw[i] < raw[i_lo]:
+			i_lo = i
+	horde.reseed(seeds[i_hi])
+	h.eq(horde.worst_bucket(), raw[i_hi],
+		"m3: riscrivere la disposizione peggiore (%d) deve riprodurre il suo picco %d"
+			% [seeds[i_hi], raw[i_hi]])
+	horde.reseed(seeds[i_lo])
+	var back: int = horde.worst_bucket()
+	h.eq(back, raw[i_lo],
+		"m3: riscrivere la disposizione migliore (%d) deve riprodurre il suo picco %d, non il massimo di prima"
+			% [seeds[i_lo], raw[i_lo]])
+	h.check(back < raw[i_hi],
+		"m3: worst_bucket() e' dichiarato per-frame, non storico: dopo il seme %d deve scendere a %d dal %d del seme %d. "
+		% [seeds[i_lo], back, raw[i_hi], seeds[i_hi]]
+		+ "Se resta fermo al massimo, il numero sta accumulando da setup() e ogni lettura di questo test e' sbagliata")
+	print("test_arena: m3 semantica worst_bucket(): dopo il seme %d (picco %d) il seme %d lo riporta a %d: e' il picco del frame ricostruito, non un massimo storico"
+		% [seeds[i_hi], raw[i_hi], seeds[i_lo], back])
+
+## Quante posizioni di due disposizioni sono diverse. Il confronto e' esatto
+## (`!=` su `Vector3`), non una tolleranza: "identici" nel criterio n. 2 di m3
+## vuol dire identici, e una tolleranza qui lascerebbe passare un `reseed` che
+## sposta ogni nemico di mezzo centimetro.
+func _differing(a: PackedVector3Array, b: PackedVector3Array) -> int:
+	var n := mini(a.size(), b.size())
+	var d := 0
+	for i in n:
+		if a[i] != b[i]:
+			d += 1
+	return d
+
+## Una somma delle coordinate. Non serve a misurare niente: serve a dare un
+## secondo modo di vedere che due disposizioni sono la stessa cosa, e che il primo
+## confronto non e' passato per un caso. Con `near(..., 0.0)` la tolleranza e' zero:
+## due somme identiche o non sono.
+func _checksum(pts: PackedVector3Array) -> float:
+	var acc := 0.0
+	for i in pts.size():
+		var p := pts[i]
+		acc += p.x * 3.0 + p.z * 7.0 + p.y * 11.0
+	return acc
 
 # --- Interno -------------------------------------------------------------------
 

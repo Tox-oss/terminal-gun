@@ -106,6 +106,24 @@ func _ready() -> void:
 	progression.leveled_up.connect(_on_leveled_up)
 	progression.upgrade_applied.connect(func(id: String) -> void: upgrade_applied.emit(id))
 
+	# Contratto di m2: `Game.progression` e' il **dato** che -ui e la verifica di
+	# `verify_m2_surface()` leggono per nome, e non tramite `Game.player`.
+	#
+	## Perche' qui e non in `_enter_tree()` (piano sez. 5.1): la regola dice
+	# `_enter_tree()` per chi ha **figli che leggono il dato nel proprio avvio**.
+	# Qui i figli sono `Model`, `Weapon` e i due `AudioStreamPlayer3D`, e nessuno
+	# dei quattro legge `Game.progression`: l'HUD, che e' l'unico lettore, e' un
+	# fratello del giocatore dentro `scenes/arena_main.tscn` e lo legge da
+	# `_process`, non dal suo `_ready()`. Inoltre l'oggetto non esiste ancora prima
+	# di questa riga: registrarlo in `_enter_tree()` pubblicherebbe `null` e il
+	# contratto direbbe "manca" per un dato che c'e' un istante dopo.
+	#
+	## Senza questa riga le dieci voci di `M2_SURFACE` che puntano a `progression`
+	## restano irraggiungibili e `Game.progression` vale `null`: il gate resta
+	## verde e la superficie di m2 no. Un verde che copre meno di quel che dice e'
+	## il difetto peggiore di una porta.
+	Game.progression = progression
+
 	weapon = get_node_or_null("Weapon")
 	if weapon == null:
 		# Senza scena (porta su uno script solo, o test): l'arma la creiamo qui,
@@ -126,6 +144,80 @@ func _ready() -> void:
 func drive_manually() -> void:
 	read_keys = false
 	set_physics_process(false)
+
+# --- Il restart: la meta' di -gameplay ------------------------------------------
+#
+# `horde.restart_run()` (di -orda) azzera l'orda e la partita e **non tocca il
+# giocatore**: se le vite restano a zero, il passo di simulazione successivo
+# rilegge `game_over` e la partita si ferma di nuovo. Quindi il restart ha due
+# meta' e questa e' la mia.
+#
+# Nessun nodo viene creato ne' liberato: sono numeri in campi che esistono gia',
+# e per il criterio n. 4 ("nessun nodo duplicato") il numero di nodi non puo'
+# cambiare invece di dover essere controllato.
+
+## Rimette in piedi il giocatore: vita piena, statistiche ai numeri di codice,
+## progressione azzerata, arma riportata alla regolazione di partenza.
+func reset_run() -> void:
+	hp = MAX_HP
+	max_hp = MAX_HP
+	move_speed = MOVE_SPEED
+	accel = ACCEL
+	velocity = Vector3.ZERO
+	invuln = 0.0
+	dash_timer = 0.0
+	dash_cd = 0.0
+	# Al centro dell'arena: una partita nuova comincia dal centro, e la camera
+	# dell'arena parte gia' li'. Il nemico piu' vicino e' a `Game.nearest_enemy`
+	# nell'arma, quindi la posizione non cambia nulla di quello che segue.
+	position = Vector3.ZERO
+	if progression != null:
+		progression.reset()
+	if weapon != null:
+		weapon.reset()
+
+## Il restart **completo**: io e -orda, in quest'ordine. Prima il giocatore e poi
+## l'orda, cosi' nell'istante in cui la partita torna `playing` nessuno e' a zero
+## vite e nessuno puo' rileggere `game_over`.
+func restart_run() -> void:
+	reset_run()
+	var horde = Game.horde
+	if horde == null or not is_instance_valid(horde):
+		# Nessuna orda: il giocatore e' comunque in piedi, ma la partita non
+		# riparte. Non e' un errore (i test possono girare senza orda), quindi
+		# niente rumore: lo dice solo `push_warning` se l'orda c'e' e non sa
+		# ripartire, che quello sì e' un difetto di -orda.
+		return
+	if not horde.has_method("restart_run"):
+		push_warning("player: Game.horde non espone restart_run(): l'orda non riparte. "
+			+ "La meta' di -orda e' src/sim/horde.gd::restart_run().")
+		return
+	horde.call("restart_run")
+
+## Il giocatore e' morto: la meta' di **-gameplay** dello stato `game_over`. Lo
+## stato della partita intero e' di -orda (`horde.is_game_over()`), ma a decidere
+## che il giocatore e' morto e' la sua vita, e questa e' la domanda che il
+## restart e il game over guardano.
+func is_dead() -> bool:
+	return hp <= 0.0
+
+## Il tasto che rimette in piedi la partita, una volta sola per pressione (non
+## un `Input.is_key_pressed` tenuto premuto: quello chiamerebbe il restart a ogni
+## frame finche' il tasto resta giù, e la partita ripartirebbe ogni 16 ms).
+const RESTART_KEYS := [KEY_ENTER, KEY_KP_ENTER, KEY_R]
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not read_keys or not is_dead():
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo:
+		return
+	if not RESTART_KEYS.has(key.physical_keycode):
+		return
+	restart_run()
+	var vp := get_viewport()
+	if vp != null:
+		vp.set_input_as_handled()
 
 # --- Il ciclo di gioco ---------------------------------------------------------
 

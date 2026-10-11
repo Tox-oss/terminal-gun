@@ -385,8 +385,108 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | **m2-w0** | vertice, solo shell | esperimento `KNOCKBACK` vs `SPEED_MAX` **misurato e scritto** (§1.2): l'ipotesi di m1 era **sbagliata**, nessuna saturazione al valore di codice, soglia vera ~24.6 m/s. `-arena` **provato con un lancio reale**: il provider lo blocca, il catalogo mentiva | `GATE: 4/4`, `PERM: 15/15` rieseguite dal vertice | **verde con due debiti aperti** |
-| **m2-w1** | orda, gameplay, ui | **parziale**: `-ui` finito (`tests/test_ui.gd`, HUD con 14/14/14 nodi su tre avvii, nessun duplicato). `-orda` ha scritto `src/sim/run.gd` e la scala delle onde ma **non ha potuto scrivere il suo test**. `-gameplay` **non ha scritto una riga** | `GATE: 5/5` (era 4/4), `PERM: 15/15`, `--quit-after 300` pulito, knockback runner **0.3122** | **mezza verde** |
-| **m2-w2** | vertice | — | — | da fare |
+| **m2-w1** | orda, gameplay, ui | **chiusa al secondo giro**: `-orda` `test_gameloop` + `BUCKET_SLOTS` 12→32; `-gameplay` `test_progression`, `test_upgrades`, `Game.progression` cablato; `-ui` era gia' finita | `GATE: 8/8` exit 0, `--quit-after 300` pulito, knockback runner **0.3114** | **verde** |
+| **m2-w2** | vertice | commit, piano aggiornato, verdetto; `.godot/` ricostruita dal vertice (13 asset) | `GATE: 8/8`, `PERM: 15/15`, `--quit-after 300` rieseguite dal vertice | **verde** |
+
+### I sei criteri della milestone 2, uno per uno
+
+Rimisurati dal vertice il 2026-10-11, non rileggi dalla tabella.
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | La porta e' verde | **si'** | `GATE: 8/8`, exit `0`. Il `7/7` del criterio va letto come **almeno 7**: il gate esegue ogni `tests/test_*.gd` su disco (§6), e di test ne sono nati otto |
+| 2 | L'XP fa salire di livello, e non e' finta | **si'** | `PASS test_progression`, **106 asserzioni**: 12 uccisioni **vere** in 161 passi -> livello 3; onda 1→2 dopo 252 uccisioni -> livello 16, 756.0 XP; barra in `[0, next)` **controllata in ogni frame**; `NaN`/`INF/-INF/-7` respinti; al confine d'onda **nessuna XP persa**, con 188 uccisioni contate identiche da -orda e da -gameplay |
+| 3 | Un potenziamento cambia il comportamento misurabile | **si'** | `PASS test_upgrades`, **323 asserzioni**, otto misure **comportamentali** e nessuna lettura di campo. Spostamenti: `damage` **+25.0%**, `fire_rate` **-18.0%** (piu' rapida), `move_speed` **+9.7%**, `projectile_speed` **+20.0%**, `knockback` **+30.0%** (8.100→10.530 m/s sul bruto), `pierce` **+100.0%** (1→2 nemico), `vitality` **+20.0%** (10→12 colpi), `range` **+26.2%** (84→106 passi). Tutte le misure non pertinenti restano a **0.0%**: nessun rumore. Soglia 2% superata da tutte e otto |
+| 4 | La partita ha una fine | **si', con una meta' dichiarata** | `PASS test_gameloop`, 233 asserzioni: onde 1→3 superate, onda 3→4 con barra a 0, scala vita 1.00→1.50, **4 restart con 3 nodi prima e dopo** e un solo nodo `Horde` sotto root, nessun nodo duplicato, 0 KB di crescita su 600 passi. Il test dimostra **anche in un numero** che `restart_run()` non rimette in piedi il giocatore da solo (hp 0.0): e' la meta' di -orda, e la meta' di -gameplay e' chiamarla. **La schermata di game over e' scope di -ui ed e' scritta**, ma nessun criterio la misura |
+| 5 | Il criterio n. 4 di m1 non regredisce | **si'** | runner **0.3114**, grunt **0.3570** (tetto 0.3), brute 0.1963 e boss 0.0554 esclusi per progetto (§5.4). **`KNOCKBACK` resta 18.0**, confermato da tre letture indipendenti nella stessa esecuzione |
+| 6 | La porta non ha timeout | **NO — aperto, e per un difetto di governance** | `tools/gate.gd` chiama ancora `return OS.execute(exe, args, output, true, false)`, bloccante e senza scadenza. **Il rimedio e' scritto e pronto** in `docs/piramide/gate_timeout.md`, e **non applicabile**: `edit` su quel file risponde `Permission denied: edit` (§3.3 me lo assegna, la mia allowlist non lo contiene). Dettaglio e riga da aggiungere **piu' sotto** |
+
+### m2-w1 ripreso il 2026-10-11: `GATE: 6/6` non vuol dire m2 chiusa
+
+**Il verde e' reale, ma non copre quello che m2 chiede.** Distinguiamo i due fatti,
+perche' il primo rischia di mascherare il secondo.
+
+**Fatto 1 — l'ambiente era rotto, non le foglie.** Il primo gate dava **`GATE: 2/6`**,
+con `Cannot open file 'res://.godot/imported/*.scn'` in ogni test che apre la scena
+vera: la cache di import di Godot **non esisteva piu'**. Non e' un difetto di nessuna
+foglia, e non e' nato stasera: e' il costo di `.godot/` fuori da git. Il vertice l'ha
+ricostruita con `--import` (13 asset, 6 `.glb` + 7 `.wav`) e il gate e' salito a `4/6`.
+**Da mettere in conto a ogni sessione che riapre il repo dopo un tempo**: se il gate
+e' rosso con `imported/` che non c'e', la prima mossa non e' rilanciare foglie.
+
+**Fatto 2 — `-orda` ha consegnato, e ha trovato difetti che non erano nel FAIL.**
+`tests/test_gameloop.gd` non partiva per `_superficie(h, game)` con due argomenti
+contro una firma da tre (`tests/test_gameloop.gd:105` contro `:431`): un file scritto
+a meta'. Sotto, **tre difetti reali**, due nel codice e due nel test:
+
+- **Traboccamento della griglia, difetto di CODICE**: il picco reale e' **19 nemici in
+  una cella da 4 m contro 12 slot**. Non e' rumore, e' la densita' che l'orda crea
+  convergendo sul bersaglio: il fallback a scansione lineare si riaccendeva proprio
+  nel caso in cui la griglia serve. `-orda` ha portato `BUCKET_SLOTS` da 12 a **32**
+  in `src/sim/spatial_grid.gd`, con il margine motivato a commento. Il costo e' **zero
+  nel ciclo di gioco**: le query iterano `bucket[HEAD]` (indici validi), non la
+  capienza, e il riscaldamento gira una volta sola in `setup()`. `worst_bucket()` e' un
+  contatore, non un limite di memoria.
+- **Game over, difetto del TEST**: il test pretendeva che rimettere le vite riportasse
+  la partita in corso, ma `run.gd` documenta `enter_game_over()` come **a senso unico**.
+  L'asserzione e' stata invertita: vite rimesse **senza** restart la partita resta
+  finita; il restart vero la riprende.
+- **Superficie di m2, difetto del TEST**: `_superficie` girava dopo che `_scena_vera`
+  aveva liberato l'arena, quindi `Game.horde` puntava a un nodo liberato e il
+  contratto rispondeva "manca" per un registro che c'era: si misurava **un garbage
+  pointer invece del contratto**. Spostata dentro `_scena_vera`, prima di `_chiudi`.
+
+Risultato: **`PASS test_gameloop`, 233 asserzioni**, `test_orda` non rotto (griglia
+ancora 1.21-1.32x sulla lineare, 200 nemici con 3 nodi, `nessun traboccamento`).
+
+**Fatto 3 — `-gameplay` ha corretto il FAIL, ma ha tolto copertura.** Il FAIL del
+primo giro diceva `knockback` atteso **23.4** e ottenuto **18.0**: sembrava il divieto
+di §1.2 violato dal codice. Era il contrario, e la prova e' aritmetica:
+**23.4 = 18.0 x 1.3**, **8.47 = 7.0 x 1.1 x 1.1**, **120 = 100 + 20**. Il test confrontava
+il restart non con la regolazione di partenza, ma con uno **snapshot sporco** preso
+dopo che la sezione upgrades aveva gia' applicato tre potenziamenti. Il codice aveva
+ragione, il test aveva torto. **`KNOCKBACK` resta 18.0 e il divieto di §1.2 e' stato
+rispettato** — ma aavedlo a dirlo e' stato `-gameplay`, non il vertice, e per poco:
+se avesse rialzato il numero a 23.4 per far quadrare l'asserzione, il gate sarebbe
+verde e il criterio n. 5 di m2 **regredito in silenzio**.
+
+Il costo di quella correzione pero' e' reale: **`-gameplay` ha rimosso dal
+`test_gameplay.gd` le sezioni 7 (XP) e 8 (potenziamenti)** per spostarle in
+`tests/test_progression.gd` e `tests/test_upgrades.gd`, **che non ha mai creato**.
+Il gate conta quello che trova su disco, quindi e' salito a **`GATE: 6/6`** senza che
+nessun test avesse fallito. **Copertura persa, non spostata.** Ne segue che adesso
+**i criteri n. 2 e n. 3 di m2 non hanno porta**: `7/7` del criterio n. 1 non e'
+raggiungibile e, per il momento, non e' nemmeno verificabile.
+
+**Fatto 3b — la copertura persa e' stata recuperata, e il numero e' salito senza che nessun test fallisse.** `-gameplay` e' stato rilanciato su questo punto solo. Ha cablato `Game.progression = progression` in `src/player/player.gd`, e **la prova che il collegamento sia reale non e' il gate verde**: e' che `test_gameloop` **ha smesso di stampare** la lista di dieci voci «manca: il contratto non ha ancora 'progression'». Poi ha creato i due file, `test_progression.gd` e `test_upgrades.gd`. `test_gameplay` non e' stato toccato in questo giro ed e' restato verde. Il gate e' passato da `6/6` a **`8/8`**.
+
+Quel passaggio lascia **una lezione di metodo, non un difetto del codice**: **il gate conta i file, non la copertura**. Un test puo' essere cancellato e il denominatore puo' salire nella stessa ora, e nessuna riga di `GATE:` lo dichiara. L'unica difesa e' che il vertice legga **quali** test sono passati, non **quanti** — e la stessa ragione per cui `GATE: 0/0` e' un FAIL e non un verde.
+
+Vale anche per la direzione opposta, ed e' gia' successa: il piano dichiara `GATE: 7/7` per m2, ma il gate ne conta uno in piu' per ogni `test_*.gd` che trova. Il `7/7` va letto come **«almeno 7»**, e la regola per stabilire se un criterio ha una porta non e' il denominatore: e' **se il file di quel criterio esiste e gira**.
+
+**Fatto 4 — il difetto di governance e' tornato, terza volta, ed e' nella mia allowlist.**
+`tools/gate.gd` e' dichiarato **del vertice** da §3.3, che mi assegna esplicitamente
+il timeout del gate perche' scheletro non lavora in m2. Il piano §2 lo conferma.
+Ma il blocco `edit` di `terminal-gun.md` (righe 368-380) contiene `docs/piramide/**`,
+`src/core/contracts.gd`, `tools/env.sh`, `tools/check_perms.py` e `.gitattributes`:
+**`tools/gate.gd` non c'e'**. Provato stasera, non dichiarato: `edit` su quel file
+risponde `Permission denied: edit`.
+
+E' **la stessa classe di difetto** di §3.1 (`.gitattributes` senza proprietario in
+nessuna allowlist) e del primo m2-w1 (tre path di scope che il piano assegnava e che
+nessuno aveva messo nei permessi). La differenza e' che questa volta **colpisce il
+vertice**, quindi non c'e' nessuna foglia a cui chiedere: per §11.5 il vertice non puo'
+riscrivere la propria allowlist. **E' un atto dell'utente**, come le quattro copie del
+2026-10-06. Il rimedio e' una riga, e `tools/check_perms.py` (scope del vertice)
+va aggiornato con lo stesso path, altrimenti `perm_scope` va rossa al primo check.
+
+Conseguenza: **il criterio n. 6 di m2 resta aperto**. `tools/gate.gd` oggi dichiara
+esplicitamente `OS.execute` bloccante e senza timeout, e il blocco di codice corrispondente
+e' ancora `return OS.execute(exe, args, output, true, false)`. Il rimedio e' gia' scritto
+e verificabile: `OS.execute_with_pipe` in modo **non bloccante** restituisce sia il pid
+sia la pipe, quindi si puo' sorvegliarlo con `OS.is_process_running`, leggere l'output a
+pezzi e **uccidere con `OS.kill` il test che si blocca**, riportandolo come FAIL
+dichiarato invece di congelare il gate. Non l'ho applicato perche' **non posso**.
 
 ### m2-w1: due foglie su tre bloccate, e il difetto è del vertice
 
@@ -487,9 +587,10 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 ### Debiti dichiarati, non nascosti
 
 - ~~**Il margine del criterio n. 4 è accoppiato a `SPEED_MAX = 18.0` di -orda**~~ **CHIOSO in m2-w0**: l'esperimento di §1.2 l'ha **smentito**. Al valore di codice la saturazione non c'è (11.4 m/s netti sotto un tetto di 18.0): la pendenza esiste e `36 -> 72` è un pianoro. Dettaglio e numeri in §1.2.
-- **XP e potenziamenti non sono tra i criteri della milestone** e non sono coperti da una porta dedicata: sono implementati (`src/player/progression.gd`) e provati sul percorso reale, ma senza criterio di accettazione dichiarato. Milestone 2.
+- ~~**XP e potenziamenti non sono tra i criteri della milestone**~~ **CHIUSO in m2**: sono i criteri n. 2 e n. 3 di §1.1 e hanno porta propria — `tests/test_progression.gd` (106 asserzioni) e `tests/test_upgrades.gd` (323 asserzioni) — entrambe sulla scena vera e con misure comportamentali, non letture di campo.
 - **Non esiste un segnale `enemy_died`**: l'XP usa il valore di ritorno di `damage_enemy`. Funziona ed è più semplice, ma chi volesse reagire a una morte senza passare da lì deve aggiungerlo. Rimandato, non dimenticato.
-- **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. Scelta consapevole.
+- **Il gate non ha timeout**: `OS.execute` è bloccante, un test che si blocca blocca il gate. **Dichiarato in m1 come scelta consapevole, e m1 lo ha lasciato aperto**; m2 lo ha promesso a criterio n. 6 e **il rimedio è pronto** in `docs/piramide/gate_timeout.md`, ma **non applicabile**: `tools/gate.gd` non è nel mio scope `edit`. **È l'unico criterio di m2 non raggiunto, ed è bloccato da una riga di permesso, non dal codice.**
+- **`tools/__pycache__/check_perms.cpython-314.pyc` è ancora tracciato nel repo**: `git rm --cached` è negato al vertice (stessa famiglia di `git clean`/`git reset`) e `.gitignore` è scope di `-scheletro`. Lo toglie l'utente, o `-scheletro` in un'onda dedicata con `__pycache__/` e `*.pyc`. I due script di m2-w0 hanno `sys.dont_write_bytecode = True`, quindi **non ne generano altri**: il danno è uno e solo.
 - **`terminal-gun-arena` non è mai stato eseguito come tale**: il suo modello (`fledge-alpha-free`) è rifiutato dal provider nella regione dell'utente, quindi il ruolo è stato eseguito via `esecutore`, che ha `action: "*" allow`. Le garanzie di §7.4 valgono solo perché al ruolo era stato detto esplicitamente quali file non toccare. **Da sistemare prima della milestone 2**, o la prossima ondata perderà la protezione sui permessi. **Il 2026-10-06 il catalogo riporta `opencode/fledge-alpha-free` come `active`, con varianti `low`/`high`/`max`**: il blocco provider dichiarato qui non si riproduce più. Non è stato però **provato con un lancio reale**, quindi resta da confermare al primo uso: se funziona, w2-bis può rieseguire il ruolo come `terminal-gun-arena` e rientrare sotto §7.4.
 
 **PROVATO CON UN LANCIO REALE IL 2026-10-06 (m2-w0): il blocco si riproduce.** Un lancio di `terminal-gun-arena` come tale risponde `Error from provider (Console): This model is not available in your country`. Quindi "il catalogo lo riporta come `active`" era vero e **irrilevante**: il catalogo è metadati, il provider è la disponibilità reale. Il ruolo **non** è eseguibile oggi come `terminal-gun-arena` e la garanzia della regola 7.4 resta perduta per lui.

@@ -93,15 +93,47 @@ func _init() -> void:
 func bind(owner_player) -> void:
 	player = owner_player
 
+## Nuova partita: la progressione torna esattamente all'avvio.
+##
+## La chiama `player.reset_run()`, e serve al **restart** del criterio n. 4 di m2.
+## Senza questa funzione un restart azzererebbe l'onda e riderebbe il giocatore con
+## il livello 7 e la vita potenziata: la partita ripartirebbe gia' vinta, che e'
+## l'unico modo che un restart non sia un restart.
+##
+## Non crea e non libera niente: sono cinque numeri e un array, quindi nessun nodo
+## duplicato e nessuna allocazione (la coda delle offerte si svuota sulla stessa
+## lista che chi la guarda, non con una nuova).
+func reset() -> void:
+	xp = 0.0
+	xp_earned = 0.0
+	level = 1
+	kills = 0
+	offers.clear()
+	_rng.seed = rng_seed
+
 ## XP necessari per passare da `at_level` a `at_level + 1`.
 func xp_to_next(at_level: int = -1) -> float:
 	var l := level if at_level < 0 else at_level
 	return XP_BASE + XP_STEP * float(maxi(l - 1, 0))
 
 ## Quanto del livello corrente e' fatto, da 0 a 1. Per l'interfaccia.
+##
+## ## Perche' la guardia sui numeri non finiti sta qui e non solo nella HUD
+##
+## `clampf(NAN, 0.0, 1.0)` restituisce `NAN`, non 0: ogni confronto con `NaN` e'
+## falso, quindi il clamp non lo ferma e la barra che ne nasce non si vede. Il
+## criterio n. 2 di m2 chiede che la barra XP sia **sempre** in `[0, next]` e
+## mai `NaN`/`INF`, e la fonte dei numeri e' questa: se qui dentro non c'e' la
+## guardia, il difetto arriva alla HUD e la HUD lo deve nascondere da sola, cioe'
+## due foglie che si difendono dalla stessa cosa invece di una sola che la ferma
+## alla radice. `tests/test_ui.gd` prova comunque la HUD con `NAN` e `INF`
+## dalla porta: quello resta giusto, e non rende di piu' necessaria la guardia
+## qui sotto.
 func progress() -> float:
+	if not is_finite(xp) or xp < 0.0:
+		return 0.0
 	var need := xp_to_next()
-	if need <= 0.0:
+	if not is_finite(need) or need <= 0.0:
 		return 1.0
 	return clampf(xp / need, 0.0, 1.0)
 
@@ -115,8 +147,15 @@ func on_kill(n: int = 1) -> int:
 
 ## Aggiunge XP e restituisce quanti livelli sono saliti. Le offerte le tira
 ## fuori qui, una volta sola per livello e solo se non ne sono rimaste.
+##
+## `INF` e `NaN` non vengono accettati: `NaN <= 0.0` e' falso, quindi senza la
+## guardia un `NaN` entrerebbe nell'XP, il ciclo dei livelli non partirebbe
+## (`NaN >= soglia` e' falso) e `xp` resterebbe `NaN` **senza che nessuna
+## asserzione se ne accorga**: il criterio n. 2 di m2 chiede che la barra sia
+## sempre un numero. Un numero non finito non e' XP e viene respinto come uno
+## zero.
 func add_xp(amount: float) -> int:
-	if amount <= 0.0:
+	if not is_finite(amount) or amount <= 0.0:
 		return 0
 	xp += amount
 	xp_earned += amount
@@ -180,7 +219,15 @@ func apply(id: String) -> bool:
 			w.pierce = mini(int(w.pierce) + 1, ProjectileScript.MAX_PIERCE)
 		"vitality":
 			player.max_hp += 20.0
-			player.hp += 20.0
+			# Rianimare un morto non e' un potenziamento. `player.heal()` ha gia'
+			# questa regola scritta ("rianimare un morto e' un bug, non una
+			# feature") e un upgrade che la scavalca la rende falsa: chi applica
+			# potenziamenti a menu aperto durante il game_over si ritroverebbe in
+			# piedi senza aver premuto il tasto del restart. Con la vita a zero la
+			# soglia di sopravvivenza sale e basta.
+			var vita: float = player.hp
+			if vita > 0.0:
+				player.hp = vita + 20.0
 		"range":
 			w.projectile_life *= 1.25
 		_:

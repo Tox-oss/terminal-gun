@@ -101,6 +101,44 @@ func _ready() -> void:
 	# interrompe il `_ready`, e la foglia crede di aver registrato).
 	Game.register_impl("spawn_projectile", self._spawn_projectile)
 
+## ## Nuova partita: l'arma torna alla regolazione di partenza
+##
+## ## Perche' questo metodo esiste, e non e' una formalita'
+##
+## `player.reset_run()` lo chiama, ed e' stato scritto **dopo** che il restart
+## e' diventato un criterio (n. 4 di m2). Senza di questo, `reset_run()` lancerebbe
+## `Invalid call. Nonexistent function 'reset'` a meta' della sua propria esecuzione:
+## le vite tornerebbero a 100 e la progressione a livello 1, ma **qui dentro
+## resterebbero i numeri dei potenziamenti scelti nella partita precedente** (il
+## danno prende il +25% a ogni livello, quindi una partita nuova comincerebbe gia'
+## con il danno di un livello 7). E' il difetto che `progression.reset()`
+## documenta e non risolve da solo: la progressione non puo' scrivere sui campi
+## dell'arma, e l'arma non puo' scrivere sulla progressione.
+##
+## Sono **numeri in campi che esistono gia'**: nessun nodo creato, nessuno liberato,
+## nessuna allocazione, quindi il criterio n. 4 ("nessun nodo duplicato") non
+## dipende da una scelta di questo file. Il pool viene svuotato con il **suo**
+## `reset()`, che riusa gli stessi 100 record: `ever_created()` resta 100 anche
+## dopo un restart.
+##
+## Il cooldown torna a `0.0` e non a `fire_interval`: come all'avvio, il primo
+## colpo deve partire **al primo `step()`** e non un `fire_interval` dopo. Un
+## restart che lasciasse l'arma in attesa e' una partita nuova che comincia senza
+## sparare, che e' il difetto peggiore di tutti quelli che poteva avere.
+func reset() -> void:
+	damage = DAMAGE
+	fire_interval = FIRE_INTERVAL
+	projectile_speed = PROJECTILE_SPEED
+	projectile_life = PROJECTILE_LIFE
+	knockback = KNOCKBACK
+	pierce = PIERCE
+	acquire_radius = ACQUIRE_RADIUS
+	cooldown = 0.0
+	shots = 0
+	_sfx_gap = 0.0
+	if pool != null:
+		pool.reset()
+
 ## Un passo di gioco: cooldown, eventuale colpo, e il volo dei proiettili.
 func step(delta: float) -> void:
 	cooldown -= delta

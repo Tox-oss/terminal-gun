@@ -5,7 +5,7 @@ extends SceneTree
 ## player spara da solo, il proiettile viaggia, e il danno viene applicato **una
 ## e una sola volta**. Tutto con numeri, non con parole.
 ##
-## Le sette cose che il test dimostra:
+## Le sette cose della milestone 1 che il test dimostra, e le tre di m2:
 ##   0. il contratto e' davvero interrogato: `nearest_enemy` e `damage_enemy`
 ##      chiamati a mano dal test arrivano al doppio, con la semantica giusta
 ##      (indice, `-1` = nessun bersaglio, `true` = ucciso);
@@ -28,7 +28,22 @@ extends SceneTree
 ##      risponde `true`) fanno salire di livello, e il livello offre
 ##      **esattamente 3** potenziamenti, tutti e tre applicabili;
 ##   6. 300 colpi non allocano niente: il pool non cresce mai e i conteggi di
-##      nodi e di oggetti restano quelli di prima.
+##      nodi e di oggetti restano quelli di prima;
+##   9. **criterio n. 4 di m2, meta' di -gameplay**: `reset_run()` rimette in
+##      piedi il giocatore, `restart_run()` rimette in piedi la partita intera, e
+##      nessun nodo viene duplicato. Il numero che decide e' uno solo: dopo il
+##      restart, un passo di simulazione **non** rilegge `game_over`.
+##
+## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
+##
+## Il criterio n. 2 (l'XP) e' in `tests/test_progression.gd` e il criterio n. 3
+## (i potenziamenti) e' in `tests/test_upgrades.gd`: sono file separati per il
+## piano §3.3, e qui non ci sono piu'. Prima stavano in questo file solo perche'
+## su questa macchina non si poteva creare un file nuovo; il permesso e' stato
+## riparato e i due file esistono.
+##
+## Quello che resta qui e' la parte che **non** e' loro: il livello che offre
+## esattamente tre potenziamenti applicabili (criterio n. 4 di m1) e il restart.
 ##
 ## L'orda e' un **doppio finto** definito qui sotto (`FakeHorde`), non
 ## `src/sim/horde.gd`: questo test non deve aspettare che -orda abbia finito.
@@ -57,9 +72,11 @@ const H = preload("res://tools/test_harness.gd")
 const DT := 1.0 / 60.0
 const PLAYER_SCENE := "res://scenes/player.tscn"
 const PLAYER_SCRIPT := "res://src/player/player.gd"
-## Percorso **stringa**: vedi la nota sul caricamento in testa al file. Serve solo
-## per chiedere al suo script la tabella dei potenziamenti, non per preloaderlo.
-const PROGRESSION_SCRIPT := "res://src/player/progression.gd"
+## L'orda **vera** di -orda, caricata a runtime dalla sezione del restart. E' uno
+## script, quindi non ha bisogno della cache di import: e' l'unica parte del
+## percorso vero che questo test usa senza `scenes/arena_main.tscn`, che
+## `tests/test_progression.gd` e `tests/test_upgrades.gd` caricano per intero.
+const HORDE_SCRIPT := "res://src/sim/horde.gd"
 ## La resistenza al knockback del boss: 0.90 in `src/sim/enemy.gd`. Serve alla
 ## sezione `_knockback_impulse` per provare che e' **il contratto** a decidere
 ## quanto il colpo sposta, e non -gameplay a pre-scalare l'impulso.
@@ -265,6 +282,25 @@ var pool
 
 var _h
 var _ran := false
+var _t0 := 0
+## La regolazione **di partenza**, letta dall'istanza viva subito dopo l'avvio e
+## prima che una sola sezione la sporchi.
+##
+## ## Perche' esiste, e il difetto che ha scoperto
+##
+## Il restart era confrontato contro uno `vita0`/`corsa0`/`spinta0` letti **all'inizio
+## della sezione del restart**, e a quel punto la sezione 5 aveva gia' applicato tre
+## potenziamenti: la spinta era 23.4 (18 x 1.3, il prodotto di un rialzo
+## deliberato), la vita massima 120 (100 + 20) e la corsa 8.47. Il test si
+## aspettava quindi quei numeri sporchi e il codice, che riporta tutto alla
+## **regolazione di partenza** (18.0, 100.0, 7.0, i valori di `weapon_base.gd` e
+## `player.gd`), falliva su un difetto che non aveva.
+##
+## Il riferimento giusto e' l'unico che non dipende dall'ordine delle sezioni: lo
+## stato **vergine**, preso qui sotto. Ed e' anche la prova che `KNOCKBACK` non e'
+## stato alzato in m2 (piano §1.2, conseguenza n. 2): il numero di partenza e'
+## 18.0 e resta 18.0 dopo il restart.
+var _prima: Dictionary = {}
 
 ## Niente qui dentro. Il corpo del test gira al primo frame, non in
 ## `_initialize()`: un nodo aggiunto a `root` **durante** `_initialize()` non ha
@@ -273,6 +309,7 @@ var _ran := false
 ## `_ready`. Verificarlo in un ordine sbagliato farebbe fallire un test sulle
 ## cose che funzionano.
 func _initialize() -> void:
+	_t0 = Time.get_ticks_msec()
 	_h = H.new()
 
 func _process(_delta: float) -> bool:
@@ -293,6 +330,11 @@ func _process(_delta: float) -> bool:
 		_damage_and_iframes(h)
 		_xp_and_upgrades(h)
 		_no_allocation(h)
+		# Criterio n. 4 di m2, meta' di -gameplay. Instala l'orda **vera** di
+		# -orda, che prende il contratto: da qui in avanti questa sezione parla
+		# con l'orda vera e non piu' con il doppio finto delle altre.
+		_restart_run(h)
+	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
 
@@ -372,6 +414,18 @@ func _setup(h) -> void:
 		h.eq(pool.capacity(), 100, "il pool nasce con 100 proiettili")
 		h.eq(pool.ever_created(), 100, "e li ha creati tutti e 100 una volta sola")
 		pool.reset()
+
+	# Qui il giocatore e' **vergine**: nessuna sezione e' ancora passata di qui, e
+	# quindi nessun potenziamento e' stato applicato. E' l'unico posto in cui la
+	# regolazione di partenza si puo' leggere senza dipendere dall'ordine delle
+	# sezioni (vedi `_prima` in testa al file).
+	_prima = _numeri()
+	h.check(float(_prima["damage"]) > 0.0, "il danno di partenza esiste ed e' positivo")
+	h.check(float(_prima["knockback"]) > 0.0, "la spinta di partenza esiste ed e' positiva")
+	h.positive(float(_prima["move_speed"]), "la velocita' di corsa di partenza esiste")
+	h.positive(float(_prima["max_hp"]), "la vita massima di partenza esiste")
+	h.near(float(_prima["hp"]), float(_prima["max_hp"]), 0.0001,
+		"e alla partenza la vita e' piena")
 
 # --- 1. Movimento con delta noto, e clampato all'arena -------------------------
 
@@ -816,10 +870,321 @@ func _no_allocation(h) -> void:
 	weapon.fire_interval = fire_before
 	weapon.projectile_life = life_before
 
+# --- 7. Criterio n. 2 di m2: l'XP fa salire di livello, e non e' finta -----------
+#
+# Questa sezione e' stata spostata in `tests/test_progression.gd`, che e' il file
+# che il piano §3.3 assegna al criterio n. 2. Qui non c'e' piu'.
+
+# --- 8. Criterio n. 3 di m2: un potenziamento cambia un numero di almeno il 2% --
+#
+# Questa sezione e' stata spostata in `tests/test_upgrades.gd`, che e' il file che
+# il piano §3.3 assegna al criterio n. 3, e che la misura **sulla scena vera**.
+# Qui non c'e' piu'.
+## scrivono, quindi la firma di un potenziamento e' questo dizionario.
+func _numeri() -> Dictionary:
+	return {
+		"damage": float(weapon.damage),
+		"fire_interval": float(weapon.fire_interval),
+		"projectile_speed": float(weapon.projectile_speed),
+		"projectile_life": float(weapon.projectile_life),
+		"knockback": float(weapon.knockback),
+		"pierce": int(weapon.pierce),
+		"acquire_radius": float(weapon.acquire_radius),
+		"move_speed": float(player.move_speed),
+		"max_hp": float(player.max_hp),
+		"hp": float(player.hp),
+	}
+
+## Le stesse cose piu' le tre grandezze **derivate** sono in
+## `tests/test_upgrades.gd`: qui la firma non serve, perche' la unica firma che
+## questo file confronta e' quella della regolazione di partenza.
+
+# --- 9. Criterio n. 4 di m2, meta' di -gameplay: il restart ----------------------
+#
+# `horde.restart_run()` (di -orda) azzera l'orda e la partita e **non tocca il
+# giocatore**: se le vite restano a zero, il passo di simulazione successivo
+# rilegge `game_over` e la partita si ferma di nuovo. Questa sezione verifica la
+# meta' di -gameplay, e il numero che decide e' uno solo e non e' un numero di
+# campi:
+#
+#     dopo restart_run(), un passo di simulazione NON deve rileggere game_over
+#
+# Se `reset_run()` non rimettesse in piedi il giocatore, quel numero resta
+# `game_over` e qui si vede. E i campi sono la spiegazione, non la prova: un
+# restart che azzerasse otto numeri ma lasciasse la partita ferma non e' un
+# restart.
+#
+# ## Il difetto che questa sezione e' nata per trovare
+##
+## `player.reset_run()` chiamava `weapon.reset()`, che **non esisteva**:
+# `reset_run()` lanciava `Invalid call. Nonexistent function 'reset'` a meta' della
+# propria esecuzione, e il restart non rimetteva in piedi l'arma. Il sintomo che
+# si sarebbe visto e' questo: le vite tornavano a 100 e il livello a 1, ma il
+# danno restava quello potenziato della partita precedente. Percio' qui il danno
+# viene sporcato **prima** del restart e confrontato **dopo**.
+#
+# ## E il difetto che questa sezione ha poi trovato al posto suo
+#
+# Il riferimento era sbagliato, non il codice. `vita0`/`corsa0`/`spinta0` venivano
+# letti **all'inizio della sezione**, e a quel punto la sezione 5 aveva gia'
+# applicato tre potenziamenti: il test si aspettava la spinta a 23.4 (18.0 x 1.3),
+# la vita massima a 120 (100 + 20) e la corsa a 8.47 (7.0 x 1.1 x 1.1). Il codice
+# riportava tutto alla **regolazione di partenza** e il test lo chiamava difetto.
+#
+# Il riferimento giusto e' `_prima`: la regolazione **vergine**, letta in `_setup()`
+# prima che una sola sezione la tocchi. Con quello il restart e' confrontato con i
+# numeri con cui la partita e' davvero cominciata, che e' l'unica cosa che un
+# restart deve ripristinare. E il numero che ne esce dice anche che `KNOCKBACK`
+# non e' stato alzato in m2 (piano §1.2, conseguenza n. 2): `spinta0` e' il valore
+# di `weapon_base.gd`, e resta quello dopo il restart.
+
+func _restart_run(h) -> void:
+	var prog = player.progression
+	# L'orda **vera** di -orda prende il contratto: il restart completo la chiama,
+	# quindi senza di lei questa sezione misurerebbe solo la meta' di -gameplay, su
+	# un'orda che non c'e'. Il passo di simulazione lo guida il test a mano.
+	var scr = load(HORDE_SCRIPT)
+	if not h.check(scr is Script, "src/sim/horde.gd deve caricare a runtime"):
+		return
+	var horde_vera = (scr as Script).new()
+	horde_vera.name = "OrdaVera"
+	horde_vera.set_physics_process(false)
+	root.add_child(horde_vera)
+
+	h.check(game.horde == horde_vera,
+		"l'orda vera prende il contratto: e' l'orda su cui il gameplay spara")
+	h.check(horde_vera.has_method("restart_run"),
+		"l'orda espone restart_run(): e' la meta' di -orda del restart, e il restart completo la chiama")
+	pool.reset()
+	h.check(weapon.has_method("reset"),
+		"l'arma espone reset(): e' il metodo che reset_run() chiamava e che non esisteva")
+	if not h.check(player.has_method("reset_run") and player.has_method("restart_run"),
+		"il giocatore espone reset_run() e restart_run()"):
+		return
+	h.check(player.has_method("is_dead"), "il giocatore espone is_dead(): e' la domanda sul game over")
+	if not h.check(not _prima.is_empty(),
+		"la regolazione di partenza e' stata letta in _setup(), prima che una sezione la sporchi"):
+		return
+
+	# I numeri di partenza, presi dall'**istanza viva vergine** (`_prima`) e non da
+	# una copia dentro questo file: una copia nel test si romperebbe al primo
+	# ritocco della regolazione e fallirebbe senza che nessuno l'abbia toccata.
+	var vita0: float = float(_prima["max_hp"])
+	var danno0: float = float(_prima["damage"])
+	var intervallo0: float = float(_prima["fire_interval"])
+	var spinta0: float = float(_prima["knockback"])
+	var perforante0: int = int(_prima["pierce"])
+	var vita_proj0: float = float(_prima["projectile_life"])
+	var velocita0: float = float(_prima["projectile_speed"])
+	var gittata0: float = float(_prima["acquire_radius"])
+	var corsa0: float = float(_prima["move_speed"])
+
+	var nodi0 := _conta_nodi(root)
+	var hordi0 := _conta_nomi(root, "OrdaVera")
+	h.eq(hordi0, 1, "l'orda vera e' stata installata una volta sola, prima del ciclo")
+
+	# Tre restart di fila, come i tre di -orda: un restart che funziona una volta
+	# puo' non funzionare alla seconda, perche' il secondo trova lo stato che il
+	# primo ha lasciato.
+	for giro in 3:
+		_sporca(h, giro)
+		h.check(player.is_dead(), "restart %d: prima del restart il giocatore e' a zero vite" % (giro + 1))
+		h.check(horde_vera.is_game_over(),
+			"restart %d: e la partita e' davvero finita, non solo il giocatore" % (giro + 1))
+		h.check(float(weapon.damage) != danno0,
+			"restart %d: e il danno e' davvero sporcato dal potenziamento (%.2f contro %.2f)"
+			% [giro + 1, weapon.damage, danno0])
+
+		player.restart_run()
+
+		h.near(player.hp, vita0, 0.0001, "restart %d: le vite tornano a %s" % [giro + 1, vita0])
+		h.near(player.max_hp, vita0, 0.0001, "restart %d: e la vita massima torna a %s" % [giro + 1, vita0])
+		h.check(not player.is_dead(), "restart %d: il giocatore e' di nuovo in piedi" % (giro + 1))
+		h.vec_near(player.position, Vector3.ZERO, 0.0001, "restart %d: e al centro dell'arena" % (giro + 1))
+		h.vec_near(player.velocity, Vector3.ZERO, 0.0001, "restart %d: fermo, non con la velocita' del game over" % (giro + 1))
+		h.near(float(player.move_speed), corsa0, 0.0001, "restart %d: la velocita' di corsa torna a %.2f" % [giro + 1, corsa0])
+		h.eq(int(prog.level), 1, "restart %d: la progressione torna al livello 1" % (giro + 1))
+		h.near(prog.xp, 0.0, 0.0001, "restart %d: e a zero XP in barra" % (giro + 1))
+		h.near(prog.xp_earned, 0.0, 0.0001, "restart %d: e a zero XP guadagnati" % (giro + 1))
+		h.eq(int(prog.kills), 0, "restart %d: e a zero uccisioni" % (giro + 1))
+		h.eq(int(prog.pending()), 0, "restart %d: e senza offerte rimaste appese" % (giro + 1))
+
+		# L'arma. E' il pezzo che mancava, ed e' quello che il difetto nascondeva.
+		h.near(float(weapon.damage), danno0, 0.0001,
+			"restart %d: il danno torna a %.2f e NON resta quello potenziato" % [giro + 1, danno0])
+		h.near(float(weapon.fire_interval), intervallo0, 0.0001,
+			"restart %d: l'intervallo fra i colpi torna a %.3f" % [giro + 1, intervallo0])
+		h.near(float(weapon.knockback), spinta0, 0.0001,
+			"restart %d: la spinta torna a %.1f m/s" % [giro + 1, spinta0])
+		h.eq(int(weapon.pierce), perforante0, "restart %d: e la perforante torna a %d" % [giro + 1, perforante0])
+		h.near(float(weapon.projectile_life), vita_proj0, 0.0001,
+			"restart %d: la vita del proiettile torna a %.2f s" % [giro + 1, vita_proj0])
+		h.near(float(weapon.projectile_speed), velocita0, 0.0001,
+			"restart %d: e la sua velocita' a %.1f m/s" % [giro + 1, velocita0])
+		h.near(float(weapon.acquire_radius), gittata0, 0.0001,
+			"restart %d: e la gittata di mira torna a %.1f m" % [giro + 1, gittata0])
+		h.near(float(weapon.cooldown), 0.0, 0.0001,
+			"restart %d: l'arma e' pronta a sparare al primo passo" % (giro + 1))
+		h.eq(int(weapon.shots), 0, "restart %d: il contatore dei colpi riparte" % (giro + 1))
+		h.eq(int(pool.active_count()), 0, "restart %d: nessun proiettile resta in volo" % (giro + 1))
+		h.eq(int(pool.ever_created()), int(pool.capacity()),
+			"restart %d: i %d proiettili sono gli stessi di prima, nessuno creato" % [giro + 1, pool.capacity()])
+
+		# La meta' di -orda, verificata perche' il restart completo la chiama.
+		h.eq(int(horde_vera.wave), 1, "restart %d: si torna all'onda 1" % (giro + 1))
+		h.eq(horde_vera.run_state(), "playing", "restart %d: e la partita riparte" % (giro + 1))
+		h.check(int(horde_vera.count) > 0,
+			"restart %d: horde.count azzerato e RIPOPOLATO (%d)" % [giro + 1, horde_vera.count])
+
+		# ## IL NUMERO CHE DECIDE
+		#
+		# Un passo di simulazione, e la partita non deve rientrare in game_over.
+		# E' qui che la meta' di -gameplay si vede: se le vite fossero rimaste a
+		# zero, `_poll_run` le rileggerebbe e la partita si fermerebbe di nuovo.
+		horde_vera.step(DT)
+		h.check(not horde_vera.is_game_over(),
+			"restart %d: dopo il restart un passo di simulazione NON rilegge game_over (stato '%s')"
+			% [giro + 1, horde_vera.run_state()])
+		h.eq(horde_vera.run_state(), "playing", "restart %d: la partita riparte sul serio" % (giro + 1))
+		var ferma: PackedVector3Array = horde_vera.transforms.duplicate()
+		horde_vera.step(DT)
+		h.check(horde_vera.transforms != ferma,
+			"restart %d: e il mondo si muove di nuovo: non era fermo per sempre" % (giro + 1))
+
+		# Nessun nodo duplicato. Il totale puo' restare uguale con due orde e una
+		# orda morta, quindi si conta anche quante orde ci sono per nome.
+		h.eq(_conta_nodi(root), nodi0, "restart %d: nessun nodo creato o liberato" % (giro + 1))
+		h.eq(_conta_nomi(root, "OrdaVera"), hordi0,
+			"restart %d: una sola orda sotto root, non due" % (giro + 1))
+		h.check(game.horde == horde_vera, "restart %d: e il contratto punta ancora alla stessa orda" % (giro + 1))
+
+		# E l'arma spara **subito**, che e' la prima cosa che si sente.
+		#
+		# Il numero che decide e' `weapon.shots`, non `pool.active_count()`: un
+		# colpo partito contro un nemico che sta a un metro dalla canna arriva e
+		# muore **nello stesso frame** (percorso 0.43 m, raggio di contatto
+		# 0.16 + 0.55), e a quel punto nel pool non c'e' piu' nessuno. Dire "il
+		# primo colpo non e' partito" guardando il pool sarebbe misurare la
+		# distanza dal nemice piu' vicino, non la cadenza dell'arma.
+		var colpi_prima: int = int(weapon.shots)
+		player.step(DT, Vector3.ZERO)
+		h.eq(int(weapon.shots), colpi_prima + 1,
+			"restart %d: il primo colpo parte al primo passo, senza aspettare l'intervallo" % (giro + 1))
+
+	# `reset_run()` da solo: rimette in piedi il giocatore e **non** tocca l'onda.
+	# E' la separazione delle due meta' dichiarata in testa al file, misurata.
+	var wave_prima := int(horde_vera.wave)
+	var uccise_prima := int(horde_vera.kills)
+	player.reset_run()
+	h.near(player.hp, vita0, 0.0001, "reset_run() da solo rimette in piedi il giocatore")
+	h.eq(int(prog.level), 1, "e azzera la progressione")
+	h.eq(int(horde_vera.wave), wave_prima, "ma non tocca l'onda: e' la meta' di -orda")
+	h.eq(int(horde_vera.kills), uccise_prima, "e non tocca le uccisioni contate dall'orda")
+
+	# Il tasto che rimette in piedi la partita: una volta sola per pressione. Un
+	# `Input.is_key_pressed` tenuto premuto chiamerebbe il restart a ogni frame e
+	# la partita ripartirebbe ogni 16 ms.
+	_tasto_restart(h)
+	print("m2 restart: 3 restart completi + reset_run() da solo, %d nodi prima e dopo, "
+		% nodi0 + "HP %.1f -> %.1f, danno %.2f -> %.2f"
+		% [vita0, player.hp, danno0, float(weapon.damage)])
+
+## Sporca tutto quello che un restart deve ripulire: vite a zero, progressione
+## avanti di quattro livelli, e tre potenziamenti applicati. Il danno viene
+## **rimosso** subito dopo, perche' con tutti i nemici dell'orda vera vicino un
+## colpo riporterebbe il danno al valore di codice e il difetto del `reset()`
+## mancante sparirebbe dal test.
+func _sporca(h, giro: int) -> void:
+	var prog = player.progression
+	player.hp = 0.0
+	player.invuln = 0.0
+	player.velocity = Vector3(3.0, 0.0, -4.0)
+	player.position = Vector3(5.0, 0.0, 5.0)
+	prog.reset()
+	prog.add_xp(prog.xp_to_next() * 4.0)
+	for id in ["damage", "fire_rate", "move_speed"]:
+		prog.apply(id)
+	player.position = Vector3.ZERO
+	player.velocity = Vector3.ZERO
+	# Qualche passo di gioco: il cooldown e il contatore dei colpi non devono
+	# essere gia' a zero, altrimenti il restart non avrebbe nulla da rimettere a
+	# posto su quei due campi.
+	_passo_di_gioco()
+	h.check(float(weapon.damage) > 0.0,
+		"restart %d: la regolazione e' sporcata prima di misurare" % (giro + 1))
+	h.check(float(weapon.shots) > 0,
+		"restart %d: e sono partiti colpi, cosi' il contatore da azzerare esiste" % (giro + 1))
+
+## Un passo di gioco sul giocatore e sull'orda **vera**: a questo punto della sezione
+## e' quella sul contratto, non il finto.
+func _passo_di_gioco() -> void:
+	player.step(DT, Vector3.ZERO)
+	var hv = game.horde
+	if hv != null:
+		hv.step(DT)
+
+## Il tasto del restart. Chiamato direttamente perche' in un `--script` non c'e'
+## una pipeline di input che il test possa pilotare, e quello che si prova qui e'
+## la **decisione** (quando il restart parte e quando non parte), non il
+## trasporto dell'evento: chi lo trasporta e' il gioco.
+func _tasto_restart(h) -> void:
+	var player_legge_tasti: bool = player.read_keys
+	player.read_keys = true
+
+	# Il tasto non fa niente con il giocatore in piedi.
+	var vite_prima: float = player.hp
+	player._unhandled_input(_tasto(KEY_ENTER, true, false))
+	h.near(player.hp, vite_prima, 0.0001, "il tasto del restart non fa niente se il giocatore e' vivo")
+
+	# Con le vite a zero lo rimette in piedi, una volta sola.
+	player.hp = 0.0
+	var horde_vera = game.horde
+	if horde_vera != null:
+		horde_vera.step(DT)
+	h.check(player.is_dead(), "con le vite a zero il giocatore e' morto")
+	if horde_vera != null:
+		h.check(horde_vera.is_game_over(), "e la partita e' finita")
+	player._unhandled_input(_tasto(KEY_ENTER, true, false))
+	h.check(not player.is_dead(), "il tasto del restart rimette in piedi il giocatore")
+	if horde_vera != null:
+		h.check(not horde_vera.is_game_over(), "e la partita riparte: il tasto chiama restart_run(), non reset_run()")
+
+	# Il tasto tenuto premuto (`echo`) non deve rilanciare il restart a ogni
+	# frame: si conta che una seconda pressione con echo non tocchi niente.
+	var spinta := int(horde_vera.kills) if horde_vera != null else 0
+	player._unhandled_input(_tasto(KEY_R, true, true))
+	h.near(player.hp, player.max_hp, 0.0001,
+		"una pressione con echo non e' una nuova pressione: le vite non cambiano")
+	if horde_vera != null:
+		h.eq(int(horde_vera.kills), spinta, "e l'orda non viene riarruolata un'altra volta")
+
+	# E il tasto rilasciato non fa niente.
+	player.hp = 0.0
+	player._unhandled_input(_tasto(KEY_R, false, false))
+	h.check(player.is_dead(), "il rilascio del tasto non e' una pressione: non rimette in piedi nessuno")
+
+	# Un tasto che non e' fra quelli del restart non fa niente.
+	player.hp = 0.0
+	player._unhandled_input(_tasto(KEY_Q, true, false))
+	h.check(player.is_dead(), "un tasto che non e' fra quelli del restart non avvia niente")
+
+	player.read_keys = player_legge_tasti
+
+## Un `InputEventKey` costruito a mano.
+func _tasto(code: int, premuto: bool, ripetuto: bool) -> InputEventKey:
+	var ev := InputEventKey.new()
+	ev.keycode = code
+	ev.physical_keycode = code
+	ev.pressed = premuto
+	ev.echo = ripetuto
+	return ev
+
 # --- Interno -------------------------------------------------------------------
 
 ## Parti da zero: niente nemici, niente proiettili, player fermo al centro,
-## e progressioni azzerate.
+## e progressioni azzerate con il **suo** `reset()`, che e' la stessa strada che
+## usa `player.reset_run()`: un test che azzerasse i campi a mano misurerebbe una
+## progressione che il restart non usa.
 func _reset(at: Vector3) -> void:
 	if pool != null:
 		pool.reset()
@@ -832,11 +1197,7 @@ func _reset(at: Vector3) -> void:
 	player.dash_cd = 0.0
 	var prog = player.progression
 	if prog != null:
-		prog.kills = 0
-		prog.xp = 0.0
-		prog.xp_earned = 0.0
-		prog.level = 1
-		prog.offers = []
+		prog.reset()
 
 ## Un passo di simulazione: il giocatore (che muove e spara) e l'orda.
 func _frame() -> void:
@@ -855,13 +1216,34 @@ func _run_until_hit(max_frames: int) -> int:
 
 ## La tabella dei potenziamenti, letta dallo script della progressione a runtime.
 func _known_upgrades(prog) -> Array:
-	var consts: Variant = prog.get_script().get_script_constant_map()
+	return _script_const(prog, "UPGRADE_IDS")
+
+## Una costante di uno script, letta a runtime con `get_script_constant_map()`:
+## e' l'unico modo di arrivare alla costante di uno script senza metterla in
+## `const preload` qui dentro (vedi la nota sul caricamento in testa al file).
+func _script_const(obj, nome: String) -> Variant:
+	var consts: Variant = obj.get_script().get_script_constant_map()
 	if not (consts is Dictionary):
-		return []
-	for key in (consts as Dictionary):
-		if str(key) == "UPGRADE_IDS":
-			return (consts as Dictionary)[key]
-	return []
+		return null
+	return (consts as Dictionary).get(nome, null)
+
+## I nodi dell'albero contati davvero, ricorsivamente: dentro un `--script`
+## `get_node_count()` vale 0, perche' il ciclo di frame non e' ancora partito, e un
+## test che ci si appoggiasse passerebbe sempre.
+func _conta_nodi(nodo: Node) -> int:
+	var totale := 1
+	for c in nodo.get_children():
+		totale += _conta_nodi(c)
+	return totale
+
+## Quanti nodi chiamati `wanted` ci sono sotto `nodo`, ricorsivamente. Serve a
+## contare i **duplicati**, che un totale non vede: due orde e un'orda morta fanno
+## lo stesso numero di nodi.
+func _conta_nomi(nodo: Node, wanted: String) -> int:
+	var totale := 1 if nodo.name == wanted else 0
+	for c in nodo.get_children():
+		totale += _conta_nomi(c, wanted)
+	return totale
 
 ## I numeri che i potenziamenti cambiano, come stringhe: se un potenziamento
 ## cambiasse qualcosa di invisibile, la firma non cambierebbe e il test lo

@@ -28,7 +28,22 @@ extends RefCounted
 const CELL := 4.0
 
 ## Indici per cella, oltre al contatore.
-const BUCKET_SLOTS := 12
+##
+## **32, non 12: misurato.** `tests/test_gameloop.gd`, con l'orda piena (200) e
+## il fuoco sul giocatore, registra un **picco di 19 nemici in una sola cella**:
+## l'orda converge tutta sul bersaglio e le celle centrali si affollano. Con 12
+## slot il secchiello traboccava e **tutte** le query cadevano a scansione
+## lineare proprio nel caso in cui la griglia serve, cioe' quando la densita'
+## e' alta. Il fallback tornava a essere la camminata di 200 confronti che la
+## griglia doveva sostituire.
+##
+## A 32 il margine sul picco misurato e' del 68%, e il costo e' **zero** nel
+## ciclo di gioco: `nearest_index`, `collect_into` e `fill_radius` iterano
+## `bucket[HEAD]`, cioe' gli indici **validi**, mai la capienza. Il secchiello
+## grande costa solo `BUCKET_SIZE * 4` byte per cella riscaldata, e il
+## riscaldamento sta in `setup()`, che gira una volta sola all'avvio: 841 celle
+## da 25 slot sono ~84 KB, presi **prima** del primo frame e mai piu'.
+const BUCKET_SLOTS := 32
 ## `bucket[0]` = quanti indici validi.
 const HEAD := 0
 ## Il primo slot di dato.

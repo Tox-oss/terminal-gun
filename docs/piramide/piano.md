@@ -282,22 +282,128 @@ soggetto di m4. Va detto qui perché è una scoperta dell'ondata, non una cosa c
 file e il vertice lo riscrive **prima** di lanciare; `-arena` riceve il numero nuovo già scritto
 e lo rende verificabile. È l'ordine giusto: un test non riscrive il criterio che lo giudica.
 
-### 4.4 Onde della milestone 4
+## 1.5 Milestone 5 — W/S invertiti e proiettili nel posto sbagliato
+
+Come m4, nasce da una persona che ha giocato. Ma questi due non sono difetti di **design**: sono
+difetti che la porta **non poteva** vedere, e il motivo è la parte che questa milestone dichiara.
+
+### 1.5a I due difetti, con la prova
+
+**W e S invertiti.** `src/player/player.gd:250` costruisce l'input e il suo commento dichiara la
+convenzione — *«`z` a avanti sullo schermo (quindi -1 con W)»*, e W dà `v.z -= 1.0`. Poi
+`world_direction` (riga 265) fa:
+
+```gdscript
+var up := Vector3(b.y.x, 0.0, b.y.z)      # "su sullo schermo", preso dalla camera
+var dir := (right.normalized() * flat.x) + (up.normalized() * flat.z)
+```
+
+La camera guarda dall'alto e da dietro (`HEIGHT = 34`, `BACK = 24`, `arena_camera.gd:14-16`), e
+`look_at` le orienta la `+Y` **allontanandola dalla camera in orizzontale**: cioè `up` punta
+**già** «su sullo schermo». Moltiplicarlo per `flat.z = -1` con W **riporta indietro**. È una
+doppia negazione, e W spinge il giocatore **verso la camera**, cioè **giù sullo schermo**.
+
+**I proiettili nel posto sbagliato.** `projectile_pool.gd:376` scrive
+`set_instance_transform(i, Transform3D(_visual_basis, pos))` dove `pos` è una **posizione mondo**
+(viene da `muzzle_position()` = `global_position + MUZZLE_HEIGHT`). Ma la `MultiMeshInstance3D`
+che la disegna è creata a riga 340 e aggiunta **al pool**, che `weapon_base.gd:85-87` aggiunge
+**all'arma**, che è `Player/Weapon`. Quindi ogni proiettile viene disegnato a
+**posizione del giocatore + posizione mondo del proiettile**: i pallini scortano di quanto ti sei
+mosso.
+
+### 1.5a-bis Dove la doppia negazione è stata tolta, e perché lì
+
+**`-gameplay` ha tolto il segno in `read_input()`, non in `world_direction()`.** La lettura della
+tastiera è passata in una funzione **pura**, `input_vector(destra, sinistra, indietro, avanti)`,
+e lì **W dà `z = +1` invece di `-1`**.
+
+Il motivo, dichiarato nel file: **`right * x + up * z` in `world_direction` è la formula giusta**.
+`up` presa dalla base della camera è **per costruzione** l'alto dello schermo, e il suo ripiego
+`-b.z` è l'avanti, cioè la stessa cosa in orizzontale. Quindi l'unica riga col verso sbagliato era
+**il costruttore del vettore**, non il traduttore.
+
+**Ed è una scelta giusta per una ragione che non è di stile.** Il vettore di W era dichiarato in
+**due posti** con due convenzioni diverse: il commento di `read_input` e la formula di
+`world_direction`. Cambiare la formula avrebbe lasciato il commento a mentire; cambiare il
+costruttore lascia la formula, che è quella giusta, e sposta la convenzione **in un posto solo**.
+Il piano che stai leggendo è **stantio su questo punto**: la convenzione ora è `z = +1` per W, non
+`-1`. Il numero nella prova qui sopra è quello di **prima** del fix, e serve perché descrive il
+difetto.
+
+**Tre API pubbliche sono nate per la misura** (`visual_node`, `draw_transform`, `draw_position`):
+in headless la MultiMesh non si rilegge, quindi l'unico numero prendibile è la **trasformazione
+del nodo**, che è la causa. Il fix è `top_level = true` su `Projectiles`, impostato **prima** di
+`add_child` perché il nodo non entri mai nell'albero con la trasformazione del padre: è una
+*proprietà*, non un nodo, quindi `node_count` resta **33** e il criterio n. 3 di m1 non regredisce.
+
+### 1.5b Perché la porta era verde, ed è la parte importante di m5
+
+| difetto | perché `GATE: 8/8` non lo poteva vedere |
+|---|---|
+| W/S invertiti | `world_direction` con la **base identità** (test headless: nessuna camera) dà `-z` per W, che è **giusto**. I test esercitano **solo il ripiego**; il gioco usa la strada della camera |
+| proiettili scortati | nei test il giocatore sta **all'origine**, e l'origine è l'unico punto in cui `giocatore + posizione mondo` dà `posizione mondo`. Inoltre la MultiMesh in headless **non si rilegge** (`test_arena.gd` lo dichiara esplicitamente) |
+
+**È la terza volta oggi che un difetto ha la stessa forma**, e la forma è questa: **un test che
+esercita un percorso che il gioco non usa, in un ambiente che azzera la grandezza sotto esame.**
+Non è sfortuna: è la conseguenza diretta del fatto che i test **guidano a mano** gli attori che
+nel gioco si guidano da soli.
+
+**Quindi m5 non è «due bug»: è due bug più il test che li avrebbe presi.** Un test che gira sulla
+**scena vera**, col giocatore **lontano dall'origine** e una **camera reale**, non è un test più
+rigoroso: è un test in un mondo diverso, ed è l'unico posto dove questi due numeri non sono
+azzerati.
+
+Fuori m5, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
+**E resta fuori anche §1.4a (il giocatore non può morire), che è `m6`**: l'utente ha deciso di
+tenere le wave separate.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | La porta è verde | `GATE: 8/8` e `PERM: 15/15`, rieseguite dal vertice |
+| 2 | **W va «su sullo schermo»** | con una **camera reale** costruita come quella di arena, `world_direction` del vettore di W deve puntare nella direzione che **quella camera** mostra come alto. L'atteso è **calcolato dalla base della camera**, non scritto a mano: un test con `Vector3(0,0,-1)` dentro rifiatta esattamente il difetto di oggi |
+| 3 | **Il ripiego senza camera resta coerente** | senza camera W resta `-z`. I due percorsi devono **concordare** sullo schermo, o il gioco e i test hanno due convenzioni diverse |
+| 4 | **Il proiettile è disegnato dove è calcolato** | la trasformazione che il renderer applica a una posizione **mondo** deve essere l'**identità**, **misurata**. In headless non si può leggere la MultiMesh, quindi il numero si prende sulla **trasformazione del nodo**, che è la causa |
+| 5 | **Nessun nodo duplicato** | il fix non può aggiungere nodi in albero: `node_count` resta **33**, o il criterio n. 3 di m1 regredisce |
+| 6 | **I denti, provati e rimossi** | ripristinato il segno di prima il criterio n. 2 deve dire `FAIL`; ripristinata la gerarchia di prima il criterio n. 4 deve dire `FAIL`. Poi rimossi |
+
+### 3.7 Scope della milestone 5: una foglia, tre file
+
+| agente | modello | in m5 scrive |
+|---|---|---|
+| `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/player.gd`, `src/weapons/projectile_pool.gd`, `tests/test_gameplay.gd` |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md` |
+
+**Un solo proprietario, e non per comodità**: i due difetti sono in due file suoi e il test che li
+prende è il suo. Nessun conflitto di scope e nessuna riga di permesso nuova: `PERM: 15/15` va
+comunque confermata **prima** di lanciare.
+
+### 4.5 Onde della milestone 5
 
 | onda | chi | parallelismo | finisce quando |
 |---|---|---|---|
-| **m4-w0** | vertice | — | criterio n. 3 di m1 riscritto **nel piano**, specifica scritta, `PERM: 15/15` confermata prima di lanciare |
-| **m4-w1** | orda ∥ arena | 2 agenti, una stessa risposta | `GATE: 8/8` exit 0 e `--quit-after 300` pulito, rieseguiti **dal vertice**, e i denti provati e rimossi |
-| **m4-w2** | vertice | — | commit, piano aggiornato, verdetto |
+| **m5-w0** | vertice | — | specifica scritta, `PERM: 15/15` confermata prima di lanciare |
+| **m5-w1** | gameplay | 1 agente | `GATE: 8/8`, `--quit-after 300` pulito, denti provati e rimossi, rieseguiti dal vertice |
 
-**Il rischio di questa onda, dichiarato prima che succeda.** `-arena` riscrive l'asserzione del
-criterio n. 3 mentre `-orda` cambia il numero che quell'asserzione misura: è una **race di
-significato**, non di file. I file sono disgiunti, ma se `-arena` scrive il tetto prima che
-`-orda` abbia deciso la curva, il test asserisce contro un numero che non esiste più. Il
-rimedio è l'ordine: **il vertice scrive il criterio con la curva dichiarata, e `-orda` non può
-cambiarla senza dirlo.**
+**I due fix di m5, e i numeri.** `PASS test_gameplay` **278 asserzioni** (erano 110). La misura che
+riassume tutto: con il giocatore a **12,5 m dall'origine**, lo scarto fra la posizione **calcolata**
+e quella **disegnata** era **12,529964 m** ed è ora **0,000000 m**. Il test di W/S usa una camera
+reale costruita come quella di arena (34 m sopra, 24 m dietro, `look_at` sul bersaglio) e l'atteso
+deriva dall'asse `-Z` di **quella** camera, che `world_direction` non riusa, più un controllo
+geometrico indipendente dalla sua formula.
 
+### m5, i tre debiti che lascia dichiarati
 
+1. **I proiettili non si orientano.** `_draw()` scrive ancora `Transform3D(_visual_basis, pos)` con
+   base **identità**: i pallini si vedono di traverso e non puntano verso la loro direzione. Prima
+   del difetto era mascherato dallo scarto di posizione. È `src/weapons/`, che **è** di `-gameplay`
+   ma non era in scope di m5, ed è **m7**.
+2. **Nessun test verifica la lettura dei tasti con una tastiera vera.** Il test di m5 chiama
+   `input_vector` direttamente: è la stessa funzione che `read_input` usa, ma **non prova
+   `Input.is_key_pressed` né il mapping `KEY_UP`/`KEY_RIGHT`**. Il buco è reale ed è dichiarato: il
+   tasto che l'utente preme non è mai passato attraverso un `InputEvent` in un test.
+3. **§1.4a resta aperto**: il giocatore non può morire. È **m6**.
+
+## 2. Toolchain
 
 Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nessuno deve cercare i binari per conto proprio: legge `tools/env.sh`.
 

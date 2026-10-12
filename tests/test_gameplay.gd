@@ -32,7 +32,22 @@ extends SceneTree
 ##   9. **criterio n. 4 di m2, meta' di -gameplay**: `reset_run()` rimette in
 ##      piedi il giocatore, `restart_run()` rimette in piedi la partita intera, e
 ##      nessun nodo viene duplicato. Il numero che decide e' uno solo: dopo il
-##      restart, un passo di simulazione **non** rilegge `game_over`.
+##      restart, un passo di simulazione **non** rilegge `game_over`;
+##  10. **m5, criterio n. 2**: con una **camera reale** costruita come quella di
+##      arena (34 m sopra, 24 m dietro, `look_at` sul bersaglio), il vettore che
+##      il gioco costruisce quando e' premuto **W** deve puntare nella direzione
+##      che **quella camera mostra come alto**. L'atteso e' calcolato dalla base
+##      di quella camera, non scritto a mano: un `Vector3(0, 0, -1)` dentro
+##      rifaterebbe esattamente il difetto di oggi con un altro numero;
+##  11. **m5, criterio n. 3**: senza camera W resta `-z`, e i due percorsi
+##      **concordano sullo schermo** — il ripiego e' l'alto della stessa camera,
+##      non un altro "alto";
+##  12. **m5, criterio n. 4**: la trasformazione che il renderer applica a una
+##      posizione **mondo** deve essere l'**identita'**, misurata. In headless la
+##      MultiMesh non si rilegge, quindi il numero si prende sulla **trasformazione
+##      del nodo** che la disegna: e' la causa, ed e' misurabile;
+##  13. **m5, criterio n. 5**: nessun nodo in piu'. `node_count` resta **33**
+##      sulla scena vera, che e' la sola scena in cui il numero conta.
 ##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
@@ -72,6 +87,10 @@ const H = preload("res://tools/test_harness.gd")
 const DT := 1.0 / 60.0
 const PLAYER_SCENE := "res://scenes/player.tscn"
 const PLAYER_SCRIPT := "res://src/player/player.gd"
+## La scena **vera**, su cui il numero dei nodi conta. Non il montaggio di questo
+## test: qui dentro ci sono il doppio finto, il giocatore e l'orda di -orda, e il
+## loro numero non dice niente sul criterio n. 5 di m5.
+const ARENA_SCENE := "res://scenes/arena_main.tscn"
 ## L'orda **vera** di -orda, caricata a runtime dalla sezione del restart. E' uno
 ## script, quindi non ha bisogno della cache di import: e' l'unica parte del
 ## percorso vero che questo test usa senza `scenes/arena_main.tscn`, che
@@ -84,6 +103,43 @@ const BOSS_RESIST := 0.90
 ## HP alti nel test: cosi' l'attenzione va sulla regola del colpo singolo e non
 ## su chi muore per primo.
 const TOUGH := 100000.0
+
+# --- m5: la camera REALE, e i numeri che la costruiscono ------------------------
+#
+# Fino ad ora i test di questo file giravano con la base **identita'**: nessuna
+# camera nel viewport, quindi `world_direction` prendeva il suo ripiego. Il gioco
+# prende l'altro percorso, quello della camera. E' la ragione per cui W e S
+# erano invertiti in gioco e giusti nei test (piano §1.5b): i test esercitavano
+# **solo il ripiego**.
+#
+# Qui sotto la camera e' **ricostruita** con i numeri di `src/render/arena_camera.gd`
+# (righe 14-18). Quel file e' di -arena e non e' toccato: i numeri sono
+# **dichiarati qui** e la camera viene montata come la monta lui:
+#
+#     global_position = ancora + Vector3(0, HEIGHT, BACK)
+#     look_at(ancora + Vector3.UP * LOOK_HEIGHT, Vector3.UP)
+#
+const CAM_HEIGHT := 34.0
+const CAM_BACK := 24.0
+const CAM_LOOK_HEIGHT := 1.0
+const CAM_FOV := 62.0
+const CAM_NEAR := 0.5
+const CAM_FAR := 220.0
+
+## Tetto dell'angolo in gradi per i criteri n. 2 e n. 3 di m5: la stessa
+## tolleranza a 5 gradi che il criterio n. 4 di m1 usa sulla traiettoria del
+## proiettile, e per la stessa ragione: dentro 5 gradi un colpo va dove deve.
+const CAM_ANGLE_TOL := 5.0
+
+## Il giocatore **LONTANO dall'origine**, in metri. Non un dettaglio: all'origine
+## `posizione del giocatore + posizione mondo` dà `posizione mondo`, ed e' l'unico
+## punto in cui il difetto dei proiettili scortati e' invisibile. Un test che
+## misura li' non misura niente (piano §1.5b).
+const LONTANO := Vector3(11.0, 0.0, -6.0)
+
+## Il numero di nodi della scena vera, che il criterio n. 5 di m5 fissa. Se
+## `top_level` fosse diventato un nodo, questo numero salirebbe.
+const NODI_SCENA_VERA := 33
 
 ## L'orda finta. Doppio di -orda: `count` + `transforms` come dati, e i due
 ## metodi registrati sul contratto.
@@ -334,6 +390,12 @@ func _process(_delta: float) -> bool:
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
 		_restart_run(h)
+		# m5: i due difetti che nessuna porta poteva vedere, e i due test che
+		# oggi li vedono. Vanno per ultimi perche' toccano il contratto e
+		# l'albero degli attori.
+		_m5_ingresso_su_schermo(h)
+		_m5_trasformazione_del_renderer(h)
+		_m5_nessun_nodo_in_piu(h)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -1179,7 +1241,250 @@ func _tasto(code: int, premuto: bool, ripetuto: bool) -> InputEventKey:
 	ev.echo = ripetuto
 	return ev
 
+# --- 10-11. m5, criteri n. 2 e n. 3: l'ingresso e' quello che si vede -----------
+#
+# ## Perche' questa sezione non poteva esistere prima
+#
+# Fino a m5 il file intero girava con la base **identita'**: nel viewport non
+# c'era nessuna camera, quindi `world_direction` prendeva **solo** il suo
+# ripiego. Il gioco prende l'altro percorfo, quello della camera. I due non
+# concordavano sullo schermo e nessuna asserzione li guardava insieme: il gioco
+# aveva W e S invertiti e il test era verde (piano §1.5b).
+#
+# Qui la camera e' **vera**, costruita come quella di arena, e l'atteso **non** e'
+# un letterale: e' la direzione che **quella** camera mostra come alto, calcolata
+# dalla sua base. Un `Vector3(0, 0, -1)` scritto qui dentro rifaterebbe il
+# difetto di oggi con un altro numero, che e' esattamente la trappola che questo
+# test e' nato per evitare.
+
+func _m5_ingresso_su_schermo(h) -> void:
+	_riordina_orda_finta()
+	_reset(Vector3.ZERO)
+
+	# I vettori d'ingresso vengono dalla **funzione che il gioco usa**, non scritti
+	# qui: il difetto di m5 era un **segno**, e un vettore scritto a mano nel test
+	# asserisce una convenzione che il gioco non ha per forza.
+	var v_w: Vector3 = player.input_vector(false, false, false, true)
+	var v_s: Vector3 = player.input_vector(false, false, true, false)
+	var v_d: Vector3 = player.input_vector(true, false, false, false)
+	var v_a: Vector3 = player.input_vector(false, true, false, false)
+	h.check(v_w.length() > 0.0, "il tasto W da solo produce un vettore d'ingresso")
+	h.check(v_w.is_equal_approx(-v_s), "W e S sono l'uno il contrario dell'altro")
+	h.check(v_d.is_equal_approx(-v_a), "D e A sono l'uno il contrario dell'altro")
+
+	# --- La camera reale ---
+	var cam := Camera3D.new()
+	cam.name = "CameraDiArena"
+	cam.fov = CAM_FOV
+	cam.near = CAM_NEAR
+	cam.far = CAM_FAR
+	root.add_child(cam)
+	cam.current = true
+	var ancora := Vector3.ZERO
+	cam.global_position = ancora + Vector3(0.0, CAM_HEIGHT, CAM_BACK)
+	cam.look_at(ancora + Vector3.UP * CAM_LOOK_HEIGHT, Vector3.UP)
+
+	# Senza queste due righe il resto della sezione misurerebbe il ripiego e
+	# direbbe "PASS" come prima: e' il difetto di metodo, non un dettaglio.
+	if not h.check(cam.is_current(), "la camera di prova e' quella attiva del viewport"):
+		return
+	if not h.check(player.get_viewport().get_camera_3d() == cam,
+		"e il giocatore la vede davvero: senza questo il percorso della camera non viene mai preso"):
+		return
+
+	# --- L'atteso, dalla base di QUELLA camera ---
+	var alto := _schermo_alto(cam)
+	var destra := _schermo_destra(cam)
+
+	var dir_w: Vector3 = player.world_direction(v_w)
+	var angolo := rad_to_deg(dir_w.angle_to(alto))
+	h.check(angolo <= CAM_ANGLE_TOL,
+		"CON CAMERA, W va 'su sullo schermo': %.2f gradi dall'alto di quella camera (tetto %.0f)"
+		% [angolo, CAM_ANGLE_TOL])
+
+	# --- Il controllo che NON riusa nessuna formula di `world_direction` ---
+	# Andare "su sullo schermo" vuol dire, su una camera che guarda dall'alto,
+	# **allontanarsi dalla camera**. I due punti sono a 10 m dal giocatore in
+	# direzioni opposte e vince quello lontano. Se la formula di `world_direction`
+	# venisse riscritta, questa riga continuerebbe a dire la verita' geometrica.
+	var terra_camera := Vector3(cam.global_position.x, 0.0, cam.global_position.z)
+	var davanti: float = (dir_w * 10.0).distance_to(terra_camera)
+	var dietro: float = (-dir_w * 10.0).distance_to(terra_camera)
+	h.check(davanti > dietro,
+		"CON CAMERA, camminando con W ci si allontana dalla camera (%.2f m contro %.2f m): W non spinge verso la camera"
+		% [davanti, dietro])
+	h.check(rad_to_deg(player.world_direction(v_d).angle_to(destra)) <= CAM_ANGLE_TOL,
+		"CON CAMERA, D va a destra dello schermo")
+	h.check(rad_to_deg(player.world_direction(v_a).angle_to(-destra)) <= CAM_ANGLE_TOL,
+		"CON CAMERA, A va a sinistra dello schermo")
+
+	# --- Il ripiego, criterio n. 3 ---
+	cam.free()
+	var rimasta = player.get_viewport().get_camera_3d()
+	if not h.check(rimasta == null, "senza camera il giocatore non vede piu' nessuna camera"):
+		return
+
+	var ripiego_w: Vector3 = player.world_direction(v_w)
+	h.vec_near(ripiego_w, Vector3(0.0, 0.0, -1.0), 0.0001,
+		"SENZA CAMERA, W resta -z")
+	h.vec_near(player.world_direction(v_s), -ripiego_w, 0.0001,
+		"SENZA CAMERA, S e' il contrario di W")
+	# E i due percorsi devono **concordare sullo schermo**: il ripiego non e' un
+	# altro "alto", e' l'alto della stessa camera. Senza questa riga il gioco e i
+	# test avrebbero due convenzioni diverse, che e' il difetto di m5 nella sua
+	# forma piu' semplice.
+	h.vec_near(ripiego_w, alto, 0.0001,
+		"i due percorsi concordano: il ripiego e' l'alto della stessa camera di arena")
+
+	print("m5 W: alto della camera di arena %s, con camera W %s (%.2f gradi), senza camera W %s"
+		% [str(alto), str(dir_w), angolo, str(ripiego_w)])
+
+# --- 12. m5, criterio n. 4: il proiettile e' disegnato dove e' calcolato ---------
+#
+# ## Perche' il numero si prende sulla trasformazione e non sugli istanti
+#
+# In headless la MultiMesh **non si rilegge**: `get_instance_transform` su una
+# MultiMesh appena scritta non restituisce quello che ci si aspetta, ed e' il
+# motivo per cui nessuna porta ha mai guardato qui dentro. Il numero si prende
+# quindi sulla **causa**: la trasformazione che il renderer applica a una posizione
+# mondo. Se quella e' l'identita', ogni posizione mondo arriva a schermo dove e'
+# stata calcolata; se non lo e', il difetto c'e'.
+#
+# E il giocatore e' **lontano dall'origine**: all'origine `posizione del
+# giocatore + posizione mondo` dà `posizione mondo`, ed e' l'unico punto in cui il
+# difetto e' invisibile.
+
+func _m5_trasformazione_del_renderer(h) -> void:
+	_riordina_orda_finta()
+	_reset(LONTANO)
+
+	# Il caso degenere, escluso per costruzione e verificato: se il giocatore
+	# fosse all'origine questa sezione passerebbe anche col difetto dentro.
+	h.check(player.global_position.length() > 1.0,
+		"il giocatore NON e' all'origine: all'origine il difetto non si vede (%.1f m)"
+		% player.global_position.length())
+	h.check(not player.global_transform.is_equal_approx(Transform3D.IDENTITY),
+		"e la sua trasformazione globale non e' l'identita'")
+
+	var visivo = pool.visual_node()
+	if not h.check(visivo != null, "il pool deve avere il nodo che disegna i proiettili"):
+		return
+	h.check(bool(visivo.top_level),
+		"il nodo visivo e' top_level: la sua trasformazione non segue il padre")
+	var trasf: Transform3D = pool.draw_transform()
+	h.check(trasf.is_equal_approx(Transform3D.IDENTITY),
+		"la trasformazione che il renderer applica a una posizione mondo e' l'IDENTITA' (origine misurata %s)"
+		% str(trasf.origin))
+
+	# I nemici fermi: qui si misura la trasformazione del renderer, non la
+	# traiettoria di un proiettile.
+	var inseguimento_prima: float = horde.chase_speed
+	horde.chase_speed = 0.0
+	horde.target = LONTANO
+	horde.add(LONTANO + Vector3(0.0, 0.9, -8.0), TOUGH)
+	pool.reset()
+	weapon.cooldown = 0.0
+	var nodi_prima := _conta_nodi(player)
+	player.step(DT, Vector3.ZERO)
+	horde.step(DT)
+
+	var p = pool.active_at(0)
+	if not h.check(p != null, "il colpo e' partito e il proiettile e' in volo"):
+		horde.chase_speed = inseguimento_prima
+		return
+	h.check(p.pos.length() > 10.0,
+		"la posizione del proiettile e' una posizione MONDO: %.2f m dall'origine" % p.pos.length())
+
+	var disegnata: Vector3 = pool.draw_position(p.pos)
+	h.vec_near(disegnata, p.pos, 0.0001,
+		"il proiettile e' disegnato dove e' calcolato, non a giocatore + posizione mondo")
+	# Il difetto di prima era esattamente `disegnata = calcolata + giocatore`, e
+	# quel numero valeva **zero** quando il giocatore era all'origine.
+	h.check(player.global_position.length() > 1.0,
+		"la posizione del giocatore e' la grandezza che il difetto aggiungeva (%.1f m)"
+		% player.global_position.length())
+	# I due numeri da stampare sono **copie**: sotto, sparando ancora, il pool
+	# riusa lo stesso record e `p.pos` comincia a descrivere un altro colpo.
+	var pos_calcolata: Vector3 = p.pos
+	print("m5 proiettili: posizione mondo calcolata %s, posizione che il renderer ne ricava %s, "
+		% [str(pos_calcolata), str(disegnata)]
+		+ "scarto %.6f m, trasformazione del renderer identica: %s"
+		% [pos_calcolata.distance_to(disegnata), str(trasf.is_equal_approx(Transform3D.IDENTITY))])
+
+	# Sparare non deve aggiungere nodi: il numero di nodi del giocatore e' lo
+	# stesso prima e dopo un colpo.
+	for i in 30:
+		player.step(DT, Vector3.ZERO)
+		horde.step(DT)
+	h.eq(_conta_nodi(player), nodi_prima,
+		"sparare non aggiunge un nodo sotto il giocatore: %d prima, %d dopo" % [nodi_prima, _conta_nodi(player)])
+	h.eq(int(pool.ever_created()), int(pool.capacity()),
+		"e nessun proiettile nuovo: i proiettili sono record, non nodi")
+
+	horde.chase_speed = inseguimento_prima
+
+# --- 13. m5, criterio n. 5: nessun nodo in piu' ---------------------------------
+
+func _m5_nessun_nodo_in_piu(h) -> void:
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+
+	var nodi := _conta_nodi(scena)
+	# Il fix del renderer e' `top_level`: una **proprieta'**, non un nodo. Se
+	# fosse stato scelto lo spostamento del nodo fuori dal giocatore, qui il
+	# numero cambierebbe e il criterio n. 3 di m1 comincerebbe a regredire.
+	h.eq(nodi, NODI_SCENA_VERA,
+		"la scena vera resta in %d nodi anche col fix" % NODI_SCENA_VERA)
+
+	# E non basta il totale: il nodo visivo deve essere **lo stesso nodo** di
+	# prima, sotto il pool, dentro l'arma, dentro il giocatore.
+	var pool_scena = scena.get_node_or_null("Player/Weapon/Pool")
+	if h.check(pool_scena != null, "la scena vera ha il pool sotto Player/Weapon"):
+		var visivo_scena = pool_scena.visual_node()
+		if h.check(visivo_scena != null, "il pool della scena vera ha il suo nodo visivo"):
+			h.eq(visivo_scena.get_parent(), pool_scena,
+				"il nodo visivo e' ancora figlio del pool: nessun nodo spostato")
+			h.check(bool(visivo_scena.top_level),
+				"ed e' top_level anche sulla scena vera")
+			h.check(pool_scena.draw_transform().is_equal_approx(Transform3D.IDENTITY),
+				"la scena vera ha la stessa identita' di trasformazione sul renderer")
+
+	print("m5 nodi: la scena vera conta %d nodi, il nodo visivo resta figlio del pool ed e' top_level" % nodi)
+	scena.queue_free()
+
 # --- Interno -------------------------------------------------------------------
+
+## "Su sullo schermo" per QUELLA camera, calcolato dalla sua base: l'**avanti**
+## della camera appiattito sul piano XZ. Su una camera che guarda dall'alto un
+## punto piu' lontano appare piu' in alto, quindi "su" vuol dire "dove la camera
+## guarda".
+##
+## E' l'asse `-Z` della base, cioe' l'asse che `world_direction` **non** usa: li'
+## dentro si prende `+Y`. Usare `+Y` anche qui rifaterebbe il difetto di oggi
+## con un altro numero, e un atteso cosi' non puo' fallire.
+static func _schermo_alto(cam: Camera3D) -> Vector3:
+	var b := cam.global_transform.basis
+	return Vector3(-b.z.x, 0.0, -b.z.z).normalized()
+
+## "Destra sullo schermo" per QUELLA camera: `+X` della base, che e' l'asse che
+## `world_direction` chiama `right`. Qui non c'e' il difetto da prendere, e serve
+## a mostrare che la sezione copre l'intera base e non solo il suo `y`.
+static func _schermo_destra(cam: Camera3D) -> Vector3:
+	var b := cam.global_transform.basis
+	return Vector3(b.x.x, 0.0, b.x.z).normalized()
+
+## Rimette il contratto sul doppio finto. La sezione del restart installa l'orda
+## **vera** di -orda sul contratto, e da quel momento `Game.horde` non e' piu' il
+## doppio che queste sezioni contano: senza questa riga i proiettili andrebbero a
+## colpire nemici che nessuna asserzione di m5 guarda, cioe' il difetto di m5
+## ricomparirebbe in un mondo dove nessuno lo misura.
+func _riordina_orda_finta() -> void:
+	game.horde = horde
+	game.register_impl("damage_enemy", horde._damage_enemy)
+	game.register_impl("nearest_enemy", horde._nearest_enemy)
 
 ## Parti da zero: niente nemici, niente proiettili, player fermo al centro,
 ## e progressioni azzerate con il **suo** `reset()`, che e' la stessa strada che

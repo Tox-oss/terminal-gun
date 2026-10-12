@@ -328,9 +328,42 @@ func _build_items() -> void:
 	_created = CAPACITY
 
 ## Un nodo solo per 100 proiettili.
+##
+## ## `top_level = true`: perche' sta qui e non altrove
+##
+## `_draw()` scrive nelle istanze della MultiMesh delle **posizioni mondo**: il
+## `pos` del record viene da `muzzle_position()`, che e' `global_position + MUZZLE_HEIGHT`.
+## Ma questa `MultiMeshInstance3D` sta **dentro** il pool, che sta dentro l'arma,
+## che sta dentro `Player`: il renderer moltiplica ogni istanza per la
+## trasformazione globale del nodo che le disegna. Con la gerarchia di prima il
+## nodo visivo era a `posizione del giocatore`, e ogni proiettile finiva a
+## `posizione del giocatore + posizione mondo del proiettile`: i pallini
+## scortavano di quanto ti eri mosso.
+##
+## Il rimedio e' `top_level = true`, che stacca la trasformazione di questo nodo
+## da quella del padre: la sua `global_transform` resta **identita'** e le
+## posizioni mondo arrivano a schermo dove sono state calcolate.
+##
+## ## Perche' non toccare la gerarchia
+##
+## L'alternativa era spostare il nodo fuori dal giocatore (sotto `root`, o in un
+## `Node` dedicato). Non e' quello che si fa, e il motivo e' scritto: la scena
+## vera conta i nodi perche' il criterio n. 3 di m1 e il criterio n. 5 di m5
+## impongono `node_count == 33`. `top_level` e' **una proprietà**, non un nodo:
+## l'albero resta identico, il conteggio resta identico, e la trasformazione che
+## il renderer applica a una posizione mondo diventa l'identita' — che e' la
+## cosa che il difetto aveva rotto.
+##
+## Il numero lo misura `tests/test_gameplay.gd`, perche' in headless la MultiMesh
+## non si rilegge: la misura e' sulla `global_transform` del nodo, che e' la
+## causa, non l'effetto.
 func _build_visual() -> void:
 	_visual = MultiMeshInstance3D.new()
 	_visual.name = "Projectiles"
+	# PRIMA di `add_child`: il nodo non entra mai nell'albero con la trasformazione
+	# del padre, quindi non c'e' nemmeno un istante in cui i proiettili sono
+	# disegnati a `posizione del giocatore + posizione mondo`.
+	_visual.top_level = true
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = _bullet_mesh()
@@ -338,6 +371,28 @@ func _build_visual() -> void:
 	mm.visible_instance_count = 0
 	_visual.multimesh = mm
 	add_child(_visual)
+
+## Il nodo che disegna i proiettili, se c'e'. Non serve al gameplay: esiste per
+## il test di m5, che in headless non puo' rileggere la MultiMesh e quindi
+## misura la **trasformazione** che il renderer le applica.
+func visual_node():
+	return _visual
+
+## La trasformazione che il renderer applica a una posizione **mondo**: e' la
+## `global_transform` del nodo visivo, e deve essere l'**identita'**. Se tornasse
+## diversa, ogni proiettile verrebbe disegnato spostato di quanto vale quella
+## trasformazione — cioe' di quanto si e' mosso il giocatore, che e' il difetto.
+func draw_transform() -> Transform3D:
+	if _visual == null or not is_instance_valid(_visual):
+		return Transform3D.IDENTITY
+	return _visual.global_transform
+
+## Dove il renderer **disegnerebbe davvero** un proiettile che il pool tiene a
+## `world_pos`: `draw_transform() * world_pos`. E' una composizione, non un campo
+## letto al posto di una misura, quindi il test verifica la posizione finisce
+## dove e' stata calcolata invece di verificare un flag.
+func draw_position(world_pos: Vector3) -> Vector3:
+	return draw_transform() * world_pos
 
 ## La mesh del proiettile: da `scenes/projectile.tscn` se c'è, altrimenti un
 ## primitivo. Nessun rendering deve dipendere da un file che non c'è.

@@ -243,23 +243,63 @@ func step(delta: float, input_dir: Vector3 = Vector3.ZERO, dash: bool = false) -
 	if weapon != null:
 		weapon.step(delta)
 
-## WASD e frecce, in un vettore del piano schermo: `x` a destra, `z` in
-## avanti sullo schermo (quindi -1 con W). Non usa `Input.get_vector` perche'
-## `project.godot` non ha una InputMap e non e' mio: `InputMap.has_action`
+## WASD e frecce, in un vettore del piano schermo. Non usa `Input.get_vector`
+## perche' `project.godot` non ha una InputMap e non e' mio: `InputMap.has_action`
 ## avrebbe stampato un errore a ogni frame.
+##
+## Qui dentro c'e' **solo** la lettura della tastiera: il verso del vettore sta in
+## `input_vector`, che e' una funzione **pura** e che il test chiama con i quattro
+## stati a mano. Non e' comodo, e' la ragione per cui il difetto di m5 era
+## invisibile: un test che si scrive a mano il vettore di W, senza passare dalla
+## funzione che lo costruisce, asserisce una cosa diversa da quella che il gioco
+## fa, e un difetto di **segno** è proprio il difetto che un vettore scritto a
+## mano nasconde.
 func read_input() -> Vector3:
+	return input_vector(
+		Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT),
+		Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT),
+		Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN),
+		Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP))
+
+## Il vettore dello schermo per i quattro stati dei tasti: `x` a destra,
+## `z` **in avanti sullo schermo**, cioè verso l'alto di quello che si vede.
+##
+## ## Il segno di `z`, e dove stava la doppia negazione (piano §1.5a)
+##
+## `world_direction` traduce questo vettore con `right * x + up * z`, dove `up`
+## è, **per costruzione**, la direzione che la camera mostra come *alto*: su una
+## camera che guarda dall'alto è la sua `y` proiettata sul piano, e il ripiego
+## (una camera in piano, dove la `y` non ha parte orizzontale) è il suo avanti,
+## che in orizzontale è la stessa cosa. Quindi `z` deve valere `+1` per andare
+## **su**: `W` era `-1`, e quello è una doppia negazione che riportava il
+## giocatore **verso la camera**, cioè **giù sullo schermo**.
+##
+## La correzione sta **qui** e non in `world_direction`: la formula di
+## `world_direction` è quella giusta — `right` è la destra dello schermo, `up` è
+## l'alto dello schermo, e il vettore d'ingresso è espresso in quegli stessi due
+## assi — quindi l'unica riga che aveva il verso sbagliato era questa.
+## `read_input()` e `world_direction()` dichiaravano la convenzione in due posti e
+## i due posti non concordavano; quello che si corregge è il secondo, perché il
+## primo è quello da cui si legge il significato.
+##
+## Il criterio n. 2 di m5 tiene anche il ripiego: senza camera `W` resta `-z`,
+## che è l'avanti della camera identità, e con la camera di arena (dietro e in
+## alto) i due percorsi dicono la **stessa** cosa sullo schermo.
+func input_vector(destra: bool, sinistra: bool, indietro: bool, avanti: bool) -> Vector3:
 	var v := Vector3.ZERO
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+	if destra:
 		v.x += 1.0
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+	if sinistra:
 		v.x -= 1.0
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		v.z += 1.0
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+	if indietro:
 		v.z -= 1.0
+	if avanti:
+		v.z += 1.0
 	return v.limit_length(1.0)
 
-## Il vettore di input del piano schermo tradotto nel mondo, secondo la camera.
+## Il vettore di input del piano schermo tradotto nel mondo, secondo la camera:
+## `right * x + up * z`, dove `right` e `up` sono i due assi **dello schermo**
+## della camera (vedi `input_vector` per il verso di `z`).
 ## Se non c'e' camera (test headless, o i primi frame) la base e' l'identita' e il
 ## risultato e' quello che il test si aspetta: +x = est, -z = nord.
 func world_direction(input_dir: Vector3) -> Vector3:

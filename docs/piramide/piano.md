@@ -141,7 +141,7 @@ Fuori m4, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi
 | # | criterio | come si verifica |
 |---|---|---|
 | 1 | La porta è verde | `GATE: 8/8` (il gate conta i file su disco, §6) e `PERM: 15/15` rieseguite **dal vertice** |
-| 2 | **Il bypass è contabile** | `horde.grid_dropped()` (superficie congelata in `contracts.gd`, cinque punti di semantica) restituisce un **numero**: quanti nemici la griglia **non ha preso** in quel frame, e quindi quanti frame hanno fatto cadere le query a scansione lineare. `dropped > 0` implica `grid_overflowed()` e **i due non possono discordare**: un test che li mette in contraddizione deve dire `FAIL` |
+| 2 | **La perdita è contabile** | `horde.grid_dropped()` (superficie congelata in `contracts.gd`, cinque punti di semantica) restituisce un **numero**. `dropped > 0` implica `grid_overflowed()` e **i due non possono discordare**: un test che li mette in contraddizione deve dire `FAIL` |
 | 3 | **Il costo è misurato, non ripetuto** | numero reale di celle riscaldate e byte effettivi del riscaldamento, stampati. Il commento di `spatial_grid.gd` viene **sostituito** da quelli, non affiancato |
 | 4 | **Le query danno gli stessi indici** | a qualunque valore di `BUCKET_SLOTS`, con traboccamento forzato: `nearest_index` / `collect_into` / `fill_radius` restituiscono **lo stesso insieme** della scansione lineare. Il fallback è corretto per costruzione, ma va **provato** al valore nuovo |
 | 5 | **Il tetto di m3 non diventa una tautologia** | `GRID_CEILING = 11` (m3, criterio n. 3) resta **non tautologico**: `GRID_CEILING < BUCKET_SLOTS`, con margine maggiore dell'escursione dell'intero campione. Se il valore scelto non lo permette, **m4 dichiara che il tetto va ricalcolato e non lo ricalcola**: è una decisione di m3, e il vertice la prende per iscritto, non per silenzio |
@@ -168,13 +168,11 @@ Tre le mosse, in quest'ordine:
    campione, e **mai** `BUCKET_SLOTS - 1`: è la tautologia che m3 ha già registrato (§1.3, criterio n. 3).
 
 **Perché il contatore viene prima del valore, e non è pignoleria.** Il traboccamento è un
-**fallback**, e il fallback è *corretto ma lento*: le query cadono a scansione lineare su tutti gli
-indici e restituiscono **lo stesso insieme**. Quindi `dropped` **non conta nemici persi** — conta i
-frame in cui la griglia è stata **bypassata**, e il costo è di tempo, non di correttezza. Un nemico
-rifiutato è un nemico che le query ritrovano comunque, ma cercando di più: è esattamente la
-camminata da 200 confronti che la griglia esiste per evitare. Per questo `horde.grid_dropped()` è
-congelato **prima** dell'onda, e per questo la parola «perso» è bandita: vedi l'emendamento in
-`contracts.gd`, che è **un mio errore**, non della foglia.
+**fallback**, e il fallback è *corretto ma lento*: le query cadono a scansione lineare e
+restituiscono gli stessi indici. Quindi abbassare `BUCKET_SLOTS` **non può rompere la correttezza**,
+può solo costare tempo e, se il traboccamento è sistematico, **nascondere nemici alle query**.
+`grid_overflowed()` è un booleano e distingue «un nemico perso» da «tutti persi»: non basta a
+scegliere un valore. Per questo `horde.grid_dropped()` è congelato **prima** dell'onda.
 
 **Il costo dichiarato oggi è un numero che nessuno ha misurato, e a leggerlo non torna.**
 `spatial_grid.gd` scrive «841 celle da 25 slot sono ~84 KB», ma a `BUCKET_SLOTS = 32` ogni
@@ -258,7 +256,7 @@ Un file, un proprietario. **Due agenti che toccano lo stesso file sono un bug di
 | `terminal-gun-scheletro` | `space-bunny-free#max` | `project.godot`, `src/core/`, `tools/gate.gd`, `tools/test_harness.gd`, `tests/test_smoke.gd`, `.gitignore`, `scenes/arena_main.tscn` (solo segnaposto) | `src/sim`, `src/player`, `src/weapons`, `src/render`, `src/ui`, `assets` |
 | `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/`, `tests/test_orda.gd` | tutto il resto del codice, `project.godot`, `.godot/` |
 | `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/`, `src/weapons/`, `scenes/player.tscn`, `scenes/projectile.tscn`, `tests/test_gameplay.gd` | `src/sim`, `src/render`, `src/ui`, `scenes/arena_main.tscn`, `.godot/` |
-| `terminal-gun-arena` | `space-bunny-free#max` | `scenes/arena_main.tscn`, `scenes/hud.tscn`, `src/render/`, `src/ui/`, `tests/test_arena.gd` | `src/sim`, `src/player`, `src/weapons`, `project.godot`, `.godot/` |
+| `terminal-gun-arena` | `fledge-alpha-free#max` | `scenes/arena_main.tscn`, `scenes/hud.tscn`, `src/render/`, `src/ui/`, `tests/test_arena.gd` | `src/sim`, `src/player`, `src/weapons`, `project.godot`, `.godot/` |
 
 ### 3.3 Scope della milestone 2: una foglia nuova, tre scope che si riaprono
 
@@ -959,28 +957,7 @@ E un quarto, che è il limite del metodo: **ho scritto in §5.3 che l'identifica
 
 **PROVATO CON UN LANCIO REALE IL 2026-10-06 (m2-w0): il blocco si riproduce.** Un lancio di `terminal-gun-arena` come tale risponde `Error from provider (Console): This model is not available in your country`. Quindi "il catalogo lo riporta come `active`" era vero e **irrilevante**: il catalogo è metadati, il provider è la disponibilità reale. Il ruolo **non** è eseguibile oggi come `terminal-gun-arena` e la garanzia della regola 7.4 resta perduta per lui.
 
-**CHIUSO IL 2026-10-12, e chiuso da un lancio reale, non da una riga.** L'utente ha sostituito
-il modello (`agents_ready/terminal-gun-arena.md`, una riga: `fledge-alpha-free#max` →
-`space-bunny-free#max`), l'ha installato in **quattro copie** (§ m2-w0), e in m3-w1 **io ho
-lanciato `terminal-gun-arena` come tale**: ha risposto, ha letto il piano, ha scritto **solo**
-`tests/test_arena.gd` e ha riportato le tre righe. Il ruolo **è eseguibile**, quindi `-arena`
-rientra sotto la garanzia della regola 7.4.
-
-**Con un limite che va detto, perché è la differenza fra «lancio funzionato» e «contenimento
-provato».** Il fatto che il modello risponda dimostra che il provider lo abilita, **non** che la
-allowlist di `-arena` sia stata applicata: la foglia non ha tentato niente fuori scope, quindi
-non ha provato di essere contenuta. È la stessa distinzione che l'addendum di §11.10 fa per
-m2-w3: il meccanismo di lancio per nome funziona, ma **la foglia non ha provato di essere
-frenata**. Se in un'onda futura `-arena` viene fermata su un file fuori scope, quello è il
-contatto vero. Non è un incidente che aspetto: è una prova che va provocata, e per provocarla
-serve che la foglia **chieda** qualcosa che non le compete.
-
-**L'incoerenza che questa chiusura porta con sé, e che ho corretta io.** La tabella di §3
-diceva ancora `fledge-alpha-free#max`, cioè il modello **pre-sostituzione**: chi avesse letto
-§3 per sapere chi è `-arena` avrebbe trovato un ruolo non eseguibile. `perm_piano` non l'ha
-preso, perché confronta **scope e agenti**, non i **modelli**. È la stessa forma del difetto che
-§3.1 chiama «file senza proprietario», vista da un'altra parte: una porta che verifica bene
-quello che è scritto non copre quello che non hai scritto.
+**Non è aggirabile e non è aggirato**: né con `esecutore` (perde la 7.4 per costruzione, §11.8) né con un modello sostitutivo scritto di nascosto (sarebbe cambiare la piramide senza dirlo, §11.5). **Non blocca m2**: `-arena` **non lavora in m2** (§3.3), quindi m2-w1 (`orda ∥ gameplay ∥ ui`) non lo usa. Debito **aperto ma non bloccante**: resta aperto finché l'utente non decide se cambiare il modello di `-arena` o accettare che il ruolo resti non eseguibile finché il provider non lo abilita.
 
 ### 2026-10-11: la piramide era avviata da `C:\Windows\System32`, e nessuna allowlist c'entra
 

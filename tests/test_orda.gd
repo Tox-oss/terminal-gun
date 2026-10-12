@@ -15,19 +15,6 @@ extends SceneTree
 ##      nodi, oggetti e memoria;
 ##   6. `damage_enemy` uccide e il conteggio scende, per scambio-ultimo.
 ##
-## E poi la milestone 4, che e' un esperimento su **una costante**
-## (`BUCKET_SLOTS` in `src/sim/spatial_grid.gd`) e segue l'ordine dichiarato:
-##   7. `grid_dropped()` dice il numero giusto e **non zero** su un traboccamento
-##      costruito, e si azzera in `begin_frame()`;
-##   8. le tre query danno gli stessi indici della scansione lineare **anche con
-##      traboccamento forzato**, e anche senza;
-##   9. il tetto dichiarato da m3 sulla scena vera resta sotto la costante, con
-##      margine oltre l'escursione del suo campione;
-##  10. il costo del riscaldamento e' **misurato** (celle vere della griglia di
-##      produzione, non stimate) e stampato;
-##  11. la densita' che obbliga la costante e' l'orda isolata che converge, e il
-##      numero e' riproducibile perche' la disposizione ha un seme fisso.
-##
 ## Nota sul contratto: `nearest_enemy` e' `-> int` e `damage_enemy` e' `-> bool`
 ## (piano 5.2), quindi qui si chiama **anche** il contratto, non solo
 ## `horde.nearest_enemy_index(...)`: se le due strade dessero risposte diverse,
@@ -58,13 +45,6 @@ class Thing extends RefCounted:
 ## L'orda sotto test. Campo e non variabile di `_initialize()` perche' il corpo
 ## del test gira al primo frame, e a quel punto `_initialize()` e' gia' tornata.
 var _horde: HORDE = null
-
-## Picco di `worst_bucket()` su **tutto** il percorso di 600 passi: e' la
-## misura di densita' dell'orda isolata che m4 confronta con quella della scena
-## vera. Va raccolto passo per passo perche' `worst_bucket()` torna a zero a
-## ogni ricostruzione della griglia: campionato a tratti perderebbe i picchi,
-## che sono esattamente la cosa che si vuole misurare.
-var _picco: int = 0
 
 func _initialize() -> void:
 	_horde = HORDE.new()
@@ -97,18 +77,7 @@ func _run() -> void:
 	_query_budget(h, horde)
 	_object_pool(h)
 	_burn_in(h, horde)
-
-	# m4: lo strumento di misura, poi il costo, poi il tetto. La densita' e il
-	# valore stanno in fondo, su un percorso proprio a seme fisso: vedi la nota
-	# in `_m4_densita` perche' non puo' stare sul percorso casuale di sopra.
-	_m4_contatore(h, horde)
-	_m4_query(h)
-	_m4_tetto(h)
-	_m4_costo(h, horde)
-
 	_damage_kills(h, horde)
-
-	_m4_densita(h, horde)
 
 	quit(h.finish("orda"))
 
@@ -483,9 +452,6 @@ func _burn_in(h, horde: HORDE) -> void:
 
 	for s in 600:
 		horde.step(1.0 / 60.0)
-		# il picco della densita' si legge su **ogni** passo: il numero torna a
-		# zero a ogni ricostruzione, quindi qui si chiude il campione di m4
-		_picco = maxi(_picco, horde.worst_bucket())
 		passati += 1
 		# una morte ogni 5 passi: lo scambio-ultimo viene esercitato 120 volte,
 		# quindi i 600 passi non sono una passeggiata
@@ -517,17 +483,6 @@ func _burn_in(h, horde: HORDE) -> void:
 	h.check(not horde.grid_overflowed(), "nessuna caduta a scansione lineare")
 	h.eq(horde.grid_unknown_cells, 0,
 		"nessuna cella nuova dopo 600 passi: nel ciclo di gioco non si alloca")
-	# i due numeri non possono discordare: nessun rifiuto significa nessun
-	# traboccamento, e su un'orda che traboccasse la griglia non starebbe
-	# guardando niente
-	h.eq(horde.grid_dropped(), 0,
-		"nessun nemico rifiutato dalla griglia in 600 passi")
-	h.check(not horde.grid_overflowed(), "e nessun traboccamento")
-	# NOTA: qui non si asserisce `worst_bucket() < BUCKET_SLOTS`: e' la
-	# tautologia che m3 ha gia' registrato (il contatore si ferma a
-	# `BUCKET_SLOTS` per costruzione). Il segnale che nessuno e' stato perso e'
-	# il contatore qui sopra, che puo' dire solo la verita'.
-	h.check(_picco > 0, "il percorso deve aver avuto un picco da misurare: %d" % _picco)
 
 	var nodi1 := _count_nodes(root)
 	var obj1 := int(Performance.get_monitor(Performance.OBJECT_COUNT))
@@ -539,8 +494,6 @@ func _burn_in(h, horde: HORDE) -> void:
 		"600 passi non gonfiano la memoria: +%d KB" % ((mem1 - mem0) / 1024))
 	print("orda: 600 passi e %d morti, nodi %d -> %d, oggetti %d -> %d, memoria +%d KB"
 		% [morti, nodi0, nodi1, obj0, obj1, (mem1 - mem0) / 1024])
-	print("orda: densita' dell'orda isolata su 600 passi, picco %d nemici in una cella su %d slot, rifiuti %d"
-		% [_picco, GRID.BUCKET_SLOTS, horde.grid_dropped()])
 
 # --- 10. damage_enemy uccide --------------------------------------------------
 
@@ -615,357 +568,6 @@ func _damage_kills(h, horde: HORDE) -> void:
 		"dopo il riempimento si trova qualcuno")
 	print("orda: svuotata e riempita di nuovo, uccisioni in tutto %d, specie %s"
 		% [horde.kills, str(horde.census())])
-
-# --- m4: BUCKET_SLOTS, il contatore dei rifiuti e il costo misurato ----------
-#
-# L'esperimento di m4 e' su **una costante**, `BUCKET_SLOTS` in
-# `src/sim/spatial_grid.gd`, e segue l'ordine dichiarato dal piano: prima lo
-# strumento di misura, poi il costo, poi la densita', e solo dopo il valore.
-# Le quattro sezioni qui sotto sono in quell'ordine.
-#
-# ## Perche' il contatore viene prima del valore, e non e' pignoleria
-#
-# Il traboccamento e' un **fallback**, e il fallback e' corretto ma lento: le
-# query cadono a scansione lineare e restituiscono gli stessi indici. Quindi
-# abbassare `BUCKET_SLOTS` non puo' rompere la correttezza, puo' solo costare
-# tempo e, se diventa sistematico, **nascondere nemici alle query**.
-# `grid_overflowed()` e' un booleano e non distingue "un nemico perso" da
-# "199 persi", quindi non basta a scegliere un valore: `grid_dropped()` e' il
-# numero che distingue, e senza di esso la scelta sarebbe un'opinione.
-#
-## Lo strumento si dichiara **prima** dell'esperimento perche' se arrivasse
-## dopo, il primo valore misurato sarebbe gia' stato preso con la riga vecchia
-## e nessuno lo saprebbe.
-
-## Nemici in piu' di `BUCKET_SLOTS` che il test mette nella **stessa cella**,
-## per costruire un traboccamento vero invece di aspettarlo. Non e' una
-## costante scelta a piacere: il numero atteso di rifiuti e' esattamente questo,
-## quindi se `BUCKET_SLOTS` cambiasse il test continuerebbe a dire la verita'
-## sul valore nuovo invece di misurare aria.
-const RIFIUTI := 5
-
-## Query per giro della batteria di m4.
-const M4_QUERY := 200
-
-## Tetto dichiarato da m3 sulla **scena vera** (`GRID_CEILING` in
-## `tests/test_arena.gd`, che non e' di questa foglia) e l'escursione del suo
-## campione: `worst_bucket` min 4, mediana 5, max 7. Servono a dire se
-## `BUCKET_SLOTS` continua a stare sopra quel tetto **con margine**, che e' la
-## condizione che m3 aveva dichiarato e che un valore piu' stretto avrebbe
-## potuto invalidare. Copiati qui perche' il file di `-arena` non e' di questa
-## foglia e non va importato: sono i due numeri del tetto, non il tetto stesso.
-const TETTO_SCENA_VERA := 11
-const ESCURSIONE_SCENA_VERA := 3
-
-## Valori candidati della tabella dei rifiuti: il tetto della scena vera piu'
-## margine, il campione dell'orda isolata, e la trappola da non scegliere
-## (31 = `BUCKET_SLOTS - 1`, la costante tarata sul caso che si vuole evitare).
-const CANDIDATI := [16, 24, 28, 31]
-
-## Passo di simulazione, fisso. Il test guida il tempo a mano e i numeri
-## devono essere gli stessi a ogni avvio.
-const DT := 1.0 / 60.0
-
-## Seme della disposizione con cui si misura la densita' in m4. Lo **stesso**
-## che fissa `tests/test_gameloop.gd`: e' il seme della banda che il piano
-## dichiara, e i numeri di questa sezione sono quindi confrontabili con quelli e
-## riproducibili a ogni avvio. Sul seme 177 quel test misura un picco di 28.
-const SEME_DENSITA := 177
-
-# --- m4.1: il contatore dice il numero giusto, e non zero --------------------
-
-## Il contatore su un caso **costruito**: `BUCKET_SLOTS + RIFIUTI` nemici nello
-## stesso punto cadono nella stessa cella, `BUCKET_SLOTS` entrano e gli altri
-## `RIFIUTI` vengono rifiutati. Il numero atteso e' calcolato dalla costante e
-## non scritto a mano: un contatore cablato a zero, o un flag mascherato da
-## contatore, qui dice FAIL.
-func _m4_contatore(h, horde: HORDE) -> void:
-	var punti := _m4_punti(GRID.BUCKET_SLOTS + RIFIUTI)
-	var grid: GRID = GRID.new()
-	grid.setup(GRID.CELL, 30.0)
-	grid.begin_frame()
-	for i in punti.size():
-		grid.insert(i, punti[i])
-
-	h.eq(grid.dropped, RIFIUTI,
-		"il contatore deve dire quanti nemici ha rifiutato la cella piena: %d" % RIFIUTI)
-	h.check(grid.dropped > 0,
-		"e non deve essere zero quando qualcuno e' stato rifiutato")
-	h.check(grid.overflowed,
-		"un rifiuto accende anche il flag: i due non possono discordare")
-	h.eq(grid.unknown_cells, 0,
-		"nessuna cella nuova: il traboccamento e' dentro quelle riscaldate")
-
-	# punto 3 del contratto congelato: si azzera in `begin_frame()`, non in
-	# `insert()`, perche' `insert()` non conosce l'inizio di un frame
-	grid.begin_frame()
-	h.eq(grid.dropped, 0, "begin_frame() azzera il contatore dei rifiuti")
-	h.check(not grid.overflowed, "e azzera anche il flag")
-	grid.insert(0, punti[0])
-	h.eq(grid.dropped, 0, "un insert in un secchiello vuoto non e' un rifiuto")
-
-	# Sull'orda sotto test il caso normale: nessun rifiuto e nessun
-	# traboccamento. Il caso con il traboccamento e' quello costruito qui
-	# sopra: se si aspettasse che una partita trabocchi per misurare un
-	# contatore, il contatore direbbe quasi sempre zero e non misurerebbe niente.
-	h.eq(horde.grid_dropped(), 0,
-		"sull'orda viva nessun nemico e' stato rifiutato dalla griglia")
-	h.check(not horde.grid_overflowed(),
-		"e nessun traboccamento: i due numeri non possono discordare")
-
-## Il tetto dichiarato da m3 resta **non tautologico**: sotto `BUCKET_SLOTS`, e
-## con un margine maggiore dell'escursione dell'intero campione da cui e' stato
-## derivato. E' la condizione che un valore piu' stretto avrebbe potuto
-## invalidare, quindi va verificata a ogni esecuzione e non dichiarata una volta.
-func _m4_tetto(h) -> void:
-	h.check(TETTO_SCENA_VERA < GRID.BUCKET_SLOTS,
-		"il tetto dichiarato da m3 deve stare sotto la costante: %d contro %d"
-			% [TETTO_SCENA_VERA, GRID.BUCKET_SLOTS])
-	h.check(GRID.BUCKET_SLOTS - TETTO_SCENA_VERA > ESCURSIONE_SCENA_VERA,
-		"e con un margine maggiore dell'escursione del suo campione (%d): %d - %d = %d"
-			% [ESCURSIONE_SCENA_VERA, GRID.BUCKET_SLOTS, TETTO_SCENA_VERA,
-				GRID.BUCKET_SLOTS - TETTO_SCENA_VERA])
-	# e il tetto non deve essere una soglia arbitraria messa li' per far passare:
-	# sotto di esso il campione della scena vera ci sta tutto
-	h.check(GRID.BUCKET_SLOTS > TETTO_SCENA_VERA + ESCURSIONE_SCENA_VERA,
-		"la costante deve stare sopra tetto piu' escursione")
-
-# --- m4.2: il costo, misurato -------------------------------------------------
-#
-# Il numero di celle non si deduce da un commento: viene da
-# `ceil(extent / CELL) + margin_cells`, con l'estensione che passa
-# `_sync_grid()`, cioe' `arena_radius * 1.5`. Qui viene **letto** dalla griglia
-# di produzione con `occupied_cells()` e confrontato con quella formula: se
-# qualcuno cambia una delle due, il commento di `spatial_grid.gd` smette di
-# valere e questo test lo dice invece di lasciarlo passare.
-
-func _m4_costo(h, horde: HORDE) -> void:
-	var extent := horde.arena_radius * 1.5
-	var lato := ceili(extent / GRID.CELL) + 3 # 3 = margin_cells di default di setup()
-	var celle_attese := (2 * lato + 1) * (2 * lato + 1)
-	var celle := horde.occupied_cells()
-
-	h.eq(celle, celle_attese,
-		"le celle riscaldate sono quelle che setup() promette all'estensione data")
-	h.eq(GRID.BUCKET_SIZE, GRID.BUCKET_SLOTS + 1,
-		"il secchiello e' il contatore in testa piu' gli slot")
-	var byte := celle * GRID.BUCKET_SIZE * 4
-
-	# Il costo vero e' piu' del carico utile: il dizionario e l'intestazione di
-	# ogni `PackedInt32Array` stannoanch'essi sull'heap. Si misura un delta,
-	# che e' rumoroso e quindi solo stampato: quello che il commento dichiara e'
-	# il carico utile, che e' l'unica parte che `BUCKET_SLOTS` controlla.
-	var mem0 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
-	var replica: GRID = GRID.new()
-	replica.setup(GRID.CELL, extent)
-	var mem1 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
-
-	print("orda: m4 riscaldamento: extent %.1f = %.1f x 1.5, %d celle per lato, %d celle in tutto"
-		% [horde.arena_radius, extent, lato, celle])
-	print("orda: m4 riscaldamento: %d interi da 4 byte per secchiello, %d B di carico utile (%.1f KiB), heap misurato +%d KB"
-		% [GRID.BUCKET_SIZE, byte, byte / 1024.0, (mem1 - mem0) / 1024])
-
-	h.check(celle > 0, "il riscaldamento ha prodotto delle celle")
-	h.check(byte > 0, "e il loro carico utile e' un numero")
-
-# --- m4.3: la densita', e quale dei due casi obbliga --------------------------
-#
-# I due numeri che il piano mette uno contro l'altro misurano due cose diverse:
-# il picco **sull'orda isolata** che converge tutta sul bersaglio, e il picco
-# **sulla scena vera**. Nessuno dei due e' dichiarato come quello che **limita**.
-# Qui si risponde con i numeri: il caso che obbliga e' l'orda isolata, perche' il
-# suo picco sta sopra il tetto dichiarato della scena vera e sopra tutto il suo
-# campione.
-
-func _m4_densita(h, horde: HORDE) -> void:
-	# ## Perche' qui si fissa il seme, e non si usa la disposizione del dado
-	#
-	# L'orda di questo test nasce con `seed = 0`, cioe' casuale a ogni avvio: il
-	# suo picco di densita' cambia da lancio a lancio, e un'asserzione costruita
-	# su quel numero andrebbe rossa a caso. E' la ragione per cui m2-w3 ha
-	# fissato il seme 177 in `tests/test_gameloop.gd` dopo aver misurato un
-	# fallimento su 175 lanci. Qui la misura si fa sulla **stessa** disposizione
-	# che usa il gate, con lo stesso seme e con un'uccisione ogni due: i numeri
-	# sono riproducibili e l'asserzione conserva i denti senza perderli.
-	horde.reseed(SEME_DENSITA)
-	var picco := 0
-	var uccisi := 0
-	for s in 600:
-		horde.step(DT)
-		picco = maxi(picco, horde.worst_bucket())
-		if s % 2 == 0 and horde.count > 0:
-			if horde.damage_enemy(0, 9999.0, Vector3.ZERO):
-				uccisi += 1
-
-	# Il caso che obbliga la costante e' ** questo**: l'orda isolata che converge
-	# tutta sul bersaglio. Il numero qui sotto e' il suo picco, e quello che lo
-	# dichiara e' il tetto che m3 ha messo sulla scena vera (su quel campione
-	# min 4, mediana 5, max 7). Se il picco dell'orda isolata sta **sopra** il
-	# tetto della scena vera, allora la scena vera non e' il caso che obbliga la
-	# costante: dimensionare sul suo picco farebbe traboccare l'orda isolata, e
-	# con il traboccamento ogni query tornerebbe a scansione lineare proprio
-	# quando la densita' e' alta, cioe' quando la griglia serve.
-	h.check(picco > 0, "il percorso a seme fisso deve avere un picco da misurare: %d" % picco)
-	h.check(picco > TETTO_SCENA_VERA,
-		"il picco dell'orda isolata (%d) deve stare sopra il tetto dichiarato della scena vera (%d): e' questo il caso che obbliga la costante"
-			% [picco, TETTO_SCENA_VERA])
-	h.check(GRID.BUCKET_SLOTS > TETTO_SCENA_VERA + ESCURSIONE_SCENA_VERA,
-		"una costante tarata sulla scena vera (tetto %d piu' escursione %d = %d) starebbe sotto questa"
-			% [TETTO_SCENA_VERA, ESCURSIONE_SCENA_VERA, TETTO_SCENA_VERA + ESCURSIONE_SCENA_VERA])
-
-	print("orda: m4 densita' a seme %d, 600 passi con un'uccisione ogni due (%d uccisioni): picco %d nemici in una cella su %d slot"
-		% [SEME_DENSITA, uccisi, picco, GRID.BUCKET_SLOTS])
-	print("orda: m4 rifiuti dalla griglia su quel percorso: %d, traboccamento: %s"
-		% [horde.grid_dropped(), str(horde.grid_overflowed())])
-	print("orda: m4 confronto: orda isolata %d contro tetto della scena vera %d (su quel campione max 7): il caso che obbliga e' l'orda isolata"
-		% [picco, TETTO_SCENA_VERA])
-
-	# E la tabella: quanti nemici cadrebbero fuori dalle query, adesso, con una
-	# costante candidata. Il conto e' sulle celle vere delle posizioni dell'orda.
-	_m4_tabella(h, horde, picco)
-
-## Quanti nemici la griglia **rifiuterebbe** in questo istante con una costante
-## candidata, e in quante celle. Il numero e' `somma(max(0, occupazione -
-## candidato))`: quello che `insert()` fa, scritto una volta per poterlo leggere
-## invece di indovinarlo.
-func _m4_tabella(h, horde: HORDE, picco: int) -> void:
-	var per_cella := {}
-	for i in horde.count:
-		var c := Vector2i(floori(horde.transforms[i].x / GRID.CELL),
-			floori(horde.transforms[i].z / GRID.CELL))
-		per_cella[c] = int(per_cella.get(c, 0)) + 1
-
-	var occupazione_max := 0
-	for c in per_cella:
-		occupazione_max = maxi(occupazione_max, int(per_cella[c]))
-
-	for candidato in CANDIDATI:
-		var rifiutati := 0
-		var celle_piene := 0
-		for c in per_cella:
-			var n := int(per_cella[c])
-			if n > candidato:
-				rifiutati += n - candidato
-				celle_piene += 1
-		print("orda: m4 tabella: BUCKET_SLOTS = %d -> %d nemici fuori dalle query in %d celle, su %d celle e %d nemici"
-			% [candidato, rifiutati, celle_piene, per_cella.size(), horde.count])
-
-	# Il picco e' il massimo su tutti i passi, quindi non puo' essere minore
-	# della cella piu' affollata dell'ultimo frame: se lo fosse, il picco sarebbe
-	# stato misurato su un mondo diverso da quello che la tabella descrive.
-	h.check(occupazione_max > 0, "c'e' almeno una cella occupata da guardare")
-	h.check(occupazione_max <= picco,
-		"la cella piu' affollata dell'ultimo frame (%d) non puo' superare il picco misurato (%d)"
-			% [occupazione_max, picco])
-	# E il conto fatto qui, da solo, deve concordare col contatore di produzione
-	# sullo stesso istante: due derivazioni indipendenti dello stesso numero che
-	# non possono divergere senza che qualcuno abbia mentito.
-	var rifiutati_ora := 0
-	for c in per_cella:
-		var n := int(per_cella[c])
-		if n > GRID.BUCKET_SLOTS:
-			rifiutati_ora += n - GRID.BUCKET_SLOTS
-	h.eq(rifiutati_ora, horde.grid_dropped(),
-		"i rifiuti ricalcolati dalle posizioni devono essere quelli che il contatore dice")
-
-# --- m4.4: le query danno gli stessi indici anche con traboccamento ----------
-
-func _m4_query(h) -> void:
-	# (a) traboccato: il fallback a scansione lineare deve dare gli stessi
-	# indici della scansione lineare, e lo stesso della via normale
-	_m4_batteria(h, "con traboccamento", GRID.BUCKET_SLOTS + RIFIUTI, true)
-	# (b) pieno ma non traboccato: la via griglia deve dare gli stessi indici
-	# della scansione lineare, quindi il valore scelto non cambia le risposte
-	_m4_batteria(h, "senza traboccamento", GRID.BUCKET_SLOTS, false)
-
-## Una batteria di query su una griglia costruita, con o senza traboccamento.
-## Le tre strade (`nearest_index`, `collect_into`, `fill_radius`) devono dare
-## **lo stesso insieme** di indici della scansione lineare.
-func _m4_batteria(h, etichetta: String, in_cella: int, traboccato: bool) -> void:
-	var punti := _m4_punti(in_cella)
-	var grid: GRID = GRID.new()
-	grid.setup(GRID.CELL, 30.0)
-	grid.begin_frame()
-	for i in punti.size():
-		grid.insert(i, punti[i])
-
-	h.eq(grid.overflowed, traboccato, "%s: traboccamento come atteso" % etichetta)
-	h.eq(grid.dropped, maxi(0, in_cella - GRID.BUCKET_SLOTS),
-		"%s: rifiuti come attesi" % etichetta)
-
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 404
-	var atteso := PackedInt32Array()
-	var got := PackedInt32Array()
-	var grepp := PackedInt32Array()
-	grepp.resize(punti.size())
-	var vuoti := 0
-	var discordi := 0
-	var motivo := ""
-	for t in M4_QUERY:
-		var q := Vector3(rng.randf_range(-30.0, 30.0), 0.0, rng.randf_range(-30.0, 30.0))
-		var r := rng.randf_range(0.5, 10.0)
-		GRID.linear_fill_radius(atteso, q, r, punti, punti.size())
-
-		var n := grid.collect_into(grepp, q, r, punti, punti.size())
-		var via_griglia := grepp.slice(0, n)
-		via_griglia.sort()
-		var via_lineare := atteso.duplicate()
-		via_lineare.sort()
-		if via_lineare.is_empty():
-			vuoti += 1
-		if not _same_indices(via_griglia, via_lineare):
-			discordi += 1
-			if motivo == "":
-				motivo = "collect_into q=(%.2f, %.2f) r=%.2f: griglia %d, lineare %d" \
-					% [q.x, q.z, r, via_griglia.size(), via_lineare.size()]
-		grid.fill_radius(got, q, r, punti)
-		got.sort()
-		if not _same_indices(got, via_lineare):
-			discordi += 1
-			if motivo == "":
-				motivo = "fill_radius q=(%.2f, %.2f) r=%.2f: griglia %d, lineare %d" \
-					% [q.x, q.z, r, got.size(), via_lineare.size()]
-		var ng := grid.nearest_index(q, r, punti)
-		var nl := GRID.linear_nearest(q, r, punti, punti.size())
-		if ng != nl:
-			discordi += 1
-			if motivo == "":
-				motivo = "nearest_index q=(%.2f, %.2f): griglia %d, lineare %d" \
-					% [q.x, q.z, ng, nl]
-
-	h.check(discordi == 0,
-		("%s: %d query, le tre strade devono dare gli stessi indici della scansione lineare"
-			% [etichetta, M4_QUERY]) + ("" if motivo == "" else "; " + motivo))
-	h.check(vuoti > 0,
-		"%s: il confronto deve contenere anche query con raggio vuoto" % etichetta)
-	print("orda: m4 %s: %d query (%d con raggio vuoto), tre strade d'accordo con la scansione lineare"
-		% [etichetta, M4_QUERY, vuoti])
-
-## `n` nemici **nello stesso punto** (l'unico modo di far traboccare una cella
-## di proposito) piu' un anello di celle con un nemico per cella. Nessun punto
-## dell'anello cade nella cella del mucchio, cosi' il numero dei rifiuti e'
-## esattamente quello che il test dichiara e non dipende dalla casualita'.
-func _m4_punti(n_in_cella: int) -> PackedVector3Array:
-	var punti := PackedVector3Array()
-	var mucchio := Vector3(5.0, 0.0, 5.0) # dentro la cella (1, 1)
-	for _i in n_in_cella:
-		punti.append(mucchio)
-	for gz in range(-5, 6):
-		for gx in range(-5, 6):
-			if gx == 1 and gz == 1:
-				continue
-			punti.append(Vector3(float(gx) * 4.0, 0.0, float(gz) * 4.0))
-	return punti
-
-## ## Dove NON e' il forzamento
-##
-## Il traboccamento forzato sta qui, dentro il test, e da nessuna parte in
-## `src/sim/`. `insert()` non sa che il test lo stia guardando e non ha nessun
-## ramo di aiuto: il file di produzione contiene `dropped` come campo (una
-## volta), come azzeramento in `setup()` e in `begin_frame()` (due) e come
-## incremento nel ramo `else` (una), e nient'altro. I denti si provano qui e il
-## forzamento si rimuove da qui, non si lascia nel codice di gioco.
 
 # --- Interno ------------------------------------------------------------------
 

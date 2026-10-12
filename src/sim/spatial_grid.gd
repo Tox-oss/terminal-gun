@@ -14,9 +14,8 @@ extends RefCounted
 ## centinaia di rialloc per frame. Scrivendo a indice fisso non rialloca mai.
 ##
 ## Overflow: oltre `BUCKET_SLOTS` nemici nella stessa cella il secchiello segnala
-## `overflowed`, conta il nemico in `dropped` e le query **cadono a scansione
-## lineare**: lente ma corrette. Non si perde un nemico, che e' l'unica cosa
-## che conta.
+## `overflowed` e le query **cadono a scansione lineare**: lente ma corrette. Non
+## si perde un nemico, che e' l'unica cosa che conta.
 ##
 ## Scrivere `cells[key][n] = i` su un `PackedInt32Array` tenuto in un `Dictionary`
 ## funziona ed e' in place: GDScript prende un riferimento all'elemento del
@@ -30,71 +29,20 @@ const CELL := 4.0
 
 ## Indici per cella, oltre al contatore.
 ##
-## ## 32, e **resta 32**: l'esperimento di m4 e' finito e la risposta e' "no"
-##
-## La domanda era: *esiste un valore piu' stretto che non perda nessun
-## nemico?* La risposta e' **no**, e il valore corrente resta quello giusto.
-## Non per inerzia: sotto ci sono i due numeri che lo decidono, entrambi
-## misurati, e `tests/test_orda.gd` li rimisura a ogni esecuzione.
-##
-## **Il caso che obbliga la costante e' l'orda isolata che converge**, non la
-## scena vera. I due numeri che il piano mette uno contro l'altro misurano due
-## cose diverse:
-##
-##   - **scena vera** (`tests/test_arena.gd`, sweep di 24 semi sul nodo della
-##     scena): `worst_bucket` min 4, mediana 5, **max 7**, zero semi
-##     traboccati, tetto dichiarato `GRID_CEILING = 11`;
-##   - **orda isolata** (`tests/test_gameloop.gd`, sweep dei semi da 1 a 240
-##     sulla sequenza di 600 passi con un'uccisione ogni due): **picco** di
-##     nemici in una sola cella min **24**, mediana **29**, **max 32**, e il
-##     seme 177 che quel test usa ha picco **28**.
-##
-## La scena vera non e' il caso che obbliga, e il conto si fa: sull'orda
-## isolata **tutti e 240 i semi** hanno un picco sopra 11, quindi un valore
-## tarato sulla scena vera (16, per esempio) farebbe traboccare **tutti** e
-## 240 i semi, e con il traboccamento **ogni** query torna a scansione
+## **32, non 12: misurato.** `tests/test_gameloop.gd`, con l'orda piena (200) e
+## il fuoco sul giocatore, registra un **picco di 19 nemici in una sola cella**:
+## l'orda converge tutta sul bersaglio e le celle centrali si affollano. Con 12
+## slot il secchiello traboccava e **tutte** le query cadevano a scansione
 ## lineare proprio nel caso in cui la griglia serve, cioe' quando la densita'
-## e' alta. Il fallback tornerebbe a essere la camminata di 200 confronti che
-## la griglia doveva sostituire. Un valore uguale al picco del seme del test
-## (28) non trabocca, ma non ha margine: e' la costante tarata sul caso che
-## si vuole evitare, e non `BUCKET_SLOTS - 1` peggio. Scendere di uno sotto il
-## picco (27) fa traboccare il seme del test.
+## e' alta. Il fallback tornava a essere la camminata di 200 confronti che la
+## griglia doveva sostituire.
 ##
-## **Il margine che resta, detto per intero.** Sul seme 177 che il gate usa ci
-## sono 4 slot di margine (28 su 32). Nel campione dei 240 semi il picco
-## massimo e' **32**: la costante lo contiene esattamente, con zero margine, e
-## il seme **148** ha picco **33**, quindi su quel seme un nemico viene
-## rifiutato. Non e' un nemico perso: `insert()` lo rifiuta, `grid_overflowed()`
-## va a vero e le query cadono a scansione lineare **per quel frame**, che e'
-## il fallback corretto per costruzione e verificato in `tests/test_orda.gd`.
-## Chi volesse chiudere anche quello sale a 34 e paga 8 KiB in piu' una volta
-## sola all'avvio: e' una decisione sul gioco, non una misura, e m4 non la
-## prende da solo.
-##
-## ## Costo, **misurato** e non dedotto (m4)
-##
-## Il numero di celle non si deduce da un commento: viene da
-## `ceil(extent / CELL) + margin_cells` con `extent = arena_radius * 1.5` che
-## passa `_sync_grid()`. Con `arena_radius = 28` sono `ceil(42 / 4) = 11` celle
-## per lato piu' 3 di margine, cioe' 29 per lato: **841 celle**, lette dalla
-## griglia di produzione con `occupied_cells()` e ristampate da
-## `tests/test_orda.gd` a ogni esecuzione. Ogni secchiello e' un
-## `PackedInt32Array` di `BUCKET_SIZE = 33` interi da 4 byte:
-## **841 * 33 * 4 = 111012 byte** di carico utile, **108.4 KiB**, presi **prima**
-## del primo frame e mai piu'.
-##
-## Il numero che questo commento dichiarava prima ("841 celle da 25 slot sono
-## ~84 KB") era un resto di una configurazione passata (25 slot =
-## `BUCKET_SLOTS` 24) e non tornava piu' da quando la costante era 12: le
-## stesse 841 celle a 33 interi sono 108.4 KiB, non 84. Il totale e' quello
-## qui sopra e la formula e' nel test, cosi' il commento non puo' invecchiare
-## un secondo numero.
-##
-## Il costo nel ciclo di gioco resta **zero** comunque sia il valore:
-## `nearest_index`, `collect_into` e `fill_radius` iterano `bucket[HEAD]`, cioe'
-## gli indici **validi**, mai la capienza. Il secchiello grande costa solo
-## `BUCKET_SIZE * 4` byte per cella riscaldata, e il riscaldamento sta in
-## `setup()`, che gira una volta sola all'avvio.
+## A 32 il margine sul picco misurato e' del 68%, e il costo e' **zero** nel
+## ciclo di gioco: `nearest_index`, `collect_into` e `fill_radius` iterano
+## `bucket[HEAD]`, cioe' gli indici **validi**, mai la capienza. Il secchiello
+## grande costa solo `BUCKET_SIZE * 4` byte per cella riscaldata, e il
+## riscaldamento sta in `setup()`, che gira una volta sola all'avvio: 841 celle
+## da 25 slot sono ~84 KB, presi **prima** del primo frame e mai piu'.
 const BUCKET_SLOTS := 32
 ## `bucket[0]` = quanti indici validi.
 const HEAD := 0
@@ -113,26 +61,6 @@ var worst_bucket: int = 0
 ## Qualcuno ha superato BUCKET_SLOTS in una cella: le query cadranno a scansione
 ## lineare finche' il flag resta acceso.
 var overflowed: bool = false
-## **Quanti** nemici `insert()` ha rifiutato, non un flag: `overflowed` risponde
-## a "qualcuno ha superato BUCKET_SLOTS", questo a "quanto". La differenza non
-## e' di rumore: fra `dropped == 1` e `dropped == 199` c'e' la differenza fra una
-## griglia che funziona e una griglia che **non vede piu' niente**, ed e' il
-## numero con cui `BUCKET_SLOTS` e' stato misurato (m4).
-##
-## Si azzera in `begin_frame()`, **non** in `insert()` e non in `setup()`-per-
-## frame: `insert()` non conosce l'inizio di un frame, quindi azzerarlo li'
-## farebbe valere `0` per sempre.
-##
-## ## La sua portata non e' un invariante
-##
-## `dropped`, `overflowed` e `worst_bucket` descrivono lo **stesso** intervallo,
-## cioe' l'ultima ricostruzione, ma non per costruzione: `begin_frame()` azzera
-## i primi due, mentre `worst_bucket` lo azzera a mano il chiamante che
-## ricostruisce la griglia (`horde.gd::_rebuild_grid`). Coincidono perche' in
-## produzione `begin_frame()` ha **un solo chiamante**. Aggiungerne uno nel
-## ciclo di gioco farebbe dire a due numeri "questo frame" e al terzo
-## "l'ultima ricostruzione", e nessuno dei tre fallirebbe rumorosamente.
-var dropped: int = 0
 
 var _cells: Dictionary = {}
 
@@ -146,7 +74,6 @@ func setup(p_cell: float, extent: float, margin_cells: int = 3) -> void:
 	_cells.clear()
 	unknown_cells = 0
 	overflowed = false
-	dropped = 0
 	worst_bucket = 0
 	var n := ceili(extent / cell) + margin_cells
 	for cz in range(-n, n + 1):
@@ -167,7 +94,6 @@ func begin_frame() -> void:
 	for key in _cells:
 		_cells[key][HEAD] = 0
 	overflowed = false
-	dropped = 0
 
 ## Mette `index` nella cella di `pos`. Nessuna allocazione se la cella esiste.
 ##
@@ -192,7 +118,6 @@ func insert(index: int, pos: Vector3) -> void:
 			worst_bucket = n + 1
 	else:
 		overflowed = true
-		dropped += 1
 
 ## Indice del nemico piu' vicino a `from` entro `radius`, o -1.
 ##

@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## L'HUD: vite, punteggio, livello, nemici vivi, stato dell'arma, **barra XP,
-## contatore d'onda e schermata di game over**. -ui (m2).
+## contatore d'onda, schermata di game over** e **il pannello delle carte**.
+## -ui (m2, m6).
 ##
 ## ## Cosa e' di chi
 ##
@@ -98,6 +99,48 @@ extends CanvasLayer
 ## senza che nessuno se ne accorga, che e' il difetto che questo file e' fatto
 ## per evitare.
 
+## ## m6: il pannello delle scelte, e perche' sta in questo file
+##
+## `choose()` non era chiamato da nessuna parte del gioco (piano sez. 1.6): si
+## saliva di livello, si sentiva un suono, e non succedeva niente. Il buco e'
+## chiuso qui dentro: quando `progression.pending() > 0` il pannello mostra le
+## offerte e **il gioco** sceglie, non il test.
+##
+## Tre fatti che vengono dall'API di `-gameplay` e non da una scelta di questa
+## foglia, e che è percio' che vanno ricommentati qui invece che nel piano:
+##
+## 1. **Tre offerte, e se ne applicano tre.** `progression.gd:188-190` dice che
+##    le altre pending restano. Quindi `pending()` va 3 -> 2 -> 1 -> 0 e il
+##    pannello si ritira da solo quando arriva a zero.
+## 2. **Gli indici si spostano.** `choose(index)` fa `offers.remove_at(index)`:
+##    dopo una scelta l'offerta successiva **scivola** nella posizione
+##    precedente. Per questo le carte sono rilegge da `offers` a ogni apertura e
+##    non sono mai tenute in testa fra una scelta e l'altra. E' la trappola di
+##    questa milestone: un pannello che conserva gli indici di prima applica
+##    due volte la stessa carta e una terza offerta non la vede nessuno.
+## 3. **Il numero scritto non e' mio.** Nome ed effetto arrivano da
+##    `offer_label(index)` e `offer_effect(index)`, dichiarati in
+##    `src/core/contracts.gd`. Qui dentro non c'e' nessun "+25%": quel numero
+##    e' di `-gameplay` e una copia mente alla prima riga cambiata in `apply()`.
+##
+## ## Perche' la pausa e' mia e non di `-gameplay`
+##
+## `get_tree().paused` e' una variabile **globale**: se la tenesse `-gameplay`,
+## il simulacro dovrebbe sapere che il pannello e' aperto e il pannello sapere
+## che il simulacro ha chiesto la pausa, cioe' due foglie con una variabile
+## globale in comune. In mano a `-ui` la pausa e' locale e il criterio n. 2 si
+## verifica da un posto solo (piano sez. 3.8).
+##
+## ## `PROCESS_MODE_ALWAYS`: un pannello che non si puo' cliccare
+##
+## Con `paused = true` un nodo col process mode di default smette di elaborare
+## **e smette di ricevere input**: il pannello resterebbe aperto a schermo e
+## non reagirebbe a nessun clic. Il difetto e' invisibile guardandolo, perche'
+## sembra funzionante: si vede, e' aperto, e non fa niente. Per questo il
+## process mode e' dichiarato nella scena su tre livelli (radice, pannello,
+## pulsanti) e non solo sulla radice, e `tests/test_ui.gd` verifica sia la
+## dichiarazione sia il fatto.
+
 ## ## Stringhe a schermo
 ##
 ## Solo ASCII: l'HUD viene letto anche nei log di `--headless`, e la console di
@@ -163,9 +206,40 @@ var _wave_bar: ProgressBar = null
 var _game_over_panel: Control = null
 var _game_over_text: Label = null
 
+# --- Il pannello delle scelte (m6) ---------------------------------------------
+## Il pannello e le carte. I `Button` sono in un array **perche' il numero di
+## carte e' un fatto di layout**: quante carte ci stanno sullo schermo lo
+## decide questa foglia, quindi lo legge dalla scena e non da una costante.
+## Quante **offerte** ci sono, invece, non lo decido io: viene da `pending()`.
+var _upgrade_panel: Control = null
+var _upgrade_title: Label = null
+var _cards: Array[Button] = []
+var _card_titles: Array[Label] = []
+var _card_effects: Array[Label] = []
+## Il pannello e' aperto? Un campo e non `panel.visible`, perche' il criterio n.
+## 5 chiede che aprire e chiudere il pannello non crei e non liberi nodi: se il
+## flag vivesse solo nel nodo, un pannello che non si vede perche' e' sparito
+## sarebbe indistinguibile da uno chiuso.
+var _panel_open: bool = false
+## La pausa e' **mia**: `true` solo se sono stato io a mettere in pausa
+## l'albero. Se il gioco era gia' fermo per un motivo che non e' mio, il pannello
+## non si spaccia di essere lui ad aver fermato tutto, e soprattutto non toglie
+## una pausa che non ha messo.
+var _paused_by_panel: bool = false
+
 var _contract_node: Node = null
 var _warned_no_xp: bool = false
 var _warned_no_wave: bool = false
+## Avviso una volta sola se `offer_label`/`offer_effect` non ci sono ancora: e'
+## la superficie che il vertice ha dichiarato in `src/core/contracts.gd` e che
+## `-gameplay` scrive. Senza quei due metodi le carte mostrano il loro indice e
+## il pannello continua a funzionare, ma il numero sulla carta non e' piu' di
+## nessuno: meglio una riga di rumore che una carta con un numero inventato.
+var _warned_no_offer_text: bool = false
+## Avviso una volta sola se le offerte sono piu' delle carte che ci stanno:
+## con piu' di tre il giocatore non potrebbe scegliere tutto quello che il
+## livello gli ha dato, che e' una partita che si chiude da sola.
+var _warned_too_many_cards: bool = false
 
 func _ready() -> void:
 	# Percorsi espliciti invece di `%Nome`: se una Label si cancella, l'HUD
@@ -183,10 +257,50 @@ func _ready() -> void:
 	_wave_bar = get_node_or_null("Root/WaveBar") as ProgressBar
 	_game_over_panel = get_node_or_null("Root/GameOver") as Control
 	_game_over_text = get_node_or_null("Root/GameOver/GameOverText") as Label
+	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
+	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
+	_collect_cards()
 	redraw()
+
+## Le carte, per nome in chiaro e in ordine: `Card0`, `Card1`, ... La lista
+## finisce quando un nome non esiste piu', quindi **il numero di carte lo dice la
+## scena**. Ogni bottone e' collegato al suo indice con `bind(index)`: l'indice
+## che arriva al gestore e' quello che il pulsante occupa **adesso**, che e'
+## l'unico indice che vale (vedi la nota sugli indici che si spostano).
+func _collect_cards() -> void:
+	var slot := 0
+	while true:
+		var path := "Root/Upgrade/Card%d" % slot
+		var card := get_node_or_null(path) as Button
+		if card == null:
+			break
+		_cards.append(card)
+		_card_titles.append(get_node_or_null(path + "/Title") as Label)
+		_card_effects.append(get_node_or_null(path + "/Effect") as Label)
+		# Nascoste dal primo frame, come il pannello che le contiene. Non e'
+		# cosmetico: `visible` e' la proprieta' che l'interfaccia usa per dire
+		# "questa carta c'e'", e una carta "visibile" dentro un pannello
+		# invisibile e' una carta che un test direbbe offerta senza che nessuno
+		# l'abbia offerta.
+		card.visible = false
+		if not card.pressed.is_connected(_on_card_pressed):
+			card.pressed.connect(_on_card_pressed.bind(slot))
+		slot += 1
 
 func _process(_delta: float) -> void:
 	refresh()
+
+## Uscendo dall'albero, l'HUD restituisce la pausa che aveva preso.
+##
+## Non e' un dettaglio: `get_tree().paused` e' una variabile **globale** e un HUD
+## che sparisce mentre l'albero e' fermo lascia l'albero fermo per sempre, senza
+## piu' nessuno che possa toglierla. Lo si vede in un test che esce subito
+## dopo (`--script`): il motore chiude l'albero in pausa e non scarica la coda
+## dei messaggi, e il processo esce con `2 ObjectDB instances were leaked` e
+## `1 resources still in use`. In gioco non si vede, perche' nessuno chiude
+## l'HUD, ma il difetto e' lo stesso: una pausa che nessuno piu' possiede.
+func _exit_tree() -> void:
+	_set_paused(false)
 
 ## Il punto d'ingresso di arena. Numeri, non nodi. Firma di m1, **invariata**:
 ## `tests/test_arena.gd` la chiama con sei argomenti e quel test non e' mio.
@@ -339,6 +453,7 @@ func refresh() -> void:
 		return
 	_refresh_xp(game)
 	_refresh_wave(game)
+	_refresh_upgrades(game)
 
 ## XP e soglia del livello da `Game.player.progression`, che e' di -gameplay.
 ## Entrambi opzionali: se non ci sono, il valore di riserva resta e l'HUD non si
@@ -433,6 +548,241 @@ func _refresh_round(horde: Object) -> void:
 		return
 	round_over = over
 	redraw()
+
+# --- Il pannello delle scelte (m6) ---------------------------------------------
+#
+# `choose()` non era chiamato da nessuna parte del gioco (piano sez. 1.6): uccidi,
+# sali di livello, senti un suono, e non succede niente. Qui sotto c'e' il
+# chiamante che mancava, e nient'altro: nessuna regola di gioco, nessuna soglia,
+# nessun numero di potenziamento scritto a mano.
+
+## Rilegge il contratto e tiene il pannello allineato alle offerte che ci sono
+## **adesso**. Chiamata da `refresh()`, quindi ogni frame.
+##
+## Il pannello e' aperto se e solo se `pending() > 0`: e' la stessa domanda che
+## si fa `choose()`, quindi non c'e' una seconda definizione di "quante scelte
+## restano" che possa divergere dalla prima.
+func _refresh_upgrades(game: Node) -> void:
+	_sync_upgrade_panel(_progression(game))
+
+## L'oggetto di progressione, per contratto.
+##
+## Prima `Game.progression`, che e' il dato che il vertice ha dichiarato per
+## questa milestone; poi `Game.player.progression`, che e' la strada che gia'
+## usa `_refresh_xp`. Due porte e non una perche' le due possono non coincidere
+## durante un restart, e in quel mezzo frame un pannello che sparisce e
+## riappare e' meno peggio di uno che non vede piu' le offerte.
+func _progression(game: Node) -> Object:
+	if game == null:
+		return null
+	var direct = game.get("progression")
+	if direct is Object and is_instance_valid(direct):
+		return direct as Object
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return null
+	var prog = (player as Object).get("progression")
+	if prog is Object and is_instance_valid(prog):
+		return prog as Object
+	return null
+
+## Quante scelte non ancora prese. `-1` significa "non lo so", che e' diverso da
+## zero: zero vuol dire "il livello e' stato speso", non lo sa vuol dire "non ho
+## nessuno da cui chiederlo". Il pannello si chiude solo nel primo caso.
+func _pending(prog: Object) -> int:
+	if prog == null or not prog.has_method("pending"):
+		return -1
+	var raw = prog.call("pending")
+	if typeof(raw) != TYPE_INT and typeof(raw) != TYPE_FLOAT:
+		return -1
+	return maxi(int(raw), 0)
+
+## Apre, riallinea o chiude il pannello. Un posto solo, cosi' la regola "aperto
+## se e solo se ci sono scelte" non e' scritta in due punti.
+func _sync_upgrade_panel(prog: Object) -> void:
+	var left := _pending(prog)
+	if left <= 0:
+		_close_upgrade_panel()
+		return
+	_open_upgrade_panel(prog, left)
+
+## Il pannello si apre e mostra **le offerte disponibili, rilette adesso**.
+##
+## Il ciclo sui pulsanti invece che un `for i in pending()` fisso: quante carte
+## ci sono lo dice la scena, e se `-gameplay` offrisse piu' di tre il pannello
+## mostra le prime tre e **lo dice**, invece di lasciare il giocatore con delle
+## scelte che non puo' prendere e non sapere che esistono.
+func _open_upgrade_panel(prog: Object, left: int) -> void:
+	var slots := _cards.size()
+	if slots <= 0:
+		return
+	if left > slots and not _warned_too_many_cards:
+		_warned_too_many_cards = true
+		push_warning("hud: progression.pending()=%d e le carte nello schermo sono %d: "
+			% [left, slots]
+			+ "le ultime %d offerte non si possono prendere. Il numero di carte e' layout di -ui, in scenes/hud.tscn." % (left - slots))
+	for i in slots:
+		var card := _cards[i]
+		var shown := i < left
+		card.visible = shown
+		if not shown:
+			continue
+		# Rilettura a ogni apertura: `choose()` toglie l'offerta scelta dalla
+		# lista, quindi tutto quello che segue scivola di una posizione.
+		if i < _card_titles.size() and _card_titles[i] != null:
+			_card_titles[i].text = _offer_text(prog, i, "offer_label")
+		if i < _card_effects.size() and _card_effects[i] != null:
+			_card_effects[i].text = _offer_text(prog, i, "offer_effect")
+	if _upgrade_title != null:
+		_upgrade_title.text = "LEVEL UP - %d SCELTE" % left
+	if _upgrade_panel != null and not _upgrade_panel.visible:
+		_upgrade_panel.visible = true
+	if not _panel_open:
+		_panel_open = true
+		_set_paused(true)
+
+## Il pannello si ritira da solo quando non restano scelte: `pending() == 0` e'
+## l'unico motivo per cui si chiude, quindi il gioco riprende da solo senza che
+## nessuno debba ricordarsi di chiamare un metodo.
+func _close_upgrade_panel() -> void:
+	if _upgrade_panel != null:
+		_upgrade_panel.visible = false
+	for card in _cards:
+		card.visible = false
+	if not _panel_open:
+		return
+	_panel_open = false
+	_set_paused(false)
+
+## `get_tree().paused` e' globale, ma **solo se sono stato io** a metterla.
+##
+## Il caso che copre: il pannello si apre mentre l'albero era gia' fermo per un
+## motivo che non e' di questa foglia (un cutscene, un menu futuro). Chiudendo il
+## pannello l'HUD non deve togliere una pausa che non ha messo lui, altrimenti
+## un pannello che si chiude "riattiva" un gioco che qualcun altro aveva fermato.
+func _set_paused(on: bool) -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	if on:
+		if not tree.paused:
+			tree.paused = true
+			_paused_by_panel = true
+		return
+	if _paused_by_panel and tree.paused:
+		tree.paused = false
+	_paused_by_panel = false
+
+## Il pulsante di una carta e' stato premuto: **qui si chiama `choose()`**, e il
+## chiamante e' il pannello, non il test. E' la riga che mancava dal gioco.
+##
+## `index` e' la posizione **di adesso**, non quella di quando il pannello si e'
+## aperto: `choose()` toglie l'offerta scelta dalla lista, quindi l'offerta
+## successiva scivola indietro di uno. Il pulsante passa il suo numero di slot e
+## il pannello rilegge `offers` subito dopo, quindi le carte rimaste mostrano
+## subito quello che resta davvero e non quello che avevano un secondo prima.
+func _on_card_pressed(index: int) -> void:
+	var tree := get_tree()
+	var prog := _progression(_contract())
+	if prog == null:
+		return
+	if not prog.has_method("choose"):
+		if not _warned_no_offer_text:
+			_warned_no_offer_text = true
+			push_warning("hud: Game.progression non espone choose(): nessuna carta puo' essere scelta. "
+				+ "Il metodo e' dichiarato in src/core/contracts.gd e lo scrive -gameplay.")
+		return
+	if tree != null and tree.paused == false and _panel_open:
+		# Difensivo: il pannello aperto senza pausa non e' uno stato possibile,
+		# e proseguire lascerebbe il gioco che corre sotto un menu aperto.
+		_set_paused(true)
+	prog.call("choose", index)
+	# Rilegge tutto: le carte rimaste cambiano numero e testo, e se erano le
+	# ultime il pannello si chiude e toglie la pausa da solo.
+	_sync_upgrade_panel(prog)
+
+## Il testo di una carta, preso dal metodo che espone `-gameplay`. Se il metodo
+## non c'e' ancora, la carta mostra il suo numero e un avviso: meglio una carta
+## che non promette niente di una carta con un numero inventato qui dentro.
+func _offer_text(prog: Object, index: int, method: String) -> String:
+	if not prog.has_method(method):
+		if not _warned_no_offer_text:
+			_warned_no_offer_text = true
+			push_warning("hud: Game.progression non espone \"%s\": le carte mostrano il loro numero "
+				% method
+				+ "finche' -gameplay non dichiara il metodo. E' sulla superficie di src/core/contracts.gd.")
+		return "CARTA %d" % (index + 1)
+	var raw = prog.call(method, index)
+	return _as_text(raw)
+
+## Un valore di `-gameplay` diventato testo, senza sapere che tipo ha.
+##
+## Non e' difensivita' gratuita: il numero che la carta mostra **deve** essere il
+## numero che `apply()` usa davvero (criterio n. 4 di m6), e l'unico modo di
+## garantirlo e' non trasformare il valore qui dentro. Quindi `str()` per
+## quello che e' gia' un numero o una stringa, e per un dizionario tutti i suoi
+## valori in ordine di chiave: se domani `-gameplay` cambia la forma del dato,
+## il testo cambia con lui invece di restare indietro.
+func _as_text(raw: Variant) -> String:
+	if raw == null:
+		return ""
+	if raw is String:
+		return raw as String
+	if raw is Dictionary:
+		var keys: Array = (raw as Dictionary).keys()
+		keys.sort()
+		var parts: Array[String] = []
+		for k in keys:
+			parts.append(_as_text((raw as Dictionary)[k]))
+		return " ".join(parts)
+	return str(raw)
+
+# --- La superficie del pannello, per il test ---------------------------------
+#
+# Il test non deve cercare i nodi per nome: se il pannello cambiasse
+# struttura, il test deve fallire qui e non in silenzio.
+
+## Il pannello delle carte e' **visibile**? Letto dal nodo, come `game_over_visible`.
+func upgrade_panel_visible() -> bool:
+	return _upgrade_panel != null and _upgrade_panel.visible
+
+## Quante carte ci sono **adesso**: non quante carte ci sono nella scena.
+func upgrade_cards_shown() -> int:
+	var n := 0
+	for card in _cards:
+		if card.visible:
+			n += 1
+	return n
+
+## Il nome della carta `index`, letto dalla Label e non ricalcolato qui.
+func upgrade_card_title(index: int) -> String:
+	if index < 0 or index >= _card_titles.size():
+		return ""
+	var label := _card_titles[index]
+	return label.text if label != null else ""
+
+## L'effetto della carta `index`, letto dalla Label. E' il numero con cui il
+## criterio n. 4 confronta quello che `apply()` fa davvero.
+func upgrade_card_effect(index: int) -> String:
+	if index < 0 or index >= _card_effects.size():
+		return ""
+	var label := _card_effects[index]
+	return label.text if label != null else ""
+
+## Il percorso del pulsante della carta `index`, che il test usa per premere
+## davvero il bottone invece di chiamare `_on_card_pressed`.
+func upgrade_card_path(index: int) -> String:
+	if index < 0 or index >= _cards.size():
+		return ""
+	return String(_cards[index].get_path())
+
+## Il process mode **dichiarato** del nodo indicato dal percorso, o -1 se il
+## percorso non esiste. Il test ci somma i padri per via di `PROCESS_MODE_INHERIT`
+##: dichiarare la radice e non i pulsanti e' un difetto che questa funzione
+## rende visibile.
+func upgrade_process_mode_at(path: String) -> int:
+	var node := get_node_or_null(path)
+	return node.process_mode if node != null else -1
 
 # --- Disegno ------------------------------------------------------------------
 

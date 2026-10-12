@@ -115,17 +115,53 @@ const OFF_GRID := 3.3333
 
 var _h: H = null
 var _ran: bool = false
+## `-ui`, m6. Il pannello delle carte **mette in pausa l'albero**, e una parte di
+## questo test ha bisogno di guardare il giocatore mentre l'albero e' fermo:
+## serve aspettare che passino dei frame *di fisica*, e in un test sotto
+## `--script` non c'e' nessun frame da aspettare senza chiederlo.
+##
+## Quindi `_process` non finisce mai il test da solo: finisce solo quando `_run()`
+## arriva in fondo e chiama `quit()`. `_wait_physics` sospende `_run()` con un
+## `await` e il ciclo continua a girare intanto, quindi mettere in pausa
+## l'albero **non ferma il test**: `SceneTree._process` e' il ciclo del
+## `MainLoop`, non un nodo, e la pausa dei nodi non lo tocca (e' esattamente la
+## ragione per cui il pannello puo' essere `PROCESS_MODE_ALWAYS` e il test no).
+var _done: bool = false
 
 
 func _initialize() -> void:
 	_h = H.new()
 
+
 func _process(_delta: float) -> bool:
 	if _ran:
-		return true
+		return _done
 	_ran = true
 	_run()
-	return true
+	return _done
+
+
+## Aspetta che passino `n` frame **di fisica**, non di processo.
+##
+## La distinzione non e' pignolerie: il criterio n. 2 chiede che "il giocatore
+## non si muove", e il giocatore si muove in `_physics_process`. Aspettare frame
+## di processo in un test headless -- dove il ciclo gira piu' veloce del
+## realtime -- puo' voler dire che nel mezzo non e' passato **nessun** passo di
+## fisica, e "non si e' mosso" passerebbe senza aver provato niente.
+##
+## Il contatore e' un tetto, non un'attesa infinita: se i frame di fisica non
+## avanzassero, il test si bloccherebbe e il gate lo ucciderebbe fra 120 s
+## dicendo "timeout", che e' un fatto diverso da "l'attesa non serve". Qui si
+## esce prima e si dice il numero misurato.
+const PHYSICS_WAIT_CAP := 20000
+
+func _wait_physics(n: int) -> int:
+	var start := Engine.get_physics_frames()
+	var seen := 0
+	while Engine.get_physics_frames() < start + n and seen < PHYSICS_WAIT_CAP:
+		seen += 1
+		await physics_frame
+	return Engine.get_physics_frames() - start
 
 
 func _run() -> void:
@@ -165,6 +201,9 @@ func _run() -> void:
 	print("test_ui: popolazione d'avvio letta da horde.count e mostrata dalla HUD: %d / %d / %d"
 		% [int(first["boot_pop"]), int(second["boot_pop"]), int(third["boot_pop"])])
 
+	await _upgrade_flow(h, game)
+
+	_done = true
 	quit(h.finish("test_ui"))
 
 # --- Parte 1: l'HUD da solo ---------------------------------------------------
@@ -673,6 +712,640 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 	_tick(arena, hud)
 	h.check(not hud.game_over_visible(),
 		"avvio %d: tornato in vita il giocatore, la schermata di game over deve sparire" % round_no)
+
+# --- Parte 3: il pannello delle scelte (m6) -------------------------------------
+#
+# `choose()` non era chiamato da nessuna parte del gioco (piano sez. 1.6, primo
+# difetto della sezione): uccidi, sali di livello, senti un suono, e non
+# succede niente. Fino a m5 i test chiamavano `choose(0)` e misuravano che
+# `choose` funzionasse; il criterio n. 1 di m6 chiede l'opposto, e questa parte
+# e' scritta per non poterlo passare per sbaglio:
+#
+#   - nessuna riga di questa parte chiama `choose()`, `apply()` o
+#     `_on_card_pressed`. Il livello sale **uccidendo**, con l'API pubblica di
+#     `-orda`, e la scelta la fa **premedendo il bottone**, con un evento di
+#     mouse. Il percorso e' quattro passi, e quattro sono pezzi di codice di
+#     gioco: `Button.pressed` -> `hud._on_card_pressed` -> `progression.choose`
+#     -> `progression.apply`.
+#   - se il pannello non chiamasse `choose()`, qui `pending()` resterebbe a 3 e
+#     il danno non cambierebbe: il test va rosso da solo.
+
+## Danno con cui il test ammazza un nemico. Volutamente enorme: il nemico deve
+## morire al primo colpo, e la sua vita e' di `-orda` (`enemy.gd`), quindi qui non
+## c'e' nessuna soglia da indovinare e nessun numero di gioco.
+const KILL_DAMAGE := 1000000000.0
+
+## Quanti frame di fisica si aspettano per vedere se il giocatore si muove. Tre
+## bastano: `MOVE_SPEED` e' 7 m/s e la decelerazione e' 40 m/s^2, quindi anche
+## con una spinta piccola il primo passo lo muove di qualche centesimo.
+const MOVE_FRAMES := 3
+
+## La spinta data al giocatore per misurare se si muove. Il test non ha
+## tastiera e il giocatore non si muove da solo, quindi "non si e' mosso" senza
+## una spinta passerebbe **sempre**, anche col gioco che corre: e un controllo
+## che passa sempre non e' un controllo. Il numero e' arbitrario e serve solo a
+## essere non nullo.
+const PLAYER_PUSH := 6.0
+
+## Quanta distanza conta come "si e' mosso". Sotto questa soglia il confronto
+## sarebbe fra due numeri che differiscono per il rumore dei float.
+const MOVE_EPS := 0.01
+
+## Soglia con cui un numero della carta combacia con una variazione misurata.
+## Un punto percentuale: abbastanza stretto da notare che "25%" non e' "30%",
+## abbastanza largo da non litigare con l'ultimo bit di un `*= 1.25` ripetuto.
+const CARD_NUM_TOL := 0.011
+
+func _upgrade_flow(h, game: Node) -> void:
+	var arena = _open_arena(h, game)
+	if arena == null:
+		return
+	var hud = arena.get_node_or_null(HUD_NODE)
+	var player = arena.get_node_or_null("Player")
+	var horde = game.get("horde")
+	var prog = _progression(game)
+	if not h.check(hud != null and player != null,
+			"avvio m6: la scena deve avere i nodi \"%s\" e \"Player\"" % HUD_NODE):
+		_close(arena)
+		return
+	if not h.check(horde is Object and is_instance_valid(horde),
+			"avvio m6: il contratto non espone un'orda valida: nessun livello puo' salire"):
+		_close(arena)
+		return
+	if not h.check(prog != null,
+			"avvio m6: nessuna progressione nel contratto: l'HUD non ha nulla da leggere"):
+		_close(arena)
+		return
+	var weapon = player.get("weapon")
+	if not h.check(weapon != null, "avvio m6: il giocatore non ha un'arma: nessun potenziamento puo' cambiare"):
+		_close(arena)
+		return
+
+	# ## Perche' la finestra viene ridimensionata, e con quali numeri
+	#
+	# Sotto `--script` la `Window` radice nasce a 64x64, la dimensione di default
+	# del motore: nessuna scena principale viene aperta, quindi nessuno legge
+	# `display/window/size/viewport_width` da `project.godot`. La GUI pero'
+	# **rifiuta** un evento di mouse fuori dal rettangolo della viewport, quindi
+	# un clic sul centro di una carta non arriverebbe a nessun bottone e il
+	# pannello sembrerebbe non cliccabile quando e' solo fuori dallo schermo.
+	# I due numeri vengono da `project.godot`, non scritti qui: sono la misura
+	# della finestra che l'HUD e' disegnato per (`scenes/hud.tscn` ha offset
+	# assoluti su 1280x720), e rileggere il valore invece di copiarlo e' la
+	# differenza fra una verifica che gira e una che aspetta che qualcuno cambi
+	# la risoluzione.
+	var vp_w := int(ProjectSettings.get_setting("display/window/size/viewport_width", 1280))
+	var vp_h := int(ProjectSettings.get_setting("display/window/size/viewport_height", 720))
+	root.size = Vector2i(vp_w, vp_h)
+	h.eq(root.size, Vector2i(vp_w, vp_h),
+		"la finestra radice deve avere la dimensione che dichiara project.godot: sotto --script nasce a 64x64 e la GUI scarta ogni clic fuori da quella")
+
+	# --- zero: il pannello non c'e', e il gioco non e' fermo ------------------
+	h.eq(_pending(prog), 0, "all'avvio non ci sono scelte da prendere")
+	h.check(not hud.upgrade_panel_visible(),
+		"all'avvio il pannello delle carte non si vede")
+	h.eq(hud.upgrade_cards_shown(), 0,
+		"all'avvio nessuna carta e' visibile: un pannello nato aperto mostra scelte che non esistono")
+	h.check(not paused,
+		"all'avvio il gioco non deve essere in pausa: e' il pannello a metterla in pausa, e solo quando e' aperto")
+
+	_process_mode_declared(h, hud)
+
+	var nodes_boot := _count_nodes(root)
+	_node_budget(h, nodes_boot, "all'avvio")
+
+	# --- uno: uccidendo sale di livello da solo -------------------------------
+	#
+	# Il livello sale perche' il test ha ucciso dei nemici, non perche' abbia
+	# scritto un campo. Le due meta' della catena sono le due righe dentro
+	# `_kill_until`: `damage_enemy` e' l'API pubblica di `-orda` e toglie il
+	# nemico davvero, `weapon.on_kill()` e' la riga che `weapon_base` chiama
+	# quando un suo proiettile torna indietro e che finisce in
+	# `progression.on_kill(1)`. Nessuna delle due tocca `offers`: se il pannello
+	# non ci fosse, qui sotto il livello salirebbe e non succederebbe comunque
+	# niente.
+	var kills := _kill_until(h, prog, horde, weapon, 2)
+	print("test_ui: m6, uccisioni fino al primo livello: %d" % kills)
+	h.eq(_level_of(prog), 2,
+		"uccidendo %d nemici il livello deve essere salito da solo a 2, senza che nessuno tocchi la progressione" % kills)
+	h.eq(_pending(prog), 3,
+		"un livello appena salito deve offrire 3 scelte: pending() e' di -gameplay, qui non c'e' nessun 3 scritto")
+
+	# Il pannello si apre nel frame in cui l'HUD rilegge il contratto: e' lo
+	# stesso canale che gia' porta XP e numero d'onda, non un secondo canale.
+	_tick(arena, hud)
+
+	h.check(hud.upgrade_panel_visible(),
+		"salendo di livello il pannello delle carte si deve aprire da solo: nessuno, nel gioco, apre niente")
+	h.check(paused,
+		"col pannello aperto l'albero deve essere in pausa: senza, il giocatore corre mentre si sceglie e la scelta non e' una scelta")
+	h.eq(hud.upgrade_cards_shown(), _pending(prog),
+		"il pannello deve mostrare esattamente le offerte disponibili")
+	h.eq(_count_nodes(root), nodes_boot,
+		"aprire il pannello non puo' creare un nodo: le carte sono nella scena dal primo frame, e un nodo nato a meta' partita e' quello che un restart moltiplica")
+	_node_budget(h, _count_nodes(root), "col pannello aperto")
+
+	var ids := _offer_ids(prog)
+	print("test_ui: m6, id offerti dal livello %d: %s" % [_level_of(prog), str(ids)])
+	# --- due: col pannello aperto il giocatore non si muove -------------------
+	await _stays_put(h, player, "col pannello delle carte aperto")
+
+	# --- tre: una scelta sola, e le altre due si buttano ---------------------
+	#
+	# ## La regola, e di chi e'
+	#
+	# «me li fa scegliere tutti e 3, non solo 1»: la regola nuova e' **una sola
+	# scelta e le altre due buttate**, e l'ha decisa **l'utente** (2026-10-13),
+	# non il codice. `choose(index)` **svuota** `offers`, quindi `pending()` va
+	# da 3 a 0 con **una** pressione e non 3 -> 2 -> 1 -> 0.
+	#
+	# Per questo qui si preme **una** carta e non tre: un test che ne preme tre
+	# sarebbe scritto sul contratto che l'utente ha cambiato, e direbbe rosso o
+	# verde sul significato sbagliato. Il pannello **non si tocca**: chiama
+	# `choose()` una volta sola e fa esattamente quello che faceva, e cambia solo
+	# la semantica di `choose()`, che e' di `-gameplay`.
+	#
+	# ## Perche' si preme la carta 1 e non la 0
+	#
+	# Nessuna in particolare: e' la seconda delle tre, cosi' la verifica non
+	# passerebbe nemmeno con un pannello che applicasse sempre la prima. La
+	# regola vecchia aveva un motivo per l'indice 1 (gli indici si spostavano a
+	# ogni scelta); quella non c'e' piu', e questo commento non la riporta indietro
+	# per abitudine.
+	var offerte := _offer_ids(prog)
+	h.eq(offerte.size(), _pending(prog),
+		"la lista delle offerte e pending() devono dire la stessa cosa: sono la stessa coda letta in due modi")
+	if not h.check(_pending(prog) > 0, "prima della scelta deve esserci almeno un'offerta da prendere"):
+		_close(arena)
+		return
+	var idx: int = 1
+	if not h.check(idx < offerte.size(),
+			"la carta %d non esiste fra le %d offerte" % [idx, offerte.size()]):
+		_close(arena)
+		return
+
+	# La carta che il pannello **mostra** adesso, letta dalle Label.
+	var shown_title: String = hud.upgrade_card_title(idx)
+	var shown_effect: String = hud.upgrade_card_effect(idx)
+	if prog.has_method("offer_label"):
+		h.eq(shown_title, _offer_label(prog, idx),
+			"la carta %d deve mostrare il nome che -gameplay da' per l'indice %d di adesso" % [idx, idx])
+
+	var snap_before := _snapshot(player)
+	# ## Il percorso della scelta passa dai clic, e questo e' il fatto
+	#
+	# L'esperimento «clic o nessun clic» e' stato fatto e il suo risultato sta
+	# qui perche' resta: **col clic la scelta c'e', col segnale del bottone non
+	# c'e'**. Quindi il percorso che il gioco usa e' `Button.pressed` ->
+	# `_on_card_pressed` -> `choose()` -> `apply()`, e i due fatti che lo rendono
+	# possibile sono due, non uno: sotto `--script` la finestra radice nasce a
+	# 64x64 e la GUI scarta i clic fuori da quel rettangolo (per questo qui
+	# sopra la finestra viene ridimensionata), e `BaseButton.action_mode` vale
+	# `BUTTON_RELEASE` quindi un bottone emette `pressed` quando il tasto si
+	# alza e serve premuto **e** rilasciato. Sono fatti che valgono per
+	# qualunque GUI di questo progetto, e il secondo e' il motivo per cui qui
+	# sotto ci sono due eventi e non uno.
+	var how := _press_card(hud, prog, idx)
+	h.eq(how, "clic",
+		"la scelta deve arrivare da un clic del mouse: il percorso e' Button.pressed -> _on_card_pressed -> choose() -> apply(), e nessuno dei quattro passi puo' essere questo test")
+	var snap_after := _snapshot(player)
+
+	# ## Le tre cose che la regola nuova chiede di dire
+	#
+	# 1. `pending()` e' 3 prima e **0** dopo **una** pressione: non 2.
+	h.eq(_pending(prog), 0,
+		"una sola scelta deve svuotare la coda delle offerte: pending() va da 3 a 0, non scende di uno a uno")
+	# E la coda svuotata e' anche la **condizione** che fa rullare il livello
+	# dopo (`add_xp` rulla solo se `offers.is_empty()`): se le altre due restassero
+	# in lista, il giocatore salirebbe e non gli verrebbe piu' niente da scegliere.
+	h.eq(_offer_ids(prog), [],
+		"le altre due offerte devono essere buttate e non lasciate in lista: con la coda piena il livello successivo non rulla niente")
+	# 2. **Uno solo** dei tre potenziamenti e' stato applicato: un numero reale e'
+	# cambiato, e gli altri due no. E' `_card_number_matches`, che da quando la
+	# regola e' questa confronta **tutti** i numeri cambiati e non basta che
+	# uno combaci (vedi la sua nota).
+	_card_number_matches(h, str(offerte[idx]), shown_effect, snap_before, snap_after)
+
+	h.check(not hud.upgrade_panel_visible(),
+		"esaurita la scelta il pannello deve sparire da solo: nessuno, nel gioco, deve ricordarsi di chiuderlo")
+	h.eq(hud.upgrade_cards_shown(), 0, "esaurita la scelta nessuna carta deve restare visibile")
+	h.check(not paused,
+		"esaurita la scelta l'albero deve tornare a girare: una pausa che resta e' una partita che non riprende")
+	h.eq(_count_nodes(root), nodes_boot,
+		"chiudere il pannello non puo' liberare un nodo: le carte erano gia' nella scena dal primo frame")
+	await _does_move(h, player, "a pannello chiuso")
+
+	# --- quattro: al livello dopo ne arrivano altre tre, distinte -------------
+	#
+	# 3. La terza cosa che la regola nuova chiede di dire: uccidendo ancora,
+	# senza toccare niente, la coda si riempie **di nuovo** e di offerte
+	# diverse. Se il pannello tenesse le carte che ha appena buttato, qui
+	# mostrerebbe nomi e numeri che non corrispondono a nessuna offerta viva.
+	var kills2 := _kill_until(h, prog, horde, weapon, 3)
+	h.eq(_level_of(prog), 3,
+		"uccidendo altri %d nemici il livello deve essere salito a 3 da solo" % kills2)
+	h.eq(_pending(prog), 3,
+		"il livello successivo deve offrire di nuovo 3 scelte: e' la coda svuotata dalla scelta precedente a far rullare")
+	var ids_dopo := _offer_ids(prog)
+	print("test_ui: m6, id offerti dal livello %d: %s" % [_level_of(prog), str(ids_dopo)])
+	h.eq(ids_dopo.size(), 3, "al livello 3 devono esserci tre offerte nuove")
+	# ## «altre tre, distinte»: cosa si puo' affermare, e cosa no
+	#
+	# **Non** si puo' affermare che nessuna delle tre sia una delle tre di prima:
+	# il sorts e' di `-gameplay` (`rng_seed + level * 977 + kills`) e un id puo'
+	# ricomparire fra due livelli. Misurato qui: al livello 2 escono
+	# `vitality, move_speed, knockback` e al livello 3 `projectile_speed,
+	# vitality, fire_rate`: `vitality` e' in tutte e due le liste. Un test che
+	# chiedesse la disgiunzione dei due insiemi sarebbe un test che pretende da
+	# `-gameplay` una cosa che `-gameplay` non ha dichiarato, e che domani
+	# cambierebbe il seme farebbe fallire senza che nessun difetto sia nato.
+	#
+	# Quello che e' invece proprio di questa foglia, e che qui si verifica:
+	# le tre carte mostrate sono le tre offerte **di adesso**. Il confronto e'
+	# con `offer_label(i)` letto dal contratto vivo, quindi un pannello che
+	# tenesse i testi di prima lo prenderebbe qui.
+	var visti := {}
+	for id in ids_dopo:
+		h.check(not visti.has(id),
+			"al livello 3 l'offerta \"%s\" e' stata tirata due volte nello stesso livello: le tre carte devono essere tre potenziamenti diversi" % id)
+		visti[id] = true
+	# E il sorts non e' ricominciato da capo: un pannello che mostrasse le stesse
+	# tre carte di prima sarebbe fermo, e qui nessuno si e' fermato.
+	h.check(ids_dopo != offerte,
+		"al livello 3 il pannello mostra esattamente le stesse tre carte del livello 2: i sorts non si e' rilanciato")
+	print("test_ui: m6, id scartati al livello 2: %s" % str(offerte))
+
+	_tick(arena, hud)
+	h.check(hud.upgrade_panel_visible(), "al livello successivo il pannello deve riaprirsi da solo")
+	h.eq(hud.upgrade_cards_shown(), 3, "il pannello riaperto deve mostrare tutte e tre le offerte nuove")
+	if prog.has_method("offer_label"):
+		for i in ids_dopo.size():
+			h.eq(hud.upgrade_card_title(i), _offer_label(prog, i),
+				"la carta %d del livello successivo deve mostrare il nome dell'offerta nuova che occupa quella posizione" % i)
+
+	# --- cinque: il restart ---------------------------------------------------
+	var before_restart := _count_nodes(root)
+	player.call("restart_run")
+	_tick(arena, hud)
+	h.eq(_pending(prog), 0, "dopo il restart non deve restare nessuna scelta pendente")
+	h.check(not hud.upgrade_panel_visible(),
+		"dopo il restart il pannello delle carte non deve riaprire con le scelte del livello prima")
+	h.check(not paused, "dopo il restart il gioco non deve restare in pausa")
+	h.eq(_count_nodes(root), before_restart,
+		"il restart non puo' far crescere il numero di nodi: il pannello non crea e non libera nulla")
+	_node_budget(h, _count_nodes(root), "dopo il restart")
+
+	# E il pannello torna a funzionare dopo il restart: uno che funziona solo al
+	# primo livello e' un pannello che una partita lunga non usa mai.
+	_kill_until(h, prog, horde, weapon, 2)
+	_tick(arena, hud)
+	h.check(hud.upgrade_panel_visible(),
+		"dopo il restart il pannello deve aprirsi di nuovo al livello successivo")
+	h.check(paused, "dopo il restart il pannello deve di nuovo fermare il gioco")
+	h.eq(_pending(prog), 3, "dopo il restart il livello deve offrire di nuovo 3 scelte")
+	h.eq(_press_card(hud, prog, 0), "clic",
+		"dopo il restart il pannello deve accettare di nuovo il clic del mouse")
+	h.eq(_pending(prog), 0,
+		"dopo il restart una sola scelta deve esaurire il livello come la prima volta: pending() va a 0, non a 2")
+
+	# ## Si esce con il pannello **aperto**
+	#
+	# Con la regola nuova una scelta chiude il pannello, quindi per arrivare
+	# all'uscita con l'albero fermo si sale di un altro livello e **non** si
+	# sceglie niente. Il pannello aperto e' lo stato da cui l'HUD esce, ed e'
+	# l'unico in cui la pausa e' ancora di qualcuno.
+	_kill_until(h, prog, horde, weapon, 4)
+	_tick(arena, hud)
+	h.check(hud.upgrade_panel_visible(),
+		"precondizione: senza scegliere niente il pannello resta aperto")
+	h.check(paused, "precondizione: il pannello aperto tiene l'albero in pausa")
+
+	# ## La pausa restituita all'uscita
+	#
+	# Il pannello e' aperto e ci resta: si chiude la scena **cosi' com'e'**, e
+	# l'HUD che esce dall'albero deve restituire la pausa che aveva preso.
+	# `get_tree().paused` e' globale: un HUD che sparisce mentre l'albero e' fermo
+	# lo lascia fermo per sempre, senza piu' nessuno che possa toglierla. In un
+	# test che esce subito dopo si vede come `2 ObjectDB instances were leaked`:
+	# il motore chiude l'albero in pausa e non scarica la coda dei messaggi.
+	_close(arena)
+	h.check(not paused,
+		"un HUD che esce dall'albero deve restituire la pausa che aveva preso: se no l'albero resta fermo per sempre e nessuno puo' rimetterlo in moto")
+
+## Uccide nemici finche' la progressione non arriva a `target`, e dice quante
+## uccisioni sono servite.
+##
+## Il livello sale perche' il test ha **ucciso**, non perche' abbia scritto un
+## campo: `damage_enemy` e' l'API pubblica di `-orda` e toglie il nemico
+## davvero, `weapon.on_kill()` e' la riga che `weapon_base` chiama quando un suo
+## proiettile torna indietro e che finisce in `progression.on_kill(1)`. Nessuna
+## delle due tocca `offers`: se il pannello non ci fosse il livello salirebbe lo
+## stesso e non succederebbe niente.
+##
+## Il tetto su `guard` e' un tetto, non un'attesa: senza nemici (`count == 0`) o
+## con un `damage_enemy` che non uccide, il ciclo deve uscire e dire che non ha
+## potuto arrivare al livello invece di girare per sempre.
+func _kill_until(h, prog, horde, weapon, target: int) -> int:
+	var kills := 0
+	var guard := 0
+	while _level_of(prog) < target and guard < 400:
+		guard += 1
+		if int((horde as Object).get("count")) <= 0:
+			break
+		var died: bool = (horde as Object).call("damage_enemy", 0, KILL_DAMAGE, Vector3.ZERO)
+		if not h.check(died, "verso il livello %d: il nemico %d doveva morire al primo colpo" % [target, guard]):
+			break
+		kills += 1
+		weapon.call("on_kill")
+	return kills
+
+## Il `process_mode` **dichiarato** su radice, pannello e pulsanti.
+##
+## Letto **prima** che l'albero vada in pausa, e per un motivo che e' il difetto
+## stesso: mentre l'albero e' fermo il motore riscrive temporaneamente il
+## process mode dei nodi che non possono elaborare, quindi leggere li'
+## misurerebbe `DISABLED` e non quello che c'e' nella scena. E non basta il
+## primo livello: `PROCESS_MODE_INHERIT` risale al padre, quindi dichiarare la
+## radice e lasciare i pulsanti a `INHERIT` funziona finche' nessuno sposta un
+## nodo -- ed e' esattamente il difetto che non si vede.
+func _process_mode_declared(h, hud) -> void:
+	h.eq(hud.upgrade_process_mode_at("."), Node.PROCESS_MODE_ALWAYS,
+		"la radice dell'HUD deve essere PROCESS_MODE_ALWAYS: con l'albero in pausa deve continuare a leggere il contratto, se no il pannello si apre e resta muto")
+	h.eq(hud.upgrade_process_mode_at("Root/Upgrade"), Node.PROCESS_MODE_ALWAYS,
+		"il pannello delle carte deve essere PROCESS_MODE_ALWAYS: un pannello che non riceve input non si puo' cliccare")
+	var n := 0
+	while hud.upgrade_card_path(n) != "":
+		h.eq(hud.upgrade_process_mode_at(hud.upgrade_card_path(n)), Node.PROCESS_MODE_ALWAYS,
+			"la carta %d deve essere PROCESS_MODE_ALWAYS, non PROCESS_MODE_INHERIT: il pulsante e' quello che riceve il clic" % n)
+		n += 1
+	h.check(n > 0, "il pannello delle carte deve avere almeno un pulsante da premere")
+
+## Il tetto di nodi: il criterio n. 3 di m1 chiede `node_count < 120` e il
+## confronto vero e' "non cresce", perche' un tetto che non si tocca puo' essere
+## un tetto che nessuno guarda.
+func _node_budget(h, nodes: int, when: String) -> void:
+	h.check(nodes < 120,
+		"%s: la scena vera conta %d nodi e il tetto di m1 e' 120: il pannello delle carte non puo' farlo salire" % [when, nodes])
+	# La stampa e' il numero **misurato**, non quello che il piano scrive.
+	print("test_ui: m6, nodi sotto root %s: %d" % [when, nodes])
+
+## Con il pannello aperto il giocatore non si muove. Misurato, non dedotto.
+func _stays_put(h, player, what: String) -> void:
+	var prima: Vector3 = player.global_position
+	# Una spinta: il test non ha tastiera e il giocatore non si muove da solo,
+	# quindi senza questa riga "non si e' mosso" direbbe niente.
+	player.velocity = Vector3(PLAYER_PUSH, 0.0, 0.0)
+	var aspettati := await _wait_physics(MOVE_FRAMES)
+	h.check(aspettati >= MOVE_FRAMES,
+		"%s: i frame di fisica non sono avanzati (%d su %d): l'attesa non ha potuto provare niente" % [what, aspettati, MOVE_FRAMES])
+	var dopo: Vector3 = player.global_position
+	h.check(prima.distance_to(dopo) <= 0.0001,
+		"%s: il giocatore si e' spostato di %.4f metri mentre l'albero era in pausa" % [what, prima.distance_to(dopo)])
+
+## Il controllo di `_stays_put`: la stessa attesa, ma senza pausa, deve muovere.
+func _does_move(h, player, what: String) -> void:
+	var prima: Vector3 = player.global_position
+	player.velocity = Vector3(PLAYER_PUSH, 0.0, 0.0)
+	var aspettati := await _wait_physics(MOVE_FRAMES)
+	var dopo: Vector3 = player.global_position
+	h.check(aspettati >= MOVE_FRAMES,
+		"%s: i frame di fisica non sono avanzati (%d su %d)" % [what, aspettati, MOVE_FRAMES])
+	h.check(prima.distance_to(dopo) > MOVE_EPS,
+		"%s: il giocatore doveva muoversi e non si e' mosso di %.4f metri: l'attesa di _stays_put non avrebbe provato niente" % [what, prima.distance_to(dopo)])
+
+## Preme davvero il pulsante della carta `index`, e dice **come**.
+##
+## Il percorso e' un evento di mouse, non una chiamata: il criterio n. 1 vieta che
+## sia il test a scegliere, e chiamare `hud._on_card_pressed(0)` da qui sarebbe
+## esattamente la stessa cosa che chiama `choose(0)`. Con l'evento il percorso
+## e' `Button.pressed` -> `_on_card_pressed` -> `choose()` -> `apply()`: quattro
+## passi, quattro pezzi di codice di gioco.
+##
+## Se l'evento di mouse non arriva, il ripiego e' il segnale `pressed`, che e'
+## comunque il segnale che il bottone emette quando lo si preme, e il test
+## **dichiara quale delle due strade ha preso**. Un test che cambia strada in
+## silenzio e' un test che un giorno smette di provare la strada vera.
+func _press_card(hud, prog, index: int) -> String:
+	var path: String = hud.upgrade_card_path(index)
+	var card := hud.get_node_or_null(path) as Button
+	if card == null:
+		hud.fail("la carta %d non esiste: \"%s\"" % [index, path])
+		return "nessuna carta"
+	if not card.is_visible_in_tree():
+		hud.fail("la carta %d non e' visibile: non si puo' premere un bottone che non si vede" % index)
+		return "nascosta"
+
+	var prima := _pending(prog)
+	var centro: Vector2 = card.get_global_rect().get_center()
+	# Premuto **e rilasciato**: `BaseButton.action_mode` vale
+	# `ACTION_MODE_BUTTON_RELEASE` di default, quindi un bottone emette
+	# `pressed` quando il tasto si alza, non quando si abbassa. Un solo evento di
+	# pressione arriverebbe al bottone e non produrrebbe nessuna scelta: sembrerebbe
+	# che il pannello non sia cliccabile, e invece non e' stato finito il clic.
+	#
+	# E `flush_buffered_events()` dopo ognuno: `Input.use_accumulated_input` vale
+	# `true` di default, quindi `parse_input_event` **accoda** l'evento e lo
+	# consegna alla GUI al frame dopo. Senza la flush l'evento arriverebbe
+	# davvero, ma un frame dopo, e qui si confronterebbe `pending()` subito:
+	# un verde che aspetta il frame giusto senza che nessuno lo sappia e' un
+	# verde che aspetta per sempre.
+	Input.parse_input_event(_mouse_button(MOUSE_BUTTON_LEFT, true, centro))
+	Input.flush_buffered_events()
+	Input.parse_input_event(_mouse_button(MOUSE_BUTTON_LEFT, false, centro))
+	Input.flush_buffered_events()
+	# ## Il successo e' «`pending()` e' cambiato», non «e' sceso di uno»
+	#
+	# La regola e' dell'utente (2026-10-13): `choose()` svuota la coda, quindi
+	# dopo una scelta `pending()` va a zero e non a due. La domanda che questa
+	# funzione fa al contratto resta la stessa prima e dopo il cambio di regola,
+	# ed e' la piu' piccola che si possa fare: la coda delle offerte e' cambiata
+	# oppure no.
+	if _pending(prog) != prima:
+		return "clic"
+
+	card.pressed.emit()
+	if _pending(prog) != prima:
+		return "segnale"
+	return "non e' successo niente"
+
+## Un evento di mouse a un punto dello schermo. Le coordinate sono sia locali
+## sia globali perche' la GUI le cerca con le une e con le altre a seconda del
+## percorso che fa l'evento nella viewport.
+func _mouse_button(button: int, down: bool, at: Vector2) -> InputEventMouseButton:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	ev.pressed = down
+	ev.position = at
+	ev.global_position = at
+	return ev
+
+## Criterio n. 4: il numero scritto sulla carta contro quello che `apply()` ha
+## fatto davvero, misurato campando **tutti** i numeri che lo script del
+## giocatore e quello dell'arma espongono.
+##
+## La lista dei campi non e' scritta qui: si legge `get_property_list()` con il
+## filtro `PROPERTY_USAGE_SCRIPT_VARIABLE`, quindi se `-gameplay` aggiunge un
+## campo a `apply()` questa verifica lo vede senza che nessuno la aggiorni.
+##
+## ## Perche' **tutti** i numeri cambiati, e non uno
+##
+## Con la regola vecchia bastava che **uno** dei numeri cambiati combaciasse con
+## quello scritto sulla carta: se ne applicavano tre, ne cambiavano tre, e la
+## verifica passava guardando uno solo dei tre. Oggi la regola e' **una scelta e
+## le altre due buttate**, quindi il numero giusto da confrontare e' l'unico
+## insieme di numeri che la carta premuta spiega: se uno dei due potenziamenti
+## scartati avesse toccato il suo campo, quel numero non sarebbe spiegato da
+## quello sulla carta e qui va rosso. Un confronto che ne tollera uno su tre non
+## distingue "una scelta" da "tre scelte", che e' esattamente la domanda.
+##
+## Il caso che resta spiegato da una carta sola e sono due campi e' `vitality`,
+## che alza `max_hp` e cura della stessa quantita`: e` voluto, perche' la carta
+## dice "+20" e i due numeri cambiano di 20.
+func _card_number_matches(h, id: String, shown: String, prima: Dictionary, dopo: Dictionary) -> void:
+	var cambiamenti: Array[String] = []
+	for k in prima.keys():
+		if not dopo.has(k):
+			continue
+		var a: float = prima[k]
+		var b: float = dopo[k]
+		if absf(b - a) > 0.000001:
+			cambiamenti.append("%s da %s a %s" % [k, a, b])
+	if not h.check(cambiamenti.size() > 0,
+			"applicata la carta \"%s\", nessun numero di arma o giocatore e' cambiato: apply() non ha fatto niente" % id):
+		return
+	var numeri := _numbers_in(shown)
+	if not h.check(numeri.size() > 0,
+			"la carta \"%s\" mostra \"%s\": non c'e' nessun numero da confrontare con quello che apply() fa davvero (misurato: %s)"
+			% [id, shown, ", ".join(cambiamenti)]):
+		return
+	for k in prima.keys():
+		if not dopo.has(k):
+			continue
+		var a: float = prima[k]
+		var b: float = dopo[k]
+		if absf(b - a) <= 0.000001:
+			continue
+		var rapporto := INF
+		if absf(a) > 0.000001:
+			rapporto = b / a
+		var spiegato := false
+		for n in numeri:
+			if _cambia_di(n, a, b, rapporto):
+				spiegato = true
+				break
+		if not h.check(spiegato,
+				"la carta \"%s\" (%s) spiega il suo potenziamento ma qualcos'altro e' cambiato: \"%s\". Se gli altri due potenziamenti scartati fossero stati applicati, i loro campi comparirebbero qui e non sarebbero spiegati da questa carta"
+				% [id, shown, ", ".join(cambiamenti)]):
+			return
+
+## Un numero scritto sulla carta spiega una variazione misurata?
+##
+## Quattro forme, perche' la carta non e' obbligata a parlare in percento: un
+## "+25%", un "-15%" (la cadenza sale e l'intervallo scende: la stessa cosa detta
+## al contrario), un "1.25" (il moltiplicatore), e un "+20" (una vita massima,
+## che e' additiva e non ha rapporto).
+func _cambia_di(n: float, prima: float, dopo: float, rapporto: float) -> bool:
+	if absf(n - (dopo - prima)) <= 0.05:
+		return true
+	if not is_finite(rapporto):
+		return false
+	if absf(n / 100.0 - (rapporto - 1.0)) <= CARD_NUM_TOL:
+		return true
+	if absf(n / 100.0 - (1.0 - rapporto)) <= CARD_NUM_TOL:
+		return true
+	if absf(n - rapporto) <= CARD_NUM_TOL:
+		return true
+	if absf(n / 100.0 - rapporto) <= CARD_NUM_TOL:
+		return true
+	return false
+
+## I numeri dentro un testo. Accetta il punto e la virgola decimali e un segno
+## iniziale, e salta tutto quello che non e' un numero: cosi' va bene sia
+## "Danno +25%" sia "x1.25" sia "20 HP in piu'".
+func _numbers_in(text: String) -> Array[float]:
+	var trovati: Array[float] = []
+	var i := 0
+	var n := text.length()
+	while i < n:
+		var c := text[i]
+		if c == "-" or c == "+" or (c >= "0" and c <= "9"):
+			var j := i
+			if text[j] == "-" or text[j] == "+":
+				j += 1
+			var visto_numero := false
+			var visto_separatore := false
+			while j < n:
+				var d := text[j]
+				if d >= "0" and d <= "9":
+					visto_numero = true
+					j += 1
+				elif (d == "." or d == ",") and visto_numero and not visto_separatore:
+					visto_separatore = true
+					j += 1
+				else:
+					break
+			if visto_numero:
+				var pezzo := text.substr(i, j - i)
+				if pezzo.begins_with("+"):
+					pezzo = pezzo.substr(1)
+				if not pezzo.is_empty() and pezzo.is_valid_float():
+					trovati.append(pezzo.to_float())
+			i = maxi(j, i + 1)
+			continue
+		i += 1
+	return trovati
+
+## I numeri che lo script di un oggetto espone, con un prefisso per non
+## confondere un campo del giocatore con uno dell'arma.
+func _numeric_props(obj: Object, prefix: String) -> Dictionary:
+	var out := {}
+	if obj == null:
+		return out
+	for p in (obj as Object).get_property_list():
+		if not (int(p["usage"]) & PROPERTY_USAGE_SCRIPT_VARIABLE):
+			continue
+		var nome := str(p["name"])
+		var v = (obj as Object).get(nome)
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			out[prefix + nome] = float(v)
+	return out
+
+## Un'istantanea di **tutti** i numeri del giocatore e dell'arma.
+func _snapshot(player: Object) -> Dictionary:
+	var out := {}
+	out.merge(_numeric_props(player, "p:"), true)
+	out.merge(_numeric_props(player.get("weapon"), "w:"), true)
+	return out
+
+## Quante scelte non ancora prese, lette dal contratto. `-1` se non si puo' sapere.
+func _pending(prog) -> int:
+	if prog == null or not (prog as Object).has_method("pending"):
+		return -1
+	var raw = (prog as Object).call("pending")
+	if typeof(raw) != TYPE_INT and typeof(raw) != TYPE_FLOAT:
+		return -1
+	return maxi(int(raw), 0)
+
+## Gli id offerti adesso, copiati: la copia serve perche' `offers` e' la lista
+## viva e questa funzione non deve scriverci dentro.
+func _offer_ids(prog) -> Array:
+	if prog == null:
+		return []
+	var raw = (prog as Object).get("offers")
+	if not (raw is Array):
+		return []
+	return (raw as Array).duplicate()
+
+## Il nome che `-gameplay` da' per quell'indice, letto dalla sua API.
+func _offer_label(prog, index: int) -> String:
+	if prog == null or not (prog as Object).has_method("offer_label"):
+		return ""
+	return str((prog as Object).call("offer_label", index))
+
+func _level_of(prog) -> int:
+	if prog == null:
+		return 0
+	return int((prog as Object).get("level"))
 
 # --- Interno -------------------------------------------------------------------
 

@@ -50,6 +50,25 @@ extends SceneTree
 ## `horde.nearest_enemy_index(...)`: se le due strade dessero risposte diverse,
 ## il gioco in partita punterebbe a un nemico diverso da quello che il test
 ## crede di aver colpito.
+##
+## ## `--quit-after` in headless NON e' un misurino
+##
+## Resta qui perche' e' costata una notte di prove false. `--quit-after N` conta
+## **frame**, non passi di fisica: sotto `--headless --script` il motore gira
+## senza orologio, quindi 300 iterazioni sono state 132 passi di fisica reali --
+## e quel rapporto si sposta col carico della macchina, non col codice. Ne
+## segue che due esecuzioni consecutive dello stesso comando, a configurazione di
+## gioco identica, danno numeri diversi: durante il bisect del leak la traccia
+## e' comparsa ed e' sparita senza che nessuna riga di `src/sim/` cambiasse. Le
+## prime due prove erano rumore, e il colpevole vero era un suono da 0,18 s
+## ancora in riproduzione all'uscita del motore.
+##
+## **La regola.** Un numero preso con `--quit-after` in headless e' un numero
+## che cambia col carico: se qualcuno lo usa come misurino, deve saperlo prima
+## di fidarsi, e non puo' confrontarlo con una corsa precedente perche' le due
+## corse non hanno girato lo stesso numero di passi. Per misurare si guida un
+## passo di fisso dal test -- e' il `DT` qui sotto, 1/60 s, lo stesso di
+## `tests/test_gameloop.gd` -- e si contano i passi, non le iterazioni.
 
 const H = preload("res://tools/test_harness.gd")
 const HORDE = preload("res://src/sim/horde.gd")

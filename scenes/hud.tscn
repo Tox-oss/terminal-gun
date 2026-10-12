@@ -1,12 +1,24 @@
 [gd_scene load_steps=2 format=3]
 
-; -ui (m2). L'HUD: tredici nodi, sempre gli stessi.
+; -ui (m2, m6). L'HUD: venticinque nodi, sempre gli stessi.
 ;
 ; Otto venivano da -arena (vite, testo vite, nemici, punteggio, livello, arma).
 ; m2 aggiunge cinque: la barra dell'XP, il suo testo, il contatore d'onda, la
 ; barra dell'onda e la schermata di game over. Il passaggio di proprieta' e'
 ; dichiarato in piano sez. 3.3 e 4.1: -arena aveva gia' chiuso il suo scope e
 ; riaprirgli un file e' il difetto che la regola 1 vieta.
+;
+; m6 aggiunge undici: il pannello delle carte (`Upgrade`), il suo titolo, e tre
+; carte da tre nodi (bottone, titolo, effetto). Sono **nati qui dal primo frame**
+; e non vengono creati quando compare il pannello, per la stessa ragione che
+; vale per `GameOver`: un nodo che nasce a meta' partita e' un nodo che si
+; aggiunge a ogni livello, e `tests/test_ui.gd` conta i nodi dell'HUD per
+; verificare che fra due partite non ne cresca nessuno.
+;
+; Il numero di carte e' un fatto di **layout**, non di gameplay: quante carte
+; ci stanno sullo schermo e' una decisione di questa foglia. **Quante offerte
+; ci sono** non lo e': viene da `progression.pending()`, che e' di `-gameplay`,
+; e qui dentro non c'e' nessun `3` scritto come numero di scelte.
 ;
 ; I figli stanno sotto "Root" con offset assoluti e senza ancoraggio: l'HUD e'
 ; un livello sopra un viewport 1280x720 dichiarato in project.godot, quindi non
@@ -42,10 +54,38 @@
 ; che aspetta la prossima milestone che cambia la scala. Il ragionamento per
 ; esteso e' in `src/ui/hud.gd`; `tests/test_ui.gd` verifica che tutte e tre
 ; disegnino un numero fuori dalla griglia del default.
+;
+; ## `process_mode = 3` su `Hud`, su `Upgrade` e su ogni `Card`
+;
+; `PROCESS_MODE_ALWAYS` vale 3. Serve perche' il pannello delle carte **mette in
+; pausa** l'albero (piano sez. 1.7, criterio n. 2): con `paused = true` un nodo
+; col process mode di default smette di elaborare e smette di ricevere input,
+; quindi un pannello che pausa senza questa dichiarazione resta aperto a
+; schermo e **non si puo' cliccare**. E' il difetto piu' possibile di tutti,
+; perche' sembra funzionante: si vede, e' aperto, e non reagisce.
+;
+; Il valore e' sui tre livelli perche' `PROCESS_MODE_INHERIT` risale al padre:
+; metterlo solo sulla radice funzionerebbe, ma lascerebbe il difetto a due passi
+; dalla riga che legge il file. `tests/test_ui.gd` verifica la dichiarazione sui
+; tre livelli **e** il fatto (il clic arriva e `pending()` scende), perche' una
+; dichiarazione che regge solo finche' nessuno la tocca non e' una dichiarazione.
+;
+; ## `Upgrade` copre lo schermo e ha `mouse_filter = 0`
+;
+; Il pannello e' modale: se lasciasse passare il clic (`mouse_filter = 2`, come
+; `Root`), un click fuori dalle carte andrebbe al gioco sotto, e con l'albero in
+; pausa un click "perso" e' un click che non ritorna. Le Label dentro le carte
+; restano a `MOUSE_FILTER_IGNORE` (il default di `Label`), cosi' il clic passa
+; al bottone sotto.
+;
+; Le carte stanno **prima** di `GameOver` nell'albero, quindi `GameOver` si
+; disegna sopra: se la partita finisce mentre il pannello e' aperto, la
+; schermata di game over e' quella che si vede.
 
 [ext_resource type="Script" path="res://src/ui/hud.gd" id="1_hud"]
 
 [node name="Hud" type="CanvasLayer"]
+process_mode = 3
 script = ExtResource("1_hud")
 
 [node name="Root" type="Control" parent="."]
@@ -151,6 +191,137 @@ theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 18
 text = "WEAPON -"
+
+; --- m6: il pannello delle scelte ---------------------------------------------
+;
+; Nasce qui, dal primo frame, `visible = false`. `src/ui/hud.gd::_ready` legge i
+; figli per nome in un ciclo (`Card0`, `Card1`, ...) invece di nominarli uno a
+; uno: **quante carte ci sono** e' una decisione di layout di questa foglia,
+; quindi il numero lo dice la scena e non una costante nel codice.
+;
+; Ogni carta e' tre nodi: il `Button` (che riceve il clic) e due `Label`, una
+; per il nome e una per l'effetto. Sono due nodi e non uno perche' il criterio
+; n. 4 di m6 confronta **il numero mostrato** con quello che `apply()` fa
+; davvero: se titolo ed effetto fossero un'unica stringa, il test dovrebbe
+; indovinare dove finisce l'uno e comincia l'altro, e un numero che non
+; combacia sembrerebbe un refuso invece di una carta che mente.
+;
+; I due testi vengono da `offer_label(index)` e `offer_effect(index)`, che sono
+; di `-gameplay`: qui dentro non c'e' nessun "+25%", perche' quel numero non e'
+; mio e una copia mente alla prima riga cambiata in `apply()`.
+
+[node name="Upgrade" type="Control" parent="Root"]
+process_mode = 3
+visible = false
+offset_right = 1280.0
+offset_bottom = 720.0
+mouse_filter = 0
+
+[node name="UpgradeTitle" type="Label" parent="Root/Upgrade"]
+offset_left = 200.0
+offset_top = 96.0
+offset_right = 1080.0
+offset_bottom = 140.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 30
+text = "LEVEL UP"
+horizontal_alignment = 1
+
+[node name="Card0" type="Button" parent="Root/Upgrade"]
+process_mode = 3
+offset_left = 100.0
+offset_top = 180.0
+offset_right = 440.0
+offset_bottom = 460.0
+text = ""
+
+[node name="Title" type="Label" parent="Root/Upgrade/Card0"]
+offset_left = 12.0
+offset_top = 18.0
+offset_right = 328.0
+offset_bottom = 56.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 20
+text = "-"
+horizontal_alignment = 1
+
+[node name="Effect" type="Label" parent="Root/Upgrade/Card0"]
+offset_left = 12.0
+offset_top = 200.0
+offset_right = 328.0
+offset_bottom = 240.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 22
+text = "-"
+horizontal_alignment = 1
+
+[node name="Card1" type="Button" parent="Root/Upgrade"]
+process_mode = 3
+offset_left = 470.0
+offset_top = 180.0
+offset_right = 810.0
+offset_bottom = 460.0
+text = ""
+
+[node name="Title" type="Label" parent="Root/Upgrade/Card1"]
+offset_left = 12.0
+offset_top = 18.0
+offset_right = 328.0
+offset_bottom = 56.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 20
+text = "-"
+horizontal_alignment = 1
+
+[node name="Effect" type="Label" parent="Root/Upgrade/Card1"]
+offset_left = 12.0
+offset_top = 200.0
+offset_right = 328.0
+offset_bottom = 240.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 22
+text = "-"
+horizontal_alignment = 1
+
+[node name="Card2" type="Button" parent="Root/Upgrade"]
+process_mode = 3
+offset_left = 840.0
+offset_top = 180.0
+offset_right = 1180.0
+offset_bottom = 460.0
+text = ""
+
+[node name="Title" type="Label" parent="Root/Upgrade/Card2"]
+offset_left = 12.0
+offset_top = 18.0
+offset_right = 328.0
+offset_bottom = 56.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 20
+text = "-"
+horizontal_alignment = 1
+
+[node name="Effect" type="Label" parent="Root/Upgrade/Card2"]
+offset_left = 12.0
+offset_top = 200.0
+offset_right = 328.0
+offset_bottom = 240.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 22
+text = "-"
+horizontal_alignment = 1
+
+; GameOver sta DOPO le carte nell'albero, quindi si disegna sopra: se la partita
+; finisce mentre il pannello e' aperto, la schermata di game over e' quella che
+; si vede. (Ordine di disegno = ordine dei figli: non e' una convenzione, e'
+; l'ordine in cui il server di grafica li riceve.)
 
 [node name="GameOver" type="Control" parent="Root"]
 visible = false

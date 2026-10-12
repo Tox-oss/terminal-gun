@@ -657,10 +657,28 @@ qui sotto):
 | `tests/test_progression.gd`, `tests/test_upgrades.gd`, `tests/test_gameplay.gd` | 143 / 520 / 294 asserzioni, tutte verdi |
 | `src/core/contracts.gd` | la superficie dei due metodi |
 
-**Lasciato sporco e NON committato, di proposito**: `src/sim/horde.gd` con **8 marcatori
-`BISECT-TEMP`**, `scenes/hud.tscn` e `src/ui/hud.gd` con il pannello, `tests/test_ui.gd` con i
-blocchi di diagnostica. Sono file di **due** foglie diverse e il vertice non li può toccare: sono
-file di `-orda` e di `-ui`.
+**m6-ter chiusa il 2026-10-13.** Tre foglie, scope minuscole, tutte verdi:
+
+| foglia | cosa ha consegnato | verificato dal vertice |
+|---|---|---|
+| `-orda` | **8 marcatori `BISECT-TEMP` rimossi** da `src/sim/horde.gd`, `grep` a zero; il fatto che `--quit-after` **non è un misurino** scritto in un commento che resta | `test_orda` **186**, `test_gameloop` **32.396** asserzioni |
+| `-ui` | `test_ui` alla **regola nuova** (una scelta sola), due blocchi di diagnostica rimossi, **denti fatti** | `PASS test_ui` **411 asserzioni**; i denti hanno dato `FAIL` con `pending()` fermo a 3 e nessun numero cambiato |
+| `-gameplay` | `print` di DEBUG e il rimedio `_exit_tree()`/`_notification()` **morti** rimossi; `on_impact()` torna a `_sfx.play()` e basta | `test_gameplay` **294**, `test_progression` **143**, `test_upgrades` **520** |
+
+**La regola che l'utente ha deciso è implementata e verificata**, e i numeri la mostrano:
+
+```
+test_ui: m6, id offerti dal livello 2: ["vitality", "move_speed", "knockback"]
+test_ui: m6, id offerti dal livello 3: ["projectile_speed", "vitality", "fire_rate"]
+test_ui: m6, id scartati al livello 2: ["vitality", "move_speed", "knockback"]
+test_ui: m6, nodi sotto root dopo il restart: 46
+```
+
+**I due scartati sono elencati uno per uno** e il livello 3 ne offre tre nuovi: la scelta è
+fra tre cose diverse, e una sola viene applicata.
+
+**Stato finale**: `GATE: 7/8`, e **l'unico rosso è il leak dichiarato sotto**. `PERM: 15/15`.
+`node_count` della scena vera **44** (tetto del criterio n. 3 di m1: **120**).
 
 **Il limite che dichiaro, e non nascondo**: il `GATE: 7/8` che ho misurato gira sull'**albero
 sporco**, quindi **lo stato committato non è stato misurato**. Non posso rimuovere i file sporchi
@@ -700,8 +718,43 @@ suona l'allarme, altrimenti no.
 
 Quindi **`GATE` non è rosso per un difetto: tira i dadi.** È la prima volta che una porta di questo
 progetto è non deterministica, ed è esattamente ciò che §11 vieta: *«una porta la cui rossa non
-distingue “difetto” da “dado”»*. Va chiuso alla fonte — **`_exit_tree()` che ferma l'`sfx`** — non
-ignorando la porta, che sarebbe il modo più veloce di tornare al verde e di non sapere più niente.
+distingue “difetto” da “dado”»*.
+
+### Il debito del leak, chiuso come **debito** e non come rimedio
+
+**Decisione dell'utente il 2026-10-13: «debito».** Perché il leak è un messaggio **all'uscita**,
+non dà fastidio giocando, e il gioco si misura meglio che da una riga di diagnostica.
+
+**Ma il rimedio che avevo proposto io era sbagliato, e la misura lo ha detto.**
+Ho scritto nel brief *«`_exit_tree()` che ferma l'`sfx`»*: era un'ipotesi mia, non un fatto.
+`-gameplay` l'ha provata e **non funziona**, e ha misurato perché:
+
+```
+DEBUG exit_tree ... inside_tree=false playing=true
+```
+
+A `_exit_tree()` il nodo è **già fuori dall'albero**, e `AudioStreamPlayer3D.stop()` fa un return
+anticipato su `!is_inside_tree()`. Anche `_sfx.stream = null` lì dentro è stato provato e non
+chiude. E `what=1001` (`WM_CLOSE_REQUEST`) **non arriva mai** nella sequenza di spegnimento, quindi
+agganciare la chiusura della finestra non è disponibile. La sequenza misurata è
+`13 (READY) → _exit_tree → 11 (EXIT_TREE) → 42 → 1 (PREDELETE) → 19 → 24 → 24 → 3`.
+
+**Il rimedio che la misura suggerisce** è fermare il suono **mentre il nodo è ancora in albero**,
+non allo smontaggio — cioè da `step()` o da un segnale che il gioco emette già. **Non è stato
+provato**, quindi non è una soluzione: è una direzione con un numero accanto.
+
+**E la causa è comunque isolata e misurata**, che è la parte che vale: disattivando `_sfx.play()` a
+`weapon_base.gd:194` l'allarme sparisce **0/5**; riattivandolo torna. Il pezzo è quello, e non è
+della UI né dell'orda.
+
+**Baseline, dichiarata per chi lo riprende**: `--quit-after 300`, **albero non modificato**, allarme
+**2 volte su 5**. Non 1 su 1, non 5 su 5: due. Una porta che rossa due volte su cinque non sa
+distinguere il difetto dal dado, e **non va chiusa ignorandola**: va chiuso il suono.
+
+**Una cosa che ho imparato e che vale per ogni rimedio futuro**: *«Pronto» significa **eseguito
+almeno una volta nella forma esatta in cui verrà applicato»* (§11.11). Io avevo scritto un rimedio
+e lo avevo dato per scontato, e la foglia l'ha smentito. Il costo della verifica sarebbe stato un
+lancio.
 
 ### 1.7-bis Un difetto del vertice che è nel piano da metà della sessione
 

@@ -655,6 +655,32 @@ func occupied_cells() -> int:
 func grid_overflowed() -> bool:
 	return _grid != null and _grid.overflowed
 
+## Quanti nemici la griglia ha **rifiutato** nell'ultima ricostruzione: non un
+## flag come `grid_overflowed()`, un **numero**. `dropped == 1` e
+## `dropped == 199` sono risposte diverse, e per `BUCKET_SLOTS` la differenza
+## e' tutta li': un flag distingue "c'e' un problema" dal suo contrario, non
+## dice quanto e' largo il margine che manca. Il rifiuto non perde il nemico,
+## lo toglie alle query finche' il secchiello non si svuota: e' il fallback,
+## corretto ma lento, e questo e' il numero che dice se e' un caso singolo o se
+## la griglia ha smesso di vedere.
+##
+## ## La sua portata non e' un invariante, ed e' dichiarato qui
+##
+## `dropped`, `grid_overflowed()` e `worst_bucket()` descrivono lo **stesso**
+## intervallo, cioe' l'ultima ricostruzione, ma **non per costruzione**:
+## `begin_frame()` azzera i primi due, mentre `worst_bucket` lo azzera qui
+## sotto, a mano, in `_rebuild_grid()`. I tre coincidono solo perche' in
+## produzione `begin_frame()` ha **un solo chiamante**, `_rebuild_grid()`.
+## Oggi e' vero, ma e' un **incidente del call graph, non un invariante**: chi
+## aggiungesse un `begin_frame()` nel ciclo di gioco farebbe dire a `dropped`
+## e `grid_overflowed()` "questo frame" e a `worst_bucket` "l'ultima
+## ricostruzione", e le tre misure comincerebbero a parlare di cose diverse
+## **senza che nessuna fallisca rumorosamente**. Per questo `begin_frame()` non
+## viene chiamato da nessun'altra parte: e' un punto fragile dichiarato, non un
+## posto libero.
+func grid_dropped() -> int:
+	return 0 if _grid == null else _grid.dropped
+
 ## Il nemico piu' occupato in una cella, **nel frame (griglia) appena
 ## ricostruito**: il picco delle celle dell'ultima disposizione scritta nella
 ## griglia, non un massimo storico.

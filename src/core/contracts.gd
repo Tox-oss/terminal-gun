@@ -199,14 +199,37 @@ func verify_m2_surface() -> Array[String]:
 #
 # ## Perche' serve: `grid_overflowed()` non puo' misurare la m4
 #
-# `grid_overflowed()` e' un **booleano**. Risponde a "qualcuno ha superato
+# `grid_overflowed()` e' un **booleano**: risponde a "qualcuno ha superato
 # `BUCKET_SLOTS`", e per m4 questa non e' la domanda. La domanda di m4 e' "quanto
-# e' largo `BUCKET_SLOTS` senza che nessuno venga perso", e fra "un nemico
-# rifiutato" e "199 rifiutati" non c'e' una differenza di rumore: c'e' la
-# differenza fra una griglia che funziona e una griglia che **non vede piu'
-# niente**. Un flag non distingue i due casi, quindi la risposta che dà e' vera
-# e incompleta nello stesso momento: abbastanza per dire "c'e' un problema",
-# non abbastanza per dire quanto e' largo il margine che manca.
+# e' largo `BUCKET_SLOTS` **prima che la griglia smetta di essere usata**", e fra
+# "un nemico rifiutato" e "199 rifiutati" non c'e' una differenza di rumore: c'e'
+# la differenza fra una griglia che accelera le query e una griglia che e' stata
+# **bypassata**. Un flag non distingue i due casi: dice che e' successo, non
+# quanto spesso.
+#
+# ## EMENDAMENTO DEL VERTICE, 2026-10-12: cosa `dropped` **non** significa
+#
+# La prima stesura di questo blocco diceva che `dropped > 0` fosse la differenza
+# "fra una griglia che funziona e una griglia che non vede piu' niente", e il
+# piano scriveva il criterio con le parole "nessun nemico deve essere perso".
+# **E' falso, e si rilegge a `spatial_grid.gd:16-18`:** quando `overflowed` e'
+# vero, `nearest_index`, `collect_into` e `fill_radius` **non usano la griglia** e
+# cadono su `linear_nearest` / `linear_fill_radius`, che scandiscono **tutti** gli
+# indici. Quindi:
+#
+#   - la **correttezza non si perde mai**: le query restituiscono lo stesso
+#     insieme, ed e' il criterio n. 4 di m4 a dimostrarlo;
+#   - quello che si perde e' la **griglia stessa**, cioe' l'unica cosa che
+#     `spatial_grid.gd` esiste per fare. Il costo e' di **tempo**: ogni query
+#     diventa O(n) su 200 posizioni, ed e' esattamente la camminata che la griglia
+#     doveva sostituire.
+#
+# Quindi `dropped` misura un **costo**, non una perdita. Il nemico rifiutato non e'
+# un nemico perso: e' un nemico che le query ritrovano comunque, ma cercando di
+# piu'. La parola "perso" e' bandita da qui in poi perche' descrive il contrario
+# di quello che il codice fa, e un'asserzione costruita su una parola sbagliata
+# **fallisce per la ragione sbagliata**, che e' la cosa piu' difficile da vedere
+# in un FAIL.
 #
 # Il contatore e' lo **strumento di misura**, e lo strumento si dichiara prima
 # dell'esperimento: se arriva dopo, il primo valore misurato e' gia' stato preso

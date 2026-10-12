@@ -75,6 +75,14 @@ SCOPE = {
         "tests/test_smoke.gd",
         ".gitignore",
         "scenes/arena_main.tscn",
+        # 2026-10-13: l'export a .exe. Il piano sez. 3.4 lo assegna gia' a
+        # -scheletro dal 2026-10-06, ma il path non era in nessuna allowlist:
+        # **quarta** occorrenza della classe "il piano assegna un file che nessuno
+        # puo' scrivere" (dopo .gitattributes, i path dei test di m2, e
+        # tools/gate.gd fuori dalla allowlist del vertice). `perm_scope` e' la
+        # porta che lo prende, e lo prende nel verso giusto: prima che l'onda
+        # partisse.
+        "export_presets.cfg",
     ],
     "terminal-gun-orda": [
         "src/sim/**",

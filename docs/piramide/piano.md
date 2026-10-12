@@ -489,15 +489,35 @@ Non LFS: sono artefatti di rilascio e non vale la pena spenderne il quota. `bina
 
 Richiesto dall'utente il 2026-10-06: un modo per **giocare** senza aprire l'editor. Non è dentro i criteri di m2, perché non è un criterio di prodotto: è un modo per guardare.
 
-Un `.exe` non si può produrre da qui in modo onesto: **`export_presets.cfg` non esiste** e i template di esportazione di Godot 4.7 non sono installati su questa macchina. Scaricarli è una decisione dell'utente, non mia: sono ~1 GB e si installano dalla GUI di Godot.
+**AGGIORNATO IL 2026-10-13: i due ostacoli sono caduti, e come.**
 
-Quindi il percorso che resta, in ordine di onestà:
+| ostacolo | stato, misurato |
+|---|---|
+| template di esportazione | **installati**: 1 281 349 702 byte, **35 file** in `%APPDATA%\Godot\export_templates\4.7.2.stable\`, `version.txt` = `4.7.2.stable`, `windows_release_x86_64.exe` presente |
+| `export_presets.cfg` | **ancora non esiste**. L'errore di Godot, letto: `ERROR: This project doesn't have an 'export_presets.cfg' file at its root.` |
 
-1. **`godot --path .`** — apre l'editor con il progetto già caricato, si preme F5. Un comando, zero installazioni, ed è il modo **vero** di provarlo adesso.
-2. **`godot --path . scenes/arena_main.tscn`** — parte **senza editor**, gioco diretto. È il più vicino a "un eseguibile" che esiste oggi su questa macchina.
-3. **Export a `.exe`** — quando l'utente decide di scaricare i template. Va fuori `.gitignore` (ci è già, §3.2) e va costruito con `terminal-gun-scheletro` in un'onda dedicata, perché tocca `project.godot` e `export_presets.cfg`: nessuno dei due è scope di m2.
+**I template li ha scaricati il vertice, in background, con `python` e non dalla GUI**, che è la
+via che il piano dichiarava impossibile («si installano dalla GUI di Godot»). Il piano aveva
+ragione sul **fatto** — non c'è un comando di Godot che li scarica — e torto sulla **conclusione**:
+si scaricano da `github.com/godotengine/godot-builds`, e un `.tpz` è uno zip. Il prezzo è stato
+verificare prima l'URL, perché scaricare un gigabyte e prendere un 404 è il modo più veloce di
+perdere il tempo dell'utente.
 
-Il comando del punto 2 è quello da usare, ed è **un comando solo**. Non prometto un `.exe` finché i template non ci sono: prometterlo sarebbe far annunciare a un agente un artefatto che non può produrre.
+**Ed è emerso il quarto difetto della classe «il piano assegna un file che nessuno può
+scrivere».** §3.4 qui sotto diceva che l'export «tocc[a] `project.godot` e `export_presets.cfg`»
+e lo affidava a `-scheletro`: ma gli `edit` allow di `-scheletro` erano **sette** e
+`export_presets.cfg` **non era tra quelli**. L'onda si sarebbe fermata con
+`Permission denied: edit` sul primo file, come successe in m2-w1. È stato trovato **prima** di
+lanciare, e `perm_scope` lo confermava nel verso giusto: `PERM: 14/15` appena l'utente ha
+aggiunto la riga, **`15/15` dopo** che il vertice l'ha aggiunta a `SCOPE` in
+`tools/check_perms.py`. Dopo `.gitattributes`, i path dei test di m2, `tools/gate.gd` e
+`project.godot`: cinque volte, e **cinque volte `PERM: 15/15` era verde e non le vedeva**.
+
+Quindi il percorso, in ordine di onestà, **oggi**:
+
+1. **`godot --path . scenes/arena_main.tscn`** — parte senza editor. È il modo più vicino a un eseguibile che esiste **adesso**, e non richiede nessuna delle cose qui sotto.
+2. **Un `.cmd` sul desktop** con due righe: `cd /d` sulla root e il comando di sopra. Doppio clic. **Non lo può scrivere nessun agente**: il desktop è fuori progetto e fuori scope. È un atto dell'utente, e resta il modo più veloce per giocare.
+3. **Export a `.exe`** — templates pronti, manca solo il preset, che ora `-scheletro` **può** scrivere. Va in `build/`, che è già fuori da `.gitignore` e da LFS (§3.2).
 
 **Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 

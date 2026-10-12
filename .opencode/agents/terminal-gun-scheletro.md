@@ -324,6 +324,9 @@ permissions:
   - action: edit
     resource: "scenes/arena_main.tscn"
     effect: allow
+  - action: edit
+    resource: "export_presets.cfg"
+    effect: allow
 
   # Sudo: tre comandi, ancorati alla root di progetto, solo ACL e proprieta'.
   # Tutto il resto sudo e' negato al blocco 1.

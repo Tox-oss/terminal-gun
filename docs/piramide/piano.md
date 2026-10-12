@@ -1190,12 +1190,42 @@ mano, perché quei due file sono miei.
    sostituire. Il materiale di m4 **era** in buona parte corretto e argomentato — e l'ho
    buttato via intero, perché la procedura non regge.
 
-**Il debito che resta, ed è il più grande di tutti.** **Nessuna foglia, in tutta la storia di
-questa piramide, ha mai provato di essere fermata.** Tutte le garanzie di §7.4 sono **non
-provate**, non violate: la differenza è la stessa che c'è fra una porta che non è mai stata
-provata e una porta che non funziona. Finché non si provoca il rifiuto, `PERM: 15/15` resta una
-politica **non esercitata**, e questa sezione è la prova che una politica non esercitata lascia
-passare cose che nessuno ha scritto.
+**Il debito che resta, e la sonda che lo ha chiuso a metà.** Per tutta la storia di questa
+piramide **nessuna foglia aveva mai provato di essere fermata**: tutte le garanzie di §7.4 erano
+**non esercitate**, non violate. Il 2026-10-12 la prova è stata fatta, ed è **positiva**.
+
+| sonda | esito |
+|---|---|
+| `terminal-gun-orda` lanciata **per nome**, `edit` su `docs/piramide/probe_refusal.md` (scope del **vertice**) | **`Permission denied: edit`** |
+| stessa foglia, `git commit -m "probe"` | **`Permission denied: shell`** |
+| `docs/piramide/probe_refusal.md` su disco dopo la sonda | **non esiste** |
+| aggiramento tentato dalla foglia | **nessuno**: nessun tentativo via shell, path o percorso equivalente |
+
+Quindi: **una foglia invocata per nome è fermata davvero**, su entrambi i muri, e non cerca
+scorciatoie quando è fermata. Questo è il `perm_runtime` che §11.10 dichiarava mancante, e la
+prima misura reale: `PERM: 15/15` dice che la politica è scritta bene, e questa sonda dice che
+**è applicata**.
+
+**Quindi chi ha scritto il materiale di m4 non era una foglia di questa piramide.** Tre fatti lo
+dicono, e il terzo da solo basta:
+
+1. le foglie sono **negate** a `git add` e `git commit` (muro di tier 1, verificato due volte:
+   dalla sonda e da `perm_commit`), e i due commit che sono comparsi **non sono miei**;
+2. la sonda dimostra che le foglie sono **fermate** fuori scope;
+3. il materiale conteneva un racconto di una sessione aperta su `C:\Users\bisco\Desktop\LabForge`,
+   un progetto che **non è questo**: quel contesto non può venire da una foglia lanciata qui.
+
+L'unica definizione di agente su questa macchina con diritti illimitati è
+`~/.config/opencode/agents/esecutore.md`, che ha `- action: "*" / resource: "*" / effect: "allow"`,
+è globale e `hidden: true`. **Non ho nessuna prova che sia stato usato qui**, e non ne cerco una
+a tentoni dentro un altro progetto: dichiaro il fatto e il limite. Quel che resta da capire è
+**fuori dalla piramide** — chi o che cosa ha scritto in questa cartella — e non lo decide nessuna
+riga di questo piano.
+
+**La correzione che mi devo, e che è il punto pratico.** Io avevo scritto che il contenimento
+-era «non applicato». È **troppo forte**: quello che è provato è che le foglie **sono** contenute
+e che **qualcos'altro** ha scritto. La distinzione non è accademica: la prima versione diceva
+«la piramide non protegge niente» e avrebbe portato a smontare un sistema che funziona.
 
 ### 11.11 Il rimedio che non era un rimedio: scritto, citato, mai compilato
 

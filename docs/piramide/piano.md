@@ -497,6 +497,52 @@ la terza riga sarebbe stato lo stesso numero di una sessione **non governata**, 
 compatibile con `15/15`. La differenza tra le due è un `Permission denied`, e il piano la
 dichiarava non misurata da nessuna parte.
 
+### Seconda riapertura, stessa giornata: nessuna wave pendente, e la trappola della root è ricomparsa in una forma nuova
+
+**L'utente ha chiesto di avviare la piramide. Non c'era niente da avviare, e non è stato
+inventato niente per riempire il vuoto.** w0–w3, m2-w0–m2-w3 e m3-w0–m3-w2 sono verdi e
+committate; il piano non definisce m4, e aprire una milestone nuova sarebbe stato inventare
+scope, non eseguire un'onda. Le porte sono state **rieseguite**, non rilette.
+
+| porta | esito |
+|---|---|
+| `GATE: 8/8` | **verde**, exit `0` |
+| `PERM: 15/15` | **verde**, `perm_mirror` incluso |
+| `--quit-after 300` | **pulito**: zero `SCRIPT ERROR` / `Parse Error` / `ERROR:` |
+| `git lfs ls-files` | 13 file: 6 `.glb` + 7 `.wav` |
+| `git status --short` | **pulito**, nessuna modifica non committata |
+
+**La riapertura precedente e questa dicono cose diverse, e la differenza è il fatto.** La prima
+aveva trovato `.opencode/agents/terminal-gun.md` modificato e fuori da ogni commit: c'era un
+atto da compiere. Questa ha trovato l'albero **pulito**: il debito di governance era già stato
+chiuso e committato. Due riaperture con lo stesso innesco e conclusioni opposte, ed è la
+ragione per cui il controllo si fa e non si deduce.
+
+**La trappola della root è ricomparsa, in una forma che il piano non aveva ancora vista.** La
+sessione si è aperta su `C:\Users\bisco\Desktop\LabForge` — una cartella che contiene solo
+`LEGGIMI.txt`, `LabForge.cmd`, `LabForge.exe` e **zero file `.md`**. Non è `C:\Windows\System32`
+del 2026-10-11, ma è **la stessa classe di difetto**: workspace root fuori dalla root del
+progetto, con scope `edit` relativi che non risolvono. La trappola è stata presa da sola,
+senza pagare un'onda, per una ragione precisa: **la prima cosa che il vertice fa è leggere
+questo file**, e il file non c'era. Un `cat` mancante ha fatto da `pwd`.
+
+Quindi la regola operativa si allunga di un passo: **non basta trovarsi nella root, bisogna
+averlo letto prima di lanciare la prima foglia.** Una root sbagliata in cui il piano non c'è
+è un caso che `pwd` da solo non distingue da una root sbagliata in cui il piano c'è.
+
+**Il rito delle due sentinelle di §11.10 è stato rieseguito, ed è verde.** `edit .gitignore`
+→ `Permission denied: edit` (fuori scope: è di `-scheletro`, §3). `edit tools/gate.gd` con una
+stringa inesistente → nessun rifiuto, la richiesta arriva alla ricerca: **allowlist applicata
+in questa sessione**. È la ripetizione che il piano dichiara necessaria, e resta la prova che
+una sessione non governata non ha sintomi.
+
+**Un fatto sull'allowlist che nessuna sezione dichiarava, emerso qui:** i comandi composti
+(`git status && git log`, o una pipe verso `grep`) vengono **rifiutati**, perché
+l'allowlist è una lista di comandi e non un parser di shell. `git status` da solo passa, la
+stessa informazione concatenata no. Non è un difetto ed è la scelta dichiarata di §11.3, ma
+un vertice che lo scopre solo quando una porta sembra non rispondere lo paga come un blocco.
+**Una porta per volta.**
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

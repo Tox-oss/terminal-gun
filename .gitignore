@@ -4,8 +4,13 @@
 # Rigenerabile con `godot --headless --path . --import`.
 .godot/
 
-# Configurazione di export: contiene path assoluti di macchina.
-export_presets.cfg
+# Configurazione di export: era ignorata perche' "contiene path assoluti di
+# macchina". Motivo rimosso da terminal-gun-scheletro il 2026-10-13: il preset
+# che -scheletro scrive usa solo `export_path="build/terminal-gun.exe"`, quindi
+# path relativi, e la giustificazione non vale piu'. export_presets.cfg e'
+# configurazione del progetto, non build: se resta qui, la riga
+# `--export-release "Windows Desktop"` non sopravvive a un clone.
+# export_presets.cfg
 
 # Esportazione: un export produce .pck e .exe, e nessuno dei due finirebbe in
 # LFS (vedi .gitattributes: solo *.glb, *.wav, *.ogg). Senza queste righe il

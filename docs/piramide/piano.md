@@ -1013,6 +1013,67 @@ Cinque agenti scrivono nella stessa cartella **in parallelo**. Queste regole son
 4. **Scope sui permessi, non sulle buone maniere.** Ogni foglia ha in `permissions` una deny su `edit *` e un allow sui propri file: se sfora, il sistema glielo blocca. **Emendato da §11**: è vero per la *scrittura*, che è l'unica cosa bloccata davvero, perché `shell` non è una sandbox (§11.3) e `mkdir`/`cp`/`mv`/`rm`/`echo` sono assenti di proposito. Quello che **non** è più un blocco secco è l'accesso a una risorsa non enumerata in anticipo: quello chiede, e lo chiede all'utente (§11.2). Le invarianti di **proprietà** — `--import`, `rm -rf .godot`, `git add`/`commit` — restano `deny` per tutti, con l'unica eccezione dichiarata per scheletro e vertice.
 5. **Niente path assoluti di macchina** nei file prodotti, con una sola eccezione: `tools/env.sh`, che esiste proprio perché i path stiano in un posto solo. **Una seconda eccezione, dichiarata in §11.8:** il path assoluto di Blender in `permissions` degli agenti che lo eseguono, per lo stesso identico motivo.
 
+### 1.8 Il documento di design dell'utente (2026-10-13): quattro milestone, e un blocco che nessuna aggira
+
+Inventario, contato: **6 armi**, **8 passivi**, **4 nemici** (uno boss a fasi), la fusione «pipe»,
+la metaprogressione a SUDO Coin. **Non è un'onda**: con il contratto di oggi sono almeno quattro
+milestone. Finché non è deciso, **nessuna foglia lo implementa**: qui sotto c'è anche perché.
+
+**Il blocco: questo documento è un documento di salute, e la salute non esiste.**
+`grep "take_damage" src/**/*.gd` → **una** riga: `player.gd:326`, la **definizione**. Nessun
+chiamante. Il giocatore è letteralmente invulnerabile, e per decisione dichiarata (§1.4a).
+
+| elemento del design | su cosa poggia | stato misurato |
+|---|---|---|
+| `$SUDO` — invulnerabilità | il giocatore è **già** invulnerabile | **senza effetto** |
+| `> /dev/null` — assorbimento danno | `take_damage` | **mai chiamato** |
+| `rm -rf` — contraccolpo | `take_damage` | **mai chiamato** |
+| barra RAM come salute | `hp`, che non scende mai | **piatta** |
+| `kill -9` — mira sul più sano | `Enemy.hp`, letto davvero | **l'unico dei cinque che regge** |
+| Memory Leak / Zombie / Fork Bomb / Kernel Panic | danno ricevuto e morte | **non esercitati** |
+
+**Il secondo scontro: Fork Bomb e Memory Leak sono il criterio n. 3 di m1 scritto al contrario.**
+Quel criterio è: 200 nemici vivi, `node_count < 120`, **nessun nodo per nemico**, 3 nodi di griglia
+spaziale. *«Si divide e cresce»* e *«si moltiplica riempiendo lo schermo»* sono **esattamente** i
+due comportamenti che vieta. O il criterio si riscrive — ha già un precedente, 2026-10-12 — o
+l'orda non cresce oltre il tetto.
+
+**Il terzo, piccolo: `$SUDO` che «aumenta i danni del 200%» è una seconda copia del numero.**
+È il difetto che `-gameplay` ha cancellato due ore fa: `LABELS` diceva «+15%» per un `×0.85` che è
++17,6%. Un numero in due posti diverge. Va dichiarato **in un posto solo** e letto dalla carta,
+che è già la regola di `offer_effect`.
+
+**Il quarto: la «pipe» è un cambio di contratto, e quel file è mio.** `src/core/contracts.gd` è
+l'unico codice che il vertice può scrivere. Posso emendarlo, ma la **forma** la decide l'utente:
+due armi che si fondono sono **un'arma nuova** (quale id, quale nome di carta, quale danno) o
+**una regola** (chi chiama chi, e con quali argomenti). Senza laforma, due foglie la inventano
+diversa e il vertice riceve due metodi incompatibili.
+
+**Il quinto: SUDO Coin e l'albero delle abilità sono metaprogressione + salvataggi**, entrambi
+dichiarati fuori milestone 1 (§1, riga 26). Non è una foglia: è un sottosistema, e va detto.
+
+**L'ordine è **non** forzato, e questa correzione me la devo a me stesso**: avevo scritto che le
+armi dipendono dalla salute. **Non è vero**, e `damage_enemy` è chiamato e funziona.
+
+| blocco del design | si può costruire **oggi**, senza salute? |
+|---|---|
+| tutte e **6** le armi | **sì** — colpiscono i nemici, e quel percorso è vivo |
+| **`-f`**, **`-v`**, **`-r`**, **`-j`**, **`$PATH`** | **sì** — toccano danno, raggio, catena, cadenza, velocità: nessuno dei cinque ha bisogno di `take_damage` |
+| metà di `$SUDO` e di `chmod 777` | **sì** — solo la parte «+danni»; l'altra è bloccata |
+| `kill -9` che mira sul più sano | **sì** — `Enemy.hp` esiste ed è letto |
+| `$SUDO` invulnerabile, `> /dev/null`, `rm -rf` contraccolpo, barra RAM | **no** — dipendono da `take_damage` |
+| **tutti e 4 i nemici** (Memory Leak, Zombie, Fork Bomb, Kernel Panic) | **no** — sono definiti dal danno che fanno al giocatore e dalla morte |
+
+Quindi il documento si stacca in due metà che **non si bloccano a vicenda**: le armi e i passivi
+si possono aprire subito, i nemici no. L'unica cosa che va decisa **prima** dei nemici è la
+salute, e quella è una decisione dell'utente: ha rimandato la salute tre volte («per ora piantiamo
+i concetti poi pensiamo alla salute») ed è la prima volta che metà del design **non può** farne a
+meno.
+
+Il vertice **non apre l'onda dei nemici senza quella risposta**, e non apre l'onda delle armi senza
+sapere se la salute entra prima o dopo, perché `-f`/`$SUDO`/`chmod 777` scrivono sugli stessi
+numeri e l'ordine in cui le foglie li toccano decide se si pestano i piedi.
+
 ## 8. Stato
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**

@@ -91,6 +91,22 @@ const NODO_PLAYER := "Player"
 ## variazione, e' arrotondamento.
 const SOGLIA := 0.02
 
+## Punti vita persi a ogni colpo nella misura `vita`, cioe' il denominatore con
+## cui i colpi contati diventano punti vita. Serve a confrontare l'incremento
+## secco della carta «Vita massima +20» con una misura che conta **colpi**:
+## la conversione e' dichiarata qui e non scritta dentro l'asserzione.
+const DANNO_PER_COLPO := 10.0
+
+## Le due misure contate in **frame interi**, dove un passo di confine sposta il
+## numero di `1 / N`. Le altre (danno, corsa, velocita', spinta) sono continue e
+## non hanno quell'errore. Vedi `_tol_voce`.
+const MISURE_IN_FRAME := ["cadenza", "gittata"]
+
+## Tolleranza del confronto fra una percentuale **misurata** e il numero scritto
+## sulla carta. La carta arrotonda all'intero, quindi mezzo punto e' gia' dentro
+## il numero che viene confrontato: il resto non e' tolleranza inventata qui.
+const TOL_PERCENTUALE := 0.5
+
 ## Quanti colpi si contano per la cadenza. Sei e' il minimo che tiene la misura
 ## lontana dal bordo di un passo: a `fire_interval` 0.35 il sesto colpo arriva
 ## al passo 106 e con il -15% del potenziamento al passo 91.
@@ -226,6 +242,8 @@ func _prova(h) -> void:
 	_id_inesistente(h)
 	_ritorno_alla_base(h)
 	_scelta_del_livello(h)
+	_descrizione_misurata(h)
+	_indice_relativo_a_offers(h)
 
 # --- La popolazione d'avvio: una relazione, non una cifra ----------------------
 
@@ -496,6 +514,15 @@ func _ritorno_alla_base(h) -> void:
 ## potenziamenti e sceglierne uno applica un potenziamento che si vede. Il numero
 ## che decide e' che `choose(0)` sposta almeno una misura di almeno il 2%, non
 ## che restituisca una stringa.
+##
+## ## Una scelta sola (regola dell'utente, 2026-10-13)
+##
+## Si sale di livello, si sceglie **uno**, gli altri due si buttano: `pending()`
+## va da 3 a 0 in un colpo. Questa sezione non asserisce solo il 3 -> 0, asserisce
+## anche i due numeri che lo circondano e che il 3 -> 0 da solo non prova: che i
+## due scartati non si applicano piu', e che al livello dopo ne arrivano tre
+## nuove. Il secondo e' la ragione meccanica della regola: `add_xp` rulla solo
+## con la coda vuota, quindi e' lo svuotamento a rilanciare il ciclo.
 func _scelta_del_livello(h) -> void:
 	_a_base()
 	h.eq(int(_prog.pending()), 0, "a partita nuova non c'e' nessuna offerta in sospeso")
@@ -510,7 +537,8 @@ func _scelta_del_livello(h) -> void:
 	var prima := _tutte(h)
 	var scelto: String = _prog.choose(0)
 	h.check(scelto != "", "choose(0) applica uno dei tre: '%s'" % scelto)
-	h.eq(int(_prog.pending()), 2, "e dalla coda ne resta uno meno")
+	h.eq(int(_prog.pending()), 0,
+		"e la coda si svuota in un colpo: si sceglie UNO e gli altri due si buttano")
 	h.eq(int(_emessi), 1, "un solo segnale per una scelta")
 	_emessi = 0
 	var dopo := _tutte(h)
@@ -518,14 +546,136 @@ func _scelta_del_livello(h) -> void:
 		"la scelta dal menu cambia il comportamento come fa l'applicazione diretta (%d misure mosse)"
 		% _mosse(prima, dopo))
 
-	# E le altre due, una alla volta, con lo stesso indice.
-	for giro in 2:
-		var p2 := _tutte(h)
-		var id2: String = _prog.choose(0)
-		h.check(id2 != "", "la scelta %d e' applicabile: '%s'" % [giro + 2, id2])
-		var d2 := _tutte(h)
-		h.check(_mosse(p2, d2) > 0, "'%s' cambia il comportamento di almeno una misura" % id2)
-	h.eq(int(_prog.pending()), 0, "svuotata la coda delle offerte")
+	# ## I due scartati non si applicano piu'
+	#
+	# Sotto la regola nuova (`progression.gd::choose`: una scelta e gli altri due
+	# si buttano) le due offerte rimaste non sono "in attesa": sono **buttate**.
+	# Il numero che lo dimostra e' che con la coda svuotata nessun tentativo
+	# successivo muove un numero, quindi i due potenziamenti scartati non
+	# arriveranno mai al giocatore per quella via.
+	var grezzi := _numeri_grezzi()
+	h.eq(str(_prog.choose(0)), "", "una seconda scelta non trova niente da scegliere")
+	h.eq(str(_prog.choose(1)), "", "e neppure una terza, con lo stesso indice o con un altro")
+	h.eq(int(_prog.pending()), 0, "la coda resta svuotata")
+	h.check(_grezzi_uguali(_numeri_grezzi(), grezzi),
+		"le offerte scartate non si applicano piu': nessun numero si e' mosso")
+	h.eq(int(_emessi), 0, "e nessun segnale e' partito")
+
+	# ## Il ciclo torna, ed e' lo svuotamento a rilanciarlo
+	#
+	# `add_xp` chiama `roll()` solo con `gained > 0 and offers.is_empty()`. Se
+	# `choose()` tenesse le due pending quella riga non scatterebbe piu' e il
+	# ciclo dei livelli si fermerebbe: e' il difetto che la regola nuova chiude.
+	var offerte_prima := int(_prog.pending())
+	_prog.add_xp(float(_prog.xp_to_next()))
+	h.eq(int(_prog.pending()), 3,
+		"al livello dopo tornano tre offerte nuove (prima della salita erano %d): la coda svuotata e' la condizione che rilancia il ciclo"
+		% offerte_prima)
+	_a_base()
+
+# --- m6, criterio n. 4: la descrizione e' dichiarata, non ricopiata -----------
+
+## Il numero che decide: **il numero scritto sulla carta e' quello che `apply()`
+## fa davvero, misurato**. Si mette in coda un id, si legge `offer_effect(0)`,
+## si applica l'id e si rimisura **dal gioco** la grandezza che l'id tocca: se la
+## carta dicesse «+25%` mentre il danno crescesse del 30%, qui fallirebbe anche se
+## le due cifre sembrassero vicine.
+##
+## Il confronto e' su tutte e otto le voci, non solo sul danno, perche' il difetto
+## che questa sezione chiude non e' "una sbagliata" ma "una copiata a mano": e'
+## la stessa regola per tutti e otto i numeri.
+##
+## ## Perche' qui si scrive `offers` a mano
+##
+## `roll()` non lascia scegliere quale id arriva, e per provare tutti e otto gli
+## id serve arrivarci uno alla volta. `_prog.offers = [id]` e' **impalcatura**,
+## non una scorciatoia: quello che viene confrontato e' il numero della stringa
+## contro la misura, non la coda contro se stessa, e qui sotto nessuna asserzione
+## e' soddisfatta da una `choose()` chiamata a mano.
+func _descrizione_misurata(h) -> void:
+	var noti := _costanti(_prog)
+	if not h.check(noti.has("UPGRADE_IDS"), "la progressione dichiara la tabella degli id"):
+		return
+	var ids: Array = noti["UPGRADE_IDS"]
+	for id in ids:
+		var chiave := str(id)
+		_a_base()
+		_prog.offers = [chiave]
+		var nome := str(_prog.offer_label(0))
+		var effetto := str(_prog.offer_effect(0))
+		h.eq(int(_prog.pending()), 1, "'%s': l'offerta da descrivere e' in coda" % chiave)
+		h.check(nome != "" and _ascii(nome),
+			"'%s': la carta ha un nome leggibile e solo ASCII: '%s'" % [chiave, nome])
+		h.check(effetto != "" and _ascii(effetto),
+			"'%s': e un effetto leggibile e solo ASCII: '%s'" % [chiave, effetto])
+		var carta := _numero_della_carta(effetto)
+		if not h.check(carta.size() == 2,
+				"'%s': l'effetto '%s' si sa leggere come numero, e come percentuale sì o no"
+				% [chiave, effetto]):
+			continue
+		var numero := float(carta[0])
+		var percentuale := bool(carta[1])
+		h.check(numero > 0.0, "'%s': e il numero promesso e' positivo (%s)" % [chiave, numero])
+
+		var voce := str(MISURA_DI[chiave])
+		var prima := _tutte(h)
+		h.check(_prog.apply(chiave), "apply('%s') risponde true: la carta descrive qualcosa di applicabile"
+			% chiave)
+		var dopo := _tutte(h)
+		var a := float(prima[voce])
+		var b := float(dopo[voce])
+		if percentuale:
+			# La cadenza si misura in **frame per N colpi**: meno frame vuol dire
+			# piu' cadenza, quindi il segno e' opposto rispetto alla carta e si
+			# confronta il valore assoluto. E' il caso in cui la misura ha piu'
+			# rumore degli altri, perche' il numero di frame e' intero.
+			var misurato := _percento(a, b)
+			var scarto := absf(absf(misurato) - numero)
+			var tolleranza := _tol_voce(voce, a)
+			h.check(scarto <= tolleranza,
+				"'%s': la carta promette %+.0f%% e la %s va da %.3f a %.3f (%+.1f%% misurati), scarto %.2f su una tolleranza di %.2f"
+				% [chiave, numero, voce, a, b, misurato, scarto, tolleranza])
+		else:
+			# Incremento secco: la carta promette un numero in unita' proprie
+			# (punti vita, nemici), e la misura conta colpi o nemici. La
+			# conversione e' dichiarata in `_unita_per_id`, non qui dentro.
+			var promesso := (b - a) * _unita_per_id(chiave)
+			h.check(absf(promesso - numero) <= TOL_PERCENTUALE,
+				"'%s': la carta promette %+.0f in unita' sue e la %s promette %.3f (da %.3f a %.3f)"
+				% [chiave, numero, voce, promesso, a, b])
+		_stampa_carta(chiave, nome, effetto, voce, prima, dopo)
+	_a_base()
+
+## L'indice di `offer_label`/`offer_effect` e' relativo a `offers` **adesso**:
+## lo stesso id dice le stesse due stringhe in qualunque posizione, e due id
+## diversi dicono due coppie diverse. E' il contratto con il pannello di `-ui`,
+## che deve rileggere `offers` **prima** di disegnarle e non dopo: `choose(index)`
+## applica la scelta e svuota la coda, quindi un pannello che tenesse la lista
+## delle carte disegnata mostrerebbe tre bottoni su cui non si puo' piu' cliccare.
+func _indice_relativo_a_offers(h) -> void:
+	_a_base()
+	_prog.offers = ["damage"]
+	var primo_nome := str(_prog.offer_label(0))
+	var primo_effetto := str(_prog.offer_effect(0))
+	_prog.offers = ["pierce"]
+	var secondo_nome := str(_prog.offer_label(0))
+	var secondo_effetto := str(_prog.offer_effect(0))
+	h.check(primo_nome != secondo_nome,
+		"due id diversi dicono due nomi diversi anche offerti da soli: '%s' e '%s'"
+		% [primo_nome, secondo_nome])
+	h.check(primo_effetto != secondo_effetto,
+		"e due effetti diversi: '%s' e '%s'" % [primo_effetto, secondo_effetto])
+
+	_prog.offers = ["damage", "pierce", "damage"]
+	h.eq(str(_prog.offer_label(1)), secondo_nome,
+		"l'id alla posizione 1 descritto da solo e descritto in coda dicono la stessa cosa")
+	h.eq(str(_prog.offer_effect(1)), secondo_effetto,
+		"e l'effetto pure: '%s'" % secondo_effetto)
+	h.eq(str(_prog.offer_label(2)), primo_nome,
+		"l'indice 2 e' il terzo elemento, non il primo: '%s'" % primo_nome)
+	h.eq(str(_prog.offer_label(3)), "",
+		"l'indice 3 non esiste: la coda ne ha tre e la risposta e' una stringa vuota")
+	h.eq(str(_prog.offer_effect(3)), "", "e anche l'effetto e' vuoto")
 	_a_base()
 
 # --- Le misure ------------------------------------------------------------------
@@ -655,9 +805,64 @@ func _vita(h) -> int:
 	while not _player.is_dead() and n < 500:
 		_player.invuln = 0.0
 		_player.dash_timer = 0.0
-		_player.take_damage(10.0)
+		_player.take_damage(DANNO_PER_COLPO)
 		n += 1
 	return n
+
+# --- Lettura delle carte (m6) --------------------------------------------------
+
+## Solo ASCII nelle stringhe che finiscono a schermo: e' la regola del progetto
+## (piano §5.1) e la console di Windows la mangia proprio dove serve leggerla.
+func _ascii(s: String) -> bool:
+	for i in s.length():
+		if s.unicode_at(i) > 126:
+			return false
+	return true
+
+## Il numero che una carta promette, e se lo promette in percentuale.
+## «+25%» -> `[25.0, true]`, «+1 nemico» -> `[1.0, false]`, una stringa senza
+## numeri -> `[]`. Si legge la stringa e non un campo di `progression.gd`: e' la
+## stringa che il pannello mostra, quindi e' quella che va confrontata.
+func _numero_della_carta(s: String) -> Array:
+	var inizio := s.find("+")
+	if inizio < 0:
+		return []
+	var cifre := ""
+	var i := inizio + 1
+	while i < s.length() and s[i] >= "0" and s[i] <= "9":
+		cifre += s[i]
+		i += 1
+	if cifre == "":
+		return []
+	return [float(cifre), s.substr(i).begins_with("%")]
+
+## Quanti punti della misura valgono **una unita'** di quelle che la carta
+## promette. La vita promette punti vita e la misura conta colpi da
+## `DANNO_PER_COLPO` punti; la perforante conta gia' nemici, e la carta promette
+## nemici, quindi la conversione e' uno. Nessun numero e' scritto dentro
+## l'asserzione: sta qui, una volta sola.
+func _unita_per_id(id: String) -> float:
+	return DANNO_PER_COLPO if id == "vitality" else 1.0
+
+## La tolleranza con cui una percentuale misurata si confronta con il numero
+## scritto sulla carta. La carta arrotonda all'intero, quindi mezzo punto e'
+## gia' nel numero confrontato. Le due misure contate in **frame interi**
+## (`cadenza`, `gittata`) aggiungono un passo di confine, che vale `100 / N`
+## punti percentuali su una misura di N frame: anche questo numero esce dalla
+## misura, non e' una tolleranza tarata per far passare qualcosa.
+func _tol_voce(voce: String, prima: float) -> float:
+	if voce in MISURE_IN_FRAME:
+		return TOL_PERCENTUALE + 100.0 / maxf(absf(prima), 1.0)
+	return TOL_PERCENTUALE + 0.0001
+
+## La tabella del confronto: cosa promette la carta e quanto fa il gioco. Come
+## `_stampa_riga`, non e' una stampa decorativa: e' il numero che chi legge il
+## FAIL deve poter vedere senza aprire il codice.
+func _stampa_carta(id: String, nome: String, effetto: String, voce: String,
+		prima: Dictionary, dopo: Dictionary) -> void:
+	print("upgrades: carta '%s' / '%s' -> %s %.3f->%.3f (%+.1f%%)"
+		% [nome, effetto, voce, float(prima[voce]), float(dopo[voce]),
+			_percento(float(prima[voce]), float(dopo[voce]))])
 
 ## Per quanti passi un proiettile sopravvive in un campo vuoto. Il tiro e' fatto
 ## **a mano** attraverso `Game.spawn_projectile` verso `-z`, la direzione in cui

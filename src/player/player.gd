@@ -118,10 +118,11 @@ func _ready() -> void:
 	# di questa riga: registrarlo in `_enter_tree()` pubblicherebbe `null` e il
 	# contratto direbbe "manca" per un dato che c'e' un istante dopo.
 	#
-	## Senza questa riga le dieci voci di `M2_SURFACE` che puntano a `progression`
+	## Senza questa riga le dodici voci di `M2_SURFACE` che puntano a `progression`
 	## restano irraggiungibili e `Game.progression` vale `null`: il gate resta
 	## verde e la superficie di m2 no. Un verde che copre meno di quel che dice e'
-	## il difetto peggiore di una porta.
+	## il difetto peggiore di una porta. Sono dodici e non dieci dalla m6, che ne ha
+	## dichiarate due in piu' (`offer_label`, `offer_effect`).
 	Game.progression = progression
 
 	weapon = get_node_or_null("Weapon")

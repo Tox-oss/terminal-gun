@@ -106,6 +106,19 @@ const M2_SURFACE := [
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "choose", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "apply", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "on_kill", "kind": "method"},
+	# --- m6, 2026-10-13: la descrizione di un'offerta. ---
+	#
+	# La prima volta che -ui costruisce il pannello dei potenziamenti, il problema
+	# non e' che cosa mostra ma **chi sa che cosa mostra**. Il numero del
+	# potenziamento e' dentro `progression.gd`, che e' di -gameplay: se -ui
+	# scrive "danno +25%" a mano, sta copiando una conoscenza che non e' sua, e
+	# la copia mente alla prima riga cambiata in `apply()`.
+	#
+	# Questi due metodi sono la strada dichiarata. `progression.offers` dice
+	# **quali** id ci sono; questi due dicono **come si chiamano** e **quanto
+	# fanno**, e li espone chi possiede i numeri.
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "offer_label", "kind": "method"},
+	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "offer_effect", "kind": "method"},
 ]
 
 ## L'oggetto di m2 che -gameplay registra. Non e' un nodo: e' il

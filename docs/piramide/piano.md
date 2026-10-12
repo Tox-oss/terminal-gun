@@ -556,7 +556,176 @@ Fino alla fine di m5 era pulito. `-scheletro` lo ha segnalato e ha detto che non
 lui — verificato, non ha toccato codice — ma **non ho ancora isolato quando è comparso**, quindi
 non lo dichiaro preesistente né introdotto. È un fatto nuovo e va chiuso.
 
-## 2. Toolchain
+## 1.7 Milestone 6 — la progressione è collegata: il livello fa qualcosa
+
+`choose()` non è chiamato da nessuna parte del gioco: uccidi, sali di livello, senti un suono, e
+non succede niente (§1.6). **m6 chiude quel buco**, e la scelta dell'utente del 2026-10-13 è
+**pannello con scelta, e pausa**.
+
+**Il buco è uno solo, e l'ho verificato prima di scrivere la specifica.** La catena è tutta al suo
+posto: `progression.bind(self)` (`player.gd:105`) e `Game.progression = progression` (riga 125),
+quindi `apply()` non è bloccata da un `player` nullo; `add_xp` emette `leveled_up` e chiama `roll()`
+(`progression.gd:167-169`); `choose(index)` esiste ed è sul contratto. **Manca solo chi lo chiama.**
+
+**Una cosa che l'API dice, e che il 2026-10-13 l'utente ha corretto.** `progression.gd:188-190`
+*«Le altre pending restano: si applicano una alla volta, sempre con lo stesso indice»*. Avevo preso
+quel commento per una specifica e ne avevo ricavato «tre offerte, se ne applicano tre». **Non è
+quello che si vuole**: si sale di livello, si sceglie **uno**, gli altri due si buttano, e al
+livello dopo ne arrivano altri tre. `roll()` toglie l'id scelto da `remaining` (riga 180), quindi i
+tre di ogni livello sono **distinti**: la scelta è fra tre cose diverse, non tre volte la stessa.
+
+**L'effetto cumulativo su una partita intera non è mai stato misurato.** `test_upgrades` misura
+**una** applicazione per id (danno +25,0%). Su ~30 scelte su 8 id il danno sarebbe `1,25^3,75` e
+la cadenza `0,85^3,75`: numeri **ragionevoli**, ma **non misurati**. Non è un criterio di m6, che è
+un criterio di **collegamento**, ma è il primo numero da leggere quando si guarda la curva.
+
+Fuori m6, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | **È il gioco a scegliere, non il test** | sulla **scena vera**, uccidendo nemici con `damage_enemy` finché il livello sale **da solo**, il danno dell'arma deve cambiare **senza che il test chiami mai `choose()` o `apply()`**. È il criterio che distingue m6 da tutte le altre: fino a qui il test chiamava la funzione e misurava che funzionasse |
+| 2 | **Il pannello pausa e riprende** | aperto il pannello, `get_tree().paused == true` e **il giocatore non si muove**; esaurite le scelte, `paused == false` e il gioco riprende. Il pannello deve **continuare a elaborare** mentre il gioco è fermo |
+| 3 | **Una scelta, non tre** | `pending()` va a **3 → 0**: `choose()` applica **una** offerta e **scarta le altre due**, e al livello successivo ne arrivano altre tre. Il danno cambia **una** volta per livello |
+
+**Questo criterio è stato corretto il 2026-10-13, ed è stato scritto male da me.** Avevo messo
+*«`pending()` va a 3 → 2 → 1 → 0 e il danno cambia tre volte»*, copiato dal commento di
+`progression.gd:188-190` — *«le altre pending restano: si applicano una alla volta»*. E l'utente,
+giocando, ha scritto: *«me li fa scegliere tutti e 3, non solo 1»*.
+
+**Il difetto non è stato implementare male il codice: è che ho scritto il criterio a partire dal
+codice invece che dalla decisione.** È la stessa cosa che ho scritto a `-orda` per m4 — «nessuna
+cifra prima della misura» — e l'ho scritta **a un'altra foglia mentre la violavo io**. La firma del
+documento era «le altre pending restano», e l'ho letta come una specifica quando è un commento su
+un comportamento che nessuno aveva mai visto in gioco.
+
+**La regola nuova è una scelta e non è dedotta da niente:** si sale di livello, si sceglie **uno**,
+gli altri due si buttano, e il livello dopo ne offre altri tre. È il genere, e il motivo per cui
+funziona è che la scelta è una **scelta**: se ne prendi tre, non è una scelta, è un malloppo.
+
+**E il numero che cambia di conseguenza, dichiarato perché nessuno lo aveva calcolato:** con una
+scelta per livello, su una partita a livello 10 scegli **10** potenziamenti invece di ~30, e il
+danno sarebbe `1,25^1,25` invece di `1,25^3,75`. Entrambi restano **non misurati**: sono
+stime, non fatti, e vanno misurate quando la curva si guarda davvero.
+| 4 | **La descrizione è dichiarata, non ricopiata** | il pannello prende nome ed effetto da `offer_label(index)` / `offer_effect(index)`, e il numero mostrato **combacia** con quello che `apply()` fa davvero, **misurato**: applicato l'id della carta, il danno dell'arma dev'essere quello che la carta dice |
+| 5 | **Nessun nodo di troppo** | il pannello non può far crescere `node_count` oltre il tetto del criterio n. 3 di m1 |
+| 6 | **I denti, provati e rimossi** | una carta che non chiama `choose()` deve lasciare `pending()` invariato e il danno **uguale** |
+
+### 3.8 Scope della milestone 6: due foglie, una superficie nuova
+
+| agente | modello | in m6 scrive | note |
+|---|---|---|---|
+| `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/progression.gd`, `tests/test_progression.gd`, `tests/test_upgrades.gd`, `tests/test_gameplay.gd` | `offer_label(index)` e `offer_effect(index)`, con i numeri presi **da `apply()`** e non riscritti a mano |
+| `terminal-gun-ui` | `space-bunny-free#max` | `src/ui/hud.gd`, `scenes/hud.tscn`, `tests/test_ui.gd` | il pannello, la pausa, la scelta |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | la superficie dei due metodi, **dichiarata prima** del lancio |
+
+**Le due foglie non si toccano, ma non sono indipendenti.** `-ui` chiama `offer_label` e
+`offer_effect`, che `-gameplay` scrive: è un ordine di consegna, non una race, ed è il motivo per
+cui la superficie è **congelata in `contracts.gd` prima** e non durante. Come m3: il gate può
+diventare rosso **per il motivo giusto**.
+
+**La pausa è di `-ui`, e il motivo è che `-ui` è l'unica che sa se il pannello è aperto.**
+`get_tree().paused` è una cosa globale: metterla in mano a `-gameplay` significa che il simulacro
+mette in pausa e il pannello deve sapere di riprendere, cioè due foglie con una variabile globale
+in comune. In mano a `-ui` la pausa è **locale** e il criterio n. 2 è verificabile da un posto solo.
+
+**Perché la superficie serve, e non è burocrazia.** Il pannello deve mostrare *cosa* fa ogni
+potenziamento, e quei numeri stanno dentro `progression.gd`, che è di `-gameplay`. Se `-ui`
+scrive «danno +25%» a mano, copia una conoscenza che non è sua, e la copia mente alla prima riga
+cambiata in `apply()`. I due metodi sono la strada dichiarata: `offers` dice **quali** id ci sono,
+loro dicono **come si chiamano** e **quanto fanno**, e li espone chi possiede i numeri.
+
+### 4.6 Onde della milestone 6
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m6-w0** | vertice | — | superficie `offer_label`/`offer_effect` congelata in `contracts.gd`, specifica scritta, `PERM: 15/15` prima di lanciare |
+| **m6-w1** | gameplay ∥ ui | 2 agenti, una stessa risposta | `GATE: 8/8`, `--quit-after 300` pulito, denti provati e rimossi, rieseguiti dal vertice |
+
+### m6 SOSPESA il 2026-10-13: che cosa è committato, che cosa resta sporco, e perché
+
+**Decisione dell'utente**: «mettiamo via m6 e committo quello che è buono». E ha ragione: il
+confine dell'onda era sbagliato tre volte di fila e ogni foglia finiva il suo pezzo passando il
+guaio alla successiva.
+
+**Committato, e verificato dal vertice** (`GATE: 7/8`, l'unico rosso è `test_ui` per il motivo
+qui sotto):
+
+| file | cosa porta |
+|---|---|
+| `src/player/progression.gd` | `offer_label(index)` e `offer_effect(index)` con **un solo numero** per potenziamento; `choose()` applica **una** offerta e **scarta le altre due**; `LABELS` cancellata perché era una seconda copia che **mordeva** (diceva «Cadenza +15%» per un `*= 0.85` che è +17,6%) |
+| `src/player/player.gd` | la riga 121: «dieci voci» → **dodici** |
+| `tests/test_progression.gd`, `tests/test_upgrades.gd`, `tests/test_gameplay.gd` | 143 / 520 / 294 asserzioni, tutte verdi |
+| `src/core/contracts.gd` | la superficie dei due metodi |
+
+**Lasciato sporco e NON committato, di proposito**: `src/sim/horde.gd` con **8 marcatori
+`BISECT-TEMP`**, `scenes/hud.tscn` e `src/ui/hud.gd` con il pannello, `tests/test_ui.gd` con i
+blocchi di diagnostica. Sono file di **due** foglie diverse e il vertice non li può toccare: sono
+file di `-orda` e di `-ui`.
+
+**Il limite che dichiaro, e non nascondo**: il `GATE: 7/8` che ho misurato gira sull'**albero
+sporco**, quindi **lo stato committato non è stato misurato**. Non posso rimuovere i file sporchi
+(`git checkout`/`stash`/`reset` sono muri) e non posso editarli (scope di altre foglie). Quello che
+posso dire è che i **sette test verdi** sono gli stessi che girerebbero senza quei tre file, con
+una riserva: `test_gameplay` asserisce il conteggio dei nodi **come differenza** (scena meno HUD,
+tetto **19**) proprio per sopravvivere alla crescita della HUD, ma **non l'ho verificato** nella
+configurazione committata.
+
+**Perché `test_ui` è rosso, e non è un difetto**: asserisce ancora la regola **vecchia** —
+*«pending() deve scendere di uno, non azzerarsi: atteso 2, ottenuto 0»*. È la **race di significato**
+dichiarata in §3.8: `-gameplay` ha applicato la decisione dell'utente, `-ui` asseriva il
+contrario. Il pannello **funziona** — l'utente l'ha visto e ci ha cliccato — ma il suo test aspetta
+di essere aggiornato alla regola nuova.
+
+### Il leak: isolato, e la porta è **non deterministica**
+
+`-orda` l'ha chiuso, e la sua correzione a se stesso vale più del leak:
+
+| passo | leak |
+|---|---|
+| nessun impatto | **no** |
+| ultimo impatto a 120 passi dall'uscita | **no** |
+| ultimo impatto a 122 passi dall'uscita | **no** |
+| ultimo impatto a 123 passi dall'uscita | **sì** |
+
+**Il leak è `bonk.wav` ancora in riproduzione quando il motore esce.** `bonk` dura 0,18 s ≈ **11
+passi** di fisica: sotto quella soglia il playback è vivo all'uscita e non viene rilasciato. Il
+pezzo è `src/weapons/weapon_base.gd:194` (`_sfx.play()` dentro `on_impact()`), che **è di
+`-gameplay`**.
+
+**E questo rende la porta non deterministica, che è la cosa seria.** `-orda` ha scritto, di se
+stesso: *«Le prime due "prove" che ho fatto erano rumore: il leak è comparsa e sparita a
+configurazione di gioco identica. `--quit-after` in headless non è deterministico»*. **300
+iterazioni danno ~132 passi di fisica reali**, e se l'ultimo colpo cade entro ~11 passi dall'uscita
+suona l'allarme, altrimenti no.
+
+Quindi **`GATE` non è rosso per un difetto: tira i dadi.** È la prima volta che una porta di questo
+progetto è non deterministica, ed è esattamente ciò che §11 vieta: *«una porta la cui rossa non
+distingue “difetto” da “dado”»*. Va chiuso alla fonte — **`_exit_tree()` che ferma l'`sfx`** — non
+ignorando la porta, che sarebbe il modo più veloce di tornare al verde e di non sapere più niente.
+
+### 1.7-bis Un difetto del vertice che è nel piano da metà della sessione
+
+**Questo documento è uno zig-zag, non un albero, ed è colpa mia.** La sequenza reale delle
+intestazioni è §1.3 → §3.5 → §4.2 → §4.3 → §1.4 → §1.4a → §1.4b → §3.6 → §3.6-bis → §4.4 →
+§1.5 → §1.5a → §1.5a-bis → §1.5b → §3.7 → §4.5 → §2 → §3 → §3.3 → §3.1 → §3.2 → §3.4 → §1.6 →
+§1.7 → §3.8 → §4.6 → §4 → §4.1 → §1.2 → §1.2b → §5 → …
+
+**La causa è il metodo, non la sfortuna: io ancoro le sezioni dove mi è comodo e appendo.** È già
+stato così all'inizio — §1.2 era stradalato dopo §4.1 — ma in una sessione l'ho fatto peggio: ho
+**mangiato due volte** l'intestazione `## 2. Toolchain` usandola come ancora (una volta l'ho
+dovuta ricostruire, una volta ho troncato §3.4 in due e ho lasciato un `## 2. Toolchain` dentro
+§3.4), e ho **duplicato** un §4.4. L'ultimo è stato corretto subito, perché cercare l'intestazione
+prima di sostituirla è una verifica che costa una chiamata.
+
+**La regola che ne esce, e che vale da subito: prima di sostituire un'intestazione, la si cerca.**
+Un ancoraggio è una stringa che scelgo io: se la stringa è sola in un posto, ilReplace è esatto; se
+appare due volte, o mangio un pezzo o ne creo uno. Il costo della verifica è una `grep`, il costo
+dell'errore è una sezione che mente in un documento che **è** la fonte di verità.
+
+**E una cosa che va detto perché riguarda la lettura:** le sezioni sono **numerate correttamente ma
+non in ordine**, quindi si cerca per numero (`§1.7`) e non scorrendo. Non è come dovrebbe essere un
+piano, e non lo nascondo perché sia comodo: è il risultato di un giorno di lavoro in cui il piano
+è cresciuto più in fretta della mia capacità di tenerlo in ordine.
 
 **Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 

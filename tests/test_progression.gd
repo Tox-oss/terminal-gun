@@ -167,6 +167,7 @@ func _prova(h, game, arena) -> void:
 	_senza_uccisioni_niente_xp(h, prog, horde, player, weapon, per_kill, base, passo)
 	_barra_e_nan(h, prog, base, passo)
 	_xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill, base, passo)
+	_descrizione_delle_offerte(h, prog, player, weapon)
 
 # --- 0. La popolazione d'avvio: una relazione, non una cifra --------------------
 
@@ -522,6 +523,138 @@ func _xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill: float,
 		print("progression: al confine dell'onda %d nessuna XP persa, %d uccisioni contate da -orda e da -gameplay"
 			% [wave0, uccisi_al_confine])
 
+# --- 4. m6: la descrizione di un'offerta e' dichiarata, non ricopiata ---------
+
+## Il pannello di `-ui` non scrive «Danno +25%»: lo chiede a
+## `offer_label(index)` e `offer_effect(index)`. Qui si prova che quei due
+## metodi dicono qualcosa di leggibile e di solo ASCII (finiscono in una
+## Label), e soprattutto che **leggere una carta non e' scegliere una carta**:
+## il criterio n. 6 di m6 chiede esattamente questo, e il numero che decide e'
+## che `pending()` e la firma dei numeri dell'arma restano quelle di prima.
+##
+## Si sale di livello con `on_kill(1)`, che e' la strada che il percorso vero
+## chiama quando `Game.damage_enemy` ha risposto `true`: non e' un `add_xp` a
+## mano, e quindi le offerte che arrivano sono quelle che l'uccisione ha fatte
+## rullare.
+##
+## ## L'altra meta' del contratto: dopo la scelta **non resta niente**
+##
+## La regola e' dell'utente (2026-10-13), non dedotta dal codice: si sale di
+## livello, si sceglie **uno**, gli altri due si buttano, e al livello dopo ne
+## arrivano altri tre. Quindi `choose(index)` non accorcia la coda, la **svuota**:
+## `pending()` va da 3 a 0 in un colpo, e non 3 -> 2 -> 1 -> 0 come scriveva il
+## commento di `progression.gd` che questo criterio aveva copiato.
+##
+## E non e' una questione di stile: `add_xp` rulla le offerte solo se la coda e'
+## vuota, quindi e' **lo svuotamento** che fa tornare il ciclo. Qui sotto e' il
+## numero che lo dimostra, perche' e' il punto in cui una `choose()` che tenesse
+## le due pending si romperebbe e continuerebbe a sembrare giusta fino al
+## livello successivo.
+func _descrizione_delle_offerte(h, prog, player, weapon) -> void:
+	var firma := _firma(player, weapon)
+	prog.reset()
+	h.eq(str(prog.offer_label(0)), "",
+		"a menu vuoto offer_label(0) risponde stringa vuota, non un errore")
+	h.eq(str(prog.offer_effect(0)), "",
+		"e offer_effect(0) anche: un indice che non esiste non e' un'offerta")
+	h.eq(str(prog.offer_label(-1)), "",
+		"un indice negativo e' fuori dalla coda come uno troppo grande")
+	h.eq(int(prog.pending()), 0, "e la coda delle offerte e' ancora vuota")
+
+	# Quante uccisioni servono a far salire **un** livello: la soglia e' quella
+	# che la progressione dichiara, quindi il numero esce dalla misura e non e'
+	# scritto qui dentro.
+	var uccise := int(ceilf(float(prog.xp_to_next()) / float(prog.xp_per_kill)))
+	for _i in uccise:
+		prog.on_kill(1)
+	h.eq(int(prog.pending()), 3,
+		"dopo %d uccisioni il livello offre esattamente 3 potenziamenti" % uccise)
+
+	var nomi := []
+	var effetti := []
+	for i in 3:
+		var nome := str(prog.offer_label(i))
+		var effetto := str(prog.offer_effect(i))
+		nomi.append(nome)
+		effetti.append(effetto)
+		h.check(nome != "" and _ascii(nome),
+			"l'offerta %d ha un nome leggibile: '%s'" % [i + 1, nome])
+		h.check(effetto != "" and _ascii(effetto),
+			"l'offerta %d ha un effetto leggibile: '%s'" % [i + 1, effetto])
+		h.check(_ha_numero(effetto),
+			"l'effetto '%s' contiene un numero: la carta dice quanto, non solo che cosa" % effetto)
+	h.eq(_unici(nomi), 3, "le tre carte hanno tre nomi diversi")
+	h.eq(_unici(effetti), 3, "e tre effetti diversi")
+
+	# Il numero che decide del criterio n. 6: leggere le carte e' un'operazione
+	# **di lettura**.
+	for i in 3:
+		prog.offer_label(i)
+		prog.offer_effect(i)
+	h.eq(int(prog.pending()), 3, "leggere le tre carte non sceglie niente: la coda e' quella")
+	h.eq(_firma(player, weapon), firma,
+		"e non muove nessun numero dell'arma o del giocatore")
+
+	# ## Una scelta sola, e le altre due si buttano
+	#
+	# Qui `choose(0)` e' chiamato per provare che funziona, non per far passare
+	# un'asserzione sulla scena vera: che sia **il gioco** a scegliere, uccidendo
+	# nemici, e' il compito del pannello di `-ui`.
+	var id_primo := str(prog.offers[0])
+	var scelto: String = prog.choose(0)
+	h.eq(scelto, id_primo,
+		"choose(0) applica il primo della coda, quello che la carta 0 descriveva: '%s'" % scelto)
+	h.eq(int(prog.pending()), 0,
+		"e la coda si svuota in un colpo: le altre due offerte sono scartate, non accodate")
+	h.check(_firma(player, weapon) != firma,
+		"la scelta ha mosso almeno un numero dell'arma o del giocatore")
+	h.eq(str(prog.offer_label(0)), "",
+		"l'indice 0 non e' piu' un'offerta: la stringa vuota e' la risposta giusta")
+	h.eq(str(prog.offer_effect(0)), "", "e il suo effetto e' vuoto come il nome")
+	h.eq(str(prog.choose(0)), "",
+		"una seconda scelta con la coda vuota non applica niente")
+
+	# ## Il ciclo: al livello dopo ne arrivano altre tre
+	#
+	# `add_xp` chiama `roll()` solo con `gained > 0 and offers.is_empty()`: se
+	# `choose()` tenesse le due pending, quella riga non scatterebbe piu' e il
+	# ciclo dei livelli si fermerebbe. Il numero che decide e' questo: dalla coda
+	# svuotata, l'XP che fa salire il livello successivo deve tirare tre offerte
+	# nuove, tutte distinte.
+	var uccise2 := int(ceilf(float(prog.xp_to_next()) / float(prog.xp_per_kill)))
+	for _i in uccise2:
+		prog.on_kill(1)
+	h.eq(int(prog.pending()), 3,
+		"dopo %d uccisioni il livello successivo offre altre 3 potenziamenti: la coda svuotata e' la condizione che rilancia il ciclo"
+		% uccise2)
+	h.eq(_unici(prog.offers), 3, "e sono tre potenziamenti distinti anche loro")
+
+	# Il contratto con `-ui` vale anche al contrario: la stessa offerta descritta
+	# due volte dice due volte la stessa cosa. Una carta che cambiasse testo da
+	# un frame all'altro sarebbe un pannello che mente.
+	prog.reset()
+	prog.on_kill(uccise)
+	var primo := str(prog.offer_label(0))
+	var primo_effetto := str(prog.offer_effect(0))
+	for _giro in 5:
+		prog.offer_label(0)
+		prog.offer_effect(0)
+	h.eq(str(prog.offer_label(0)), primo,
+		"la stessa offerta descritta sei volte dice sempre '%s'" % primo)
+	h.eq(str(prog.offer_effect(0)), primo_effetto,
+		"e l'effetto resta '%s': leggere non consuma niente" % primo_effetto)
+	print("progression: m6 descrizione, tre carte '%s' / '%s' / '%s'"
+		% [str(prog.offer_label(0)), str(prog.offer_label(1)), str(prog.offer_label(2))])
+	print("progression: m6 effetti '%s' / '%s' / '%s' (una scelta sola: dopo choose la coda e' vuota)"
+		% [str(prog.offer_effect(0)), str(prog.offer_effect(1)), str(prog.offer_effect(2))])
+
+	# La sezione ha applicato potenziamenti a mano per provare `choose`: la
+	# regolazione torna a com'era, letta **qui dentro** e non scritta, cosi' la
+	# sezione dopo non parte da numeri sporchi.
+	_ripristina(player, weapon, firma)
+	prog.reset()
+	h.eq(_firma(player, weapon), firma, "rimessa a posto, la firma dei numeri e' quella di prima")
+
 # --- Le misure ------------------------------------------------------------------
 
 ## L'invariante contabile. `xp_earned` e' tutto quello che e' entrato; `xp` e' la
@@ -577,6 +710,62 @@ func _stato(prog) -> Dictionary:
 		"kills": int(prog.kills),
 	}
 
+## I numeri che un potenziamento tocca, come **firma**. Serve alla sezione m6:
+## leggere una carta non deve cambiarli, quindi il confronto e' fatto su tutti
+## e non su quello che la carta nomina.
+func _firma(player, weapon) -> Dictionary:
+	return {
+		"danno": float(weapon.damage),
+		"intervallo": float(weapon.fire_interval),
+		"velocita": float(weapon.projectile_speed),
+		"vita_proj": float(weapon.projectile_life),
+		"spinta": float(weapon.knockback),
+		"perforante": int(weapon.pierce),
+		"gittata_mira": float(weapon.acquire_radius),
+		"corsa": float(player.move_speed),
+		"vita_max": float(player.max_hp),
+		"vita": float(player.hp),
+	}
+
+## Rimette i numeri di `_firma` al posto loro. I valori vengono **da** la firma,
+## non da una copia scritta qui dentro: una sezione che lascia la regolazione
+## sporca fa fallire in modo falso chi viene dopo.
+func _ripristina(player, weapon, firma: Dictionary) -> void:
+	weapon.damage = float(firma["danno"])
+	weapon.fire_interval = float(firma["intervallo"])
+	weapon.projectile_speed = float(firma["velocita"])
+	weapon.projectile_life = float(firma["vita_proj"])
+	weapon.knockback = float(firma["spinta"])
+	weapon.pierce = int(firma["perforante"])
+	weapon.acquire_radius = float(firma["gittata_mira"])
+	weapon.cooldown = 0.0
+	player.move_speed = float(firma["corsa"])
+	player.max_hp = float(firma["vita_max"])
+	player.hp = float(firma["vita"])
+
+## Solo ASCII nelle stringhe che finiscono a schermo: e' la regola del progetto
+## (piano §5.1) e la console di Windows la mangia proprio dove serve leggerla.
+func _ascii(s: String) -> bool:
+	for i in s.length():
+		if s.unicode_at(i) > 126:
+			return false
+	return true
+
+## La stringa dell'effetto contiene un numero. «+25%» e «+1 nemico» passano,
+## «Danno» no: un effetto che non dice quanto e' un'etichetta travestita.
+func _ha_numero(s: String) -> bool:
+	for i in s.length():
+		if s[i] >= "0" and s[i] <= "9":
+			return true
+	return false
+
+## Quanti valori diversi ci sono in una lista di stringhe.
+func _unici(valori: Array) -> int:
+	var visti := {}
+	for v in valori:
+		visti[v] = true
+	return visti.size()
+
 ## Le costanti della progressione lette a runtime dallo **script vivo**, mai
 ## riscritte qui dentro: una copia nel test si romperebbe al primo ritocco della
 ## curva e fallirebbe senza che nessuno l'abbia toccata. `get_script_constant_map()`
@@ -590,13 +779,15 @@ func _costanti(prog) -> Dictionary:
 
 ## `Game.progression`, non `Game.player.progression`: e' la voce che
 ## `verify_m2_surface()` chiede e che senza questa registrazione valeva `null`.
-## Dieci membri (`level`, `xp`, `kills`, `offers`, `progress`, `xp_to_next`,
-## `pending`, `choose`, `apply`, `on_kill`) erano irraggiungibili per tre foglie,
-## e il gate restava verde lo stesso.
+## Dodici membri (`level`, `xp`, `kills`, `offers`, `progress`, `xp_to_next`,
+## `pending`, `choose`, `apply`, `on_kill`, `offer_label`, `offer_effect`)
+## erano irraggiungibili per tre foglie,
+## e il gate restava verde lo stesso. Dieci erano quelli di m2; la m6 ne ha
+## dichiarati due in piu'.
 func _progressione(h, game, player):
 	var prog = game.get("progression")
 	if not h.check(prog != null,
-			"Game.progression e' registrato: senza, dieci voci del contratto di m2 non sono raggiungibili"):
+			"Game.progression e' registrato: senza, dodici voci del contratto di m2 non sono raggiungibili"):
 		return null
 	h.check(prog == player.progression,
 		"Game.progression e' lo stesso oggetto che il giocatore tiene in `progression`")
@@ -609,13 +800,14 @@ func _progressione(h, game, player):
 		if testo.begins_with("terminal-gun-gameplay"):
 			miei.append(testo)
 	h.check(miei.is_empty(),
-		"le dieci voci di m2 dichiarate a -gameplay sono tutte raggiungibili: %s" % ", ".join(miei))
+		"le dodici voci di m2 dichiarate a -gameplay sono tutte raggiungibili: %s" % ", ".join(miei))
 
 	for membro in ["level", "xp", "kills", "offers", "progress", "xp_to_next",
-			"pending", "choose", "apply", "on_kill"]:
+			"pending", "choose", "apply", "on_kill", "offer_label", "offer_effect"]:
 		var v: Variant = prog.get(membro)
 		h.check(v != null, "progression.%s esiste ed e' leggibile" % membro)
-		if membro in ["progress", "xp_to_next", "pending", "choose", "apply", "on_kill"]:
+		if membro in ["progress", "xp_to_next", "pending", "choose", "apply", "on_kill",
+				"offer_label", "offer_effect"]:
 			h.check(v is Callable, "progression.%s e' un metodo, non un campo" % membro)
 	return prog
 

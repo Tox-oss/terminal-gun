@@ -137,9 +137,14 @@ const CAM_ANGLE_TOL := 5.0
 ## misura li' non misura niente (piano §1.5b).
 const LONTANO := Vector3(11.0, 0.0, -6.0)
 
-## Il numero di nodi della scena vera, che il criterio n. 5 di m5 fissa. Se
-## `top_level` fosse diventato un nodo, questo numero salirebbe.
-const NODI_SCENA_VERA := 33
+## Il tetto di nodi di **-gameplay** sulla scena vera, cioe' tutta la scena meno
+## la HUD (vedi la nota della sezione 13: la HUD e' di `-ui` ed e' cresciuta di
+## undici nodi quando `-ui` ha aggiunto il pannello dei potenziamenti, quindi il
+## totale di 33 che m5 fissava non e' piu' un numero di questa sezione). I 19
+## sono i 33 di allora meno i 14 della HUD di allora: nessun nodo e' sparito,
+## e' solo che adesso non e' un numero di -gameplay. Se `top_level` fosse
+## diventato un nodo, questo numero salirebbe.
+const NODI_SCENA_VERA := 19
 
 ## L'orda finta. Doppio di -orda: `count` + `transforms` come dati, e i due
 ## metodi registrati sul contratto.
@@ -872,13 +877,42 @@ func _xp_and_upgrades(h) -> void:
 	h.eq(_count_unique(offered), 3, "le tre offerte sono tre potenziamenti diversi")
 	for id in offered:
 		h.check(known.has(id), "l'offerta '%s' e' un potenziamento che esiste" % str(id))
+
+	# m6: le tre carte si descrivono da sole, e **descriversi non e' scegliere**.
+	# Il pannello di `-ui` non scrive «Danno +25%»: lo chiede a
+	# `offer_label(index)` e `offer_effect(index)`, quindi qui si prova che quei
+	# due metodi rispondono su questo oggetto, e che il numero che il pannello
+	# mostra combacia con il danno che il colpio fa davvero: qui siamo al primo
+	# livello, quindi la carta promette quello che l'arma ha adesso.
+	var danno_prima: float = weapon.damage
+	var firma_prima := _signature()
 	for i in 3:
-		var signature_before := _signature()
-		var chosen: String = prog.choose(0)
-		h.check(chosen != "", "offerta %d applicabile (choose ha risposto '%s')" % [i + 1, chosen])
-		h.check(_signature() != signature_before,
-			"applicare '%s' cambia un numero davvero, non e' un no-op" % chosen)
-	h.eq(prog.pending(), 0, "dopo tre scelte non resta nessuna offerta")
+		var nome := str(prog.offer_label(i))
+		var effetto := str(prog.offer_effect(i))
+		h.check(nome != "" and _ascii(nome),
+			"l'offerta %d si descrive con un nome leggibile: '%s'" % [i + 1, nome])
+		h.check(effetto != "" and _ascii(effetto),
+			"e con un effetto leggibile: '%s'" % effetto)
+	h.eq(int(prog.pending()), 3,
+		"leggere le tre carte non ha scelto niente: la coda e' ancora quella")
+	h.eq(_signature(), firma_prima,
+		"e non ha mosso un solo numero dell'arma o del giocatore")
+	h.eq(str(prog.offer_label(3)), "",
+		"un indice oltre la coda non e' un'offerta: il nome e' una stringa vuota")
+	h.eq(str(prog.offer_effect(3)), "", "e l'effetto pure")
+	h.near(float(weapon.damage), danno_prima, 0.0001,
+		"il danno e' quello di prima di leggere le carte: %.2f" % danno_prima)
+
+	# Una sola scelta, e le altre due si buttano: regola dell'utente, 2026-10-13.
+	# `pending()` va da 3 a 0 in un colpo, non 3 -> 2 -> 1 -> 0. Il numero che
+	# decide e' che **una** sola delle tre offerte arriva al giocatore e che le
+	# altre due non sono "in attesa" da qualche parte: sono scartate.
+	var signature_before := _signature()
+	var chosen: String = prog.choose(0)
+	h.check(chosen != "", "l'offerta scelta e' applicabile: '%s'" % chosen)
+	h.check(_signature() != signature_before,
+		"applicare '%s' cambia un numero davvero, non e' un no-op" % chosen)
+	h.eq(prog.pending(), 0, "una scelta sola: gli altri due potenziamenti sono scartati, non in coda")
 	h.eq(prog.choose(0), "", "e sceglere con il menu vuoto non applica niente")
 
 	horde.chase_speed = chase_before
@@ -1424,6 +1458,18 @@ func _m5_trasformazione_del_renderer(h) -> void:
 	horde.chase_speed = inseguimento_prima
 
 # --- 13. m5, criterio n. 5: nessun nodo in piu' ---------------------------------
+#
+# ## Perche' qui si conta senza la HUD (2026-10-13, m6)
+##
+# Il numero di m5 era **tutto** `arena_main.tscn`, 33 nodi, HUD compresa. In m6
+# `-ui` ha aggiunto il pannello dei potenziamenti dentro `scenes/hud.tscn` e
+# quei nodi sono di un altro foglio: contarli in un test di -gameplay faceva
+# fallire qui un lavoro che il criterio n. 5 di m5 non riguarda, e che la
+# prossima modifica della HUD avrebbe fatto fallire di nuovo. Il criterio dice
+# «il fix del renderer non aggiunge un nodo»: il numero che lo riguarda e' quello
+## di **-gameplay**, quindi qui si contano i nodi della scena vera **meno la
+## HUD**, e si dichiara che quello e' il tetto.
+const NODO_HUD := "Hud"
 
 func _m5_nessun_nodo_in_piu(h) -> void:
 	var packed = load(ARENA_SCENE)
@@ -1432,12 +1478,29 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 	var scena := (packed as PackedScene).instantiate()
 	root.add_child(scena)
 
+	var hud = scena.get_node_or_null(NODO_HUD)
+	if not h.check(hud != null, "la scena vera ha ancora il nodo \"%s\"" % NODO_HUD):
+		return
+	var nodi_hud := _conta_nodi(hud)
 	var nodi := _conta_nodi(scena)
+	var senza_hud := nodi - nodi_hud
 	# Il fix del renderer e' `top_level`: una **proprieta'**, non un nodo. Se
-	# fosse stato scelto lo spostamento del nodo fuori dal giocatore, qui il
+	# fosse stato scelto lo spostamento del nodo fuori dal giocatore, questo
 	# numero cambierebbe e il criterio n. 3 di m1 comincerebbe a regredire.
-	h.eq(nodi, NODI_SCENA_VERA,
-		"la scena vera resta in %d nodi anche col fix" % NODI_SCENA_VERA)
+	h.eq(senza_hud, NODI_SCENA_VERA,
+		"la scena vera, senza i %d nodi della HUD di -ui, resta in %d nodi anche col fix"
+		% [nodi_hud, NODI_SCENA_VERA])
+	# La divisione e' una partizione, non una stima: se qualcuno renominasse il
+	# nodo della HUD, il totale e il pezzo escluso non tornerebbero piu' e
+	# questa riga lo direbbe invece di lasciare passare un conteggio a caso.
+	h.eq(senza_hud + nodi_hud, nodi,
+		"i %d nodi contati e i %d della HUD sommano al totale della scena vera (%d)"
+		% [senza_hud, nodi_hud, nodi])
+	var player_scena = scena.get_node_or_null("Player")
+	if h.check(player_scena != null, "la scena vera ha il nodo \"Player\""):
+		h.check(_conta_nodi(player_scena) <= NODI_SCENA_VERA,
+			"il giocatore da solo (%d nodi) non supera mai il tetto di -gameplay (%d)"
+			% [_conta_nodi(player_scena), NODI_SCENA_VERA])
 
 	# E non basta il totale: il nodo visivo deve essere **lo stesso nodo** di
 	# prima, sotto il pool, dentro l'arma, dentro il giocatore.
@@ -1447,12 +1510,17 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 		if h.check(visivo_scena != null, "il pool della scena vera ha il suo nodo visivo"):
 			h.eq(visivo_scena.get_parent(), pool_scena,
 				"il nodo visivo e' ancora figlio del pool: nessun nodo spostato")
+			h.eq(_conta_nodi(pool_scena), 2,
+				"il pool ha due soli figli: i 100 record e il nodo che li disegna")
 			h.check(bool(visivo_scena.top_level),
 				"ed e' top_level anche sulla scena vera")
 			h.check(pool_scena.draw_transform().is_equal_approx(Transform3D.IDENTITY),
 				"la scena vera ha la stessa identita' di trasformazione sul renderer")
 
-	print("m5 nodi: la scena vera conta %d nodi, il nodo visivo resta figlio del pool ed e' top_level" % nodi)
+	print("m5 nodi: la scena vera conta %d nodi, di cui %d della HUD di -ui e %d di -gameplay "
+		% [nodi, nodi_hud, senza_hud]
+		+ "(tetto di -gameplay %d); il nodo visivo resta figlio del pool ed e' top_level"
+		% NODI_SCENA_VERA)
 	scena.queue_free()
 
 # --- Interno -------------------------------------------------------------------
@@ -1565,3 +1633,11 @@ func _count_unique(values: Array) -> int:
 	for v in values:
 		seen[v] = true
 	return seen.size()
+
+## Solo ASCII nelle stringhe che finiscono a schermo: e' la regola del progetto
+## (piano §5.1) e la console di Windows la mangia proprio dove serve leggerla.
+func _ascii(s: String) -> bool:
+	for i in s.length():
+		if s.unicode_at(i) > 126:
+			return false
+	return true

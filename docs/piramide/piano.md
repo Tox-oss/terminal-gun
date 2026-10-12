@@ -517,7 +517,46 @@ Quindi il percorso, in ordine di onestà, **oggi**:
 
 1. **`godot --path . scenes/arena_main.tscn`** — parte senza editor. È il modo più vicino a un eseguibile che esiste **adesso**, e non richiede nessuna delle cose qui sotto.
 2. **Un `.cmd` sul desktop** con due righe: `cd /d` sulla root e il comando di sopra. Doppio clic. **Non lo può scrivere nessun agente**: il desktop è fuori progetto e fuori scope. È un atto dell'utente, e resta il modo più veloce per giocare.
-3. **Export a `.exe`** — templates pronti, manca solo il preset, che ora `-scheletro` **può** scrivere. Va in `build/`, che è già fuori da `.gitignore` e da LFS (§3.2).
+3. **Export a `.exe`** — **FATTO il 2026-10-13.** `C:\Users\bisco\Desktop\terminal-gun.exe`, **109 441 360 byte**, un file solo (`embed_pck=true`: con il PCK esterno spostare il solo `.exe` romperebbe il gioco), niente console, `export_path` **relativo**. `GATE: 8/8` e `PERM: 15/15` verdi dopo. **`project.godot` NON è stato toccato**: `run/main_scene` era già giusta, e mettere a rischio il file più delicato del progetto senza un motivo misurato non è stato un rischio che `-scheletro` ha accettato.
+
+**Tre cose dichiarate sull'export, e nessuna è un trionfo.**
+
+- **Non è verificato che il gioco parta.** Io posso produrre il file e misurarne i byte; l'unica prova è che **l'utente lo apra**. `-scheletro` l'ha detto nel suo report senza che nessuno glielo chiedesse, ed è la frase giusta da mettere in un report.
+- **`export_filter="all_resources"` imballa dentro al gioco tutti gli otto `tests/test_*.gdc`**, più `tools/gate.gdc`, `tools/test_harness.gdc` e `docs/piramide/probe_knockback.gdc`. Non rompe niente, ma **in un rilascio il gate non ci va**. Il filtro giusto è per risorse, non tutto.
+- **`build/` non esiste**, quindi l'export al path di default del preset fallisce con `ERROR: Prepare Template: The given export path doesn't exist.` L'artefatto è stato prodotto **esportando sulla Desktop**, che è una directory che esiste. `mkdir` è assente da tutte le allowlist per scelta (§11.3), quindi creare `build/` è un atto dell'utente.
+
+### 1.6 Due difetti che il 2026-10-13 ha aggiunto, e che nessuna porta prende
+
+**Il primo l'ha trovato l'utente giocando, e io l'ho confermato con un `grep`.**
+
+| fatto | prova |
+|---|---|
+| **`choose()` non è chiamato da nessuna parte del gioco** | gli unici chiamanti sono `tests/test_upgrades.gd` e `tests/test_gameplay.gd`. Nel gioco: nessuno |
+| **`offers_ready` non ha nessun ascoltatore** | emesso in `progression.gd:181`, e in tutto il progetto non c'è un `.connect()` per quel segnale |
+| **`_on_leveled_up` fa solo un suono** | `player.gd:412-415`: `_sfx_levelup.play()` e `leveled_up.emit()`. Nient'altro |
+
+Quindi, giocando: **uccidi, sali di livello, senti un suono, e non succede niente.** Nessun menu,
+nessuna scelta, nessun danno che cambia. `test_upgrades` dimostra che gli otto potenziamenti
+cambiano il comportamento (danno +25,0%, cadenza −18,0%, e così via) — **chiamando `choose()` e
+`apply()` a mano**.
+
+**È la sesta volta della classe di oggi, ed è la seconda trovata da una persona che gioca.**
+`take_damage` non è chiamato da nessuna parte del gioco (§1.4a): invulnerabile, game over
+irraggiungibile. `choose()` non è chiamato da nessuna parte del gioco: la progressione è
+**inerte**. Entrambe le macchine sono verificate, con centinaia di asserzioni, a partire da una
+riga che **nessun codice di gioco esegue**.
+
+**La lezione, detta una volta sola perché è la stessa di §1.5b.** Un test che chiama
+`progression.choose(0)` verifica che `choose` funzioni, non che **qualcuno lo chiami**. La
+differenza fra i due è un `grep`, e il `grep` costa un secondo: `grep -rn "\.choose(\|\.apply(\|take_damage" src/` e guarda se la risposta è solo `src/`.
+
+**Il secondo è più piccolo e l'ho misurato io.** `--quit-after 300` **non è più pulito**:
+`WARNING: 2 ObjectDB instances were leaked at exit` e `ERROR: 1 resources still in use at exit`.
+Fino alla fine di m5 era pulito. `-scheletro` lo ha segnalato e ha detto che non l'aveva causato
+lui — verificato, non ha toccato codice — ma **non ho ancora isolato quando è comparso**, quindi
+non lo dichiaro preesistente né introdotto. È un fatto nuovo e va chiuso.
+
+## 2. Toolchain
 
 **Il vertice non può scriverle**: il suo `edit` copre `docs/piramide/**`, `src/core/contracts.gd`, `tools/env.sh`. L'`edit` su `.gitattributes` va aggiunto a `~/.config/opencode/agents/terminal-gun.md` e richiede un riavvio di opencode. Finché non è fatto, **queste due righe le deve scrivere a mano l'utente**: sono l'unico punto della piramide dove il vertice è più debole di una foglia.
 

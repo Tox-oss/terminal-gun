@@ -25,6 +25,10 @@ Milestone 1 — **vertical slice giocabile**. Deve valere tutto questo, verifica
 
 Fuori milestone 1, dichiarato: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
 
+**Criterio n. 3, emendato il 2026-10-13 — il tetto non è più dichiarabile, e il numero manca per una ragione buona.** L'utente ha deciso che Fork Bomb e Memory Leak possano crescere senza limite, il che è questo criterio scritto al contrario (§1.8). Il **principio** regge ed è il più importante: *nessun nodo per nemico*. Il **numero** no: `node_count < 120` è misurato su un'orda che non cresce, e un tetto copiato da lì non è una verifica, è una decorazione.
+
+Quindi: **il tetto è dichiarato come da misurare**, non come da indovinare. Quando i nemici che crescono esisteranno, il numero si scrive sulla misura reale del campo. Fino ad allora **120 resta** e il criterio **non regredisce** — è più onesto dichiarare che non lo so ancora che scrivere `300` perché suona meglio. Il verde di oggi resta verde: nessuna milestone può alzare `node_count` sopra 120 **fino a quando Fork Bomb non esiste**, e quando esiste il tetto si riscrive insieme al criterio che lo giustifica.
+
 ### 1.1 Milestone 2 — il gioco è un gioco: progressione, fine onda, morte, restart
 
 Milestone 1 ha dimostrato che il motore gira e che il player uccide. **Non ha dimostrato che sia un gioco**: non c'è una fine, non c'è una morte, e l'XP non è governato da nessun criterio. Milestone 2 chiude il cerchio, scegliendo **una sola cosa**: che la partita abbia inizio, crescita e fine, misurabili dal gate.
@@ -1073,6 +1077,37 @@ meno.
 Il vertice **non apre l'onda dei nemici senza quella risposta**, e non apre l'onda delle armi senza
 sapere se la salute entra prima o dopo, perché `-f`/`$SUDO`/`chmod 777` scrivono sugli stessi
 numeri e l'ordine in cui le foglie li toccano decide se si pestano i piedi.
+
+## 1.9 Milestone 7 — il giocatore può perdere: la salute smette di essere un'etichetta
+
+Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_damage` ha zero chiamanti**. Il giocatore è invulnerabile per costruzione, quindi il `game_over` esiste ed è irraggiungibile, la barra della salute è piatta, e metà dei potenziamenti che l'utente ha disegnato non ha niente su cui agire.
+
+**Il criterio n. 1 è un `grep`, non un test.** È la settima volta della classe di difetto di §1.6, e per la prima volta la porta lo prende da sola invece di fidarsi di un'asserzione.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | **il danno arriva da codice di gioco** | `grep -rn "damage_player" src/` deve trovare **un chiamante in `src/` che non sia il contratto stesso**, e quel chiamante deve essere `-orda`. Un chiamante solo in `tests/` **fallisce**: è il difetto di §1.6, ripetuto |
+| 2 | il giocatore perde hp e muore, sulla **scena vera** | `tests/test_gameplay.gd`: la partita parte, l'orda raggiunge il giocatore, `hp` scende di **almeno un colpo** e resta sotto; a `hp <= 0` lo stato è `game_over`. Un test che chiama `damage_player(50.0)` a mano **non soddisfa** il criterio n. 1 e vale come prova del criterio n. 2 solo se il chiamante del n. 1 c'è |
+| 3 | morire **non corrompe** la partita | `restart_run()` **rimette in piedi il giocatore**: `hp` torna a `max_hp`, l'onda torna a 1, nessun nodo duplicato. **Debito già noto e ancora aperto**: `-orda` ha segnalato che `restart_run()` oggi lascia `hp 0.0` e l'orda ripiomba in `game_over` al passo dopo. m7 lo chiude |
+| 4 | la HUD mostra la salute vera | `tests/test_ui.gd`: la barra scende **insieme a `hp`**, non è un valore fittizio. La metafora che l'utente ha scelto è **RAM disponibile**, e qui non si decide il testo: qui si verifica che il numero sotto sia quello vero |
+| 5 | la porta è verde | `GATE: 8/8` **meno il leak dichiarato**, che resta `test_ui` per la ragione iscritta in §1.8-bis. `PERM: 15/15` |
+| 6 | la percentuale è **una sola** | nessun numero di danno scritto a mano in due posti. È il difetto di `LABELS` («+15%» per un `×0.85` che è +17,6%), ricomparso dal design dell'utente con `$SUDO` a «+200%» e `chmod 777` a «+15%» |
+
+**Perché la firma è nel contratto e non nella scena.** Il vertice ha aggiunto `damage_player(amount) -> bool` a `src/core/contracts.gd` (il file di cui è proprietario), registrata come `-gameplay`. `-orda` chiama `Game.damage_player(x)` e **non legge mai `player.gd`**: la strada alternativa, `Game.player.take_damage(x)`, funzionerebbe e sarebbe una trappola, perché obbligherebbe una foglia a copiare la conoscenza di un'altra — l'antipattern che la §5 esiste per impedire, e che è già costato un'intera onda a m2.
+
+**Fuori m7, dichiarato**: i quattro nemici (Memory Leak, Zombie Process, Fork Bomb, Kernel Panic), le sei armi, gli otto potenziamenti, la fusione «pipe», SUDO Coin. Sono m8 e successive, e aprono solo dopo che questa è verde.
+
+**m7 ha una sola onda, tre foglie, e i file sono disgiunti.** Il confine è sul **chi possiede cosa**, non sul tema: nessuno dei tre tocca un file degli altri due.
+
+| foglia | scope | la meta' è sua |
+|---|---|---|
+| `-gameplay` | `src/player/player.gd`, `src/weapons/**`, `tests/test_gameplay.gd` | registra `damage_player`, espone `is_dead`, e **`player.restart_run()` rimette `hp` a `max_hp`** — è il debito che `-orda` aveva segnalato e gli era tornato come «meta' di -gameplay» |
+| `-orda` | `src/sim/enemy.gd`, `src/sim/horde.gd`, `src/sim/run.gd`, `tests/test_orda.gd` | il nemico **chiama** `Game.damage_player(x)` dal ciclo di gioco, con una cadenza e numeri reali. È il chiamante che il criterio n. 1 cerca con la `grep` |
+| `-ui` | `src/ui/hud.gd`, `scenes/hud.tscn`, `tests/test_ui.gd` | la barra della salute segue `hp` vero. `-ui` **non decide il testo** della metafora RAM: quello è dell'utente, e qui si verifica solo che il numero sotto sia quello vero |
+
+**Il pericolo di questa onda è la stessa cosa che l'ha già fatta fallire sette volte**: che il danno lo chiami un test. Per questo il criterio n. 1 è una `grep` e non un'asserzione, ed è l'unico criterio di m7 che **non può** essere aggirato da un test ben scritto.
+
+**L'ordine dentro l'onda è libero**, perché le tre non si toccano: `-orda` può registrare il chiamante anche prima che `-gameplay` abbia implementato `damage_player`, e in quel caso il contratto risponde `_missing` — che è un rumore esplicito, non un silenzio.
 
 ## 8. Stato
 

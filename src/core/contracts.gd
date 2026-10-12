@@ -45,6 +45,8 @@ const API := [
 	"spawn_projectile",
 	"random_spawn_point",
 	"player_position",
+	# --- m7, 2026-10-13: la via che il danno prende. Vedi `damage_player` sotto.
+	"damage_player",
 ]
 
 # --- Dati esposti dalle foglie -------------------------------------------------
@@ -95,6 +97,11 @@ const M2_SURFACE := [
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "max_hp", "kind": "field"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "progression", "kind": "field"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "health_ratio", "kind": "method"},
+	# --- m7, 2026-10-13: il giocatore e' feribile, e si vede. `hp` e `max_hp`
+	# erano gia' dichiarati sopra ma erano **piatti**: nessun codice di gioco li
+	# scriveva. Questi due non aggiungono una superficie, rendono verificabile
+	# quella che c'era: `damage_player` e' il chiamante che il criterio cerca.
+	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "is_dead", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "grant_xp", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "level", "kind": "field"},
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "xp", "kind": "field"},
@@ -264,6 +271,29 @@ func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 	if _impl.has("damage_enemy"):
 		return _impl["damage_enemy"].call(index, amount, knockback) as bool
 	_missing("damage_enemy", "terminal-gun-orda")
+	return false
+
+## -gameplay. Applica `amount` di danno al **giocatore**. Restituisce `true` se la
+## mossa ha fatto scendere `hp`, `false` altrimenti.
+##
+## Questa firma e' l'inverso esatto di `damage_enemy`, ed esiste per la stessa
+## ragione: fin qui il giocatore era **invulnerabile**, perche' `take_damage()`
+## aveva **zero chiamanti** in tutto `src/` (misurato il 2026-10-13, un solo
+## `grep`, una riga: la definizione). Scriverlo cosi' invece che
+## `Game.player.take_damage(x)` non e' pignoleria: il secondo scopo obbliga
+## -orda a **leggere `player.gd`**, cioe' il codice di un'altra foglia, che e'
+## esattamente l'antipattern che la sezione 5 esiste per impedire. Qui -orda
+## scrive `Game.damage_player(x)` e non sa cosa sia il giocatore.
+##
+## **Nota per chi impara dai numeri**: questa firma dichiara *che* il giocatore
+## puo' perdere hp. Non dichiara che perda. Il criterio di m7 non e' "questa
+## riga esiste" (esiste gia' ora, e non ha cambiato niente in un anno): e' che
+## un `grep` trovi il chiamante **in `src/`** e non solo nei test. E' la
+## settima volta della stessa classe di difetto, vedi il piano sez. 1.6.
+func damage_player(amount: float) -> bool:
+	if _impl.has("damage_player"):
+		return _impl["damage_player"].call(amount) as bool
+	_missing("damage_player", "terminal-gun-gameplay")
 	return false
 
 ## -gameplay. Tira un proiettile da `pos` verso `dir` alla velocita' `speed`.

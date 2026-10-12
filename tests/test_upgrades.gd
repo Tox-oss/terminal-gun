@@ -39,15 +39,20 @@ extends SceneTree
 ##
 ## Le misure della spinta e della perforante darebbero numeri diversi a seconda
 ## della specie colpita (resistenza 0 / 0.20 / 0.55 / 0.90) e a seconda di chi
-## sta dietro: su un'orda di 200 nemici che si muove, "spinta" e "perforante"
-## sarebbero rumore, e un potenziamento decorativo passerebbe il confronto per
-## caso. Quindi il test **riordina l'orda in un poligono**: un bersaglio grosso
-## davanti (un bruto con vita altissima, che non muore mai durante le misure) e
-## una fila di otto bersagli dietro, e il resto dell'orda portata a 39 m. Si
-## toccano i tre array pubblici che il piano dichiara come "massa" di -orda, e si
-## fa **un** passo di simulazione perche' la griglia spaziale venga ricostruita:
+## sta dietro: su un'orda piena che si muove, "spinta" e "perforante" sarebbero
+## rumore, e un potenziamento decorativo passerebbe il confronto per caso.
+## Quindi il test **riordina l'orda in un poligono**: un bersaglio grosso davanti
+## (un bruto con vita altissima, che non muore mai durante le misure) e una fila
+## di otto bersagli dietro, e tutto il resto dell'orda portata a 39 m. Si toccano
+## i tre array pubblici che il piano dichiara come "massa" di -orda, e si fa
+## **un** passo di simulazione perche' la griglia spaziale venga ricostruita:
 ## `nearest_enemy` su una griglia vecchia darebbe indici sbagliati e ogni misura
 ## sarebbe falsa.
+##
+## Il numero di nemici di cui il poligono ha bisogno e' `1 + N_BERSAGLI` = 9, e
+## viene controllato come **precondizione** (l'unico numero scritto a mano in
+## questa sezione, e con il perche' nel messaggio): e' il numero di slot che il
+## poligono scrive, non la dimensione della curva di `-orda`.
 ##
 ## Questo e' impalcatura, non sostituzione: la scena e' quella vera, l'arma e'
 ## quella vera, i proiettili sono quelli veri, il danno passa da
@@ -55,13 +60,27 @@ extends SceneTree
 ##
 ## ## La trappola del `const preload` (piano sez. 5.3)
 ## `scenes/arena_main.tscn` si carica con `load()` **dentro il corpo del test**,
-## mai in `const`. Solo `tools/test_harness.gd` e' in `const`, e non tocca il
-## contratto.
+## mai in `const`. `res://src/sim/run.gd` invece e' un `RefCounted` che non
+## nomina mai l'identificatore nudo `Game`: li' il `const preload` e' sicuro, ed
+## e' la strada che gia' usano `tests/test_orda.gd` e `tests/test_gameloop.gd`
+## per non copiare la tabella delle onde.
+##
+## ## Perche' qui non c'e' piu' nessun numero scritto a mano
+##
+## Fino a m4 questo file asseriva `count == 200` all'avvio e `count == 200` dopo
+## il poligono. Poi `-orda` ha messo la curva per onda in `src/sim/run.gd` e
+## l'avvio e' sceso a `Run.POP_BASE`: la cifra e' cambiata, il criterio no.
+## Sostituire `200` con `25` avrebbe fatto passare il gate e lasciato un test da
+## riscrivere alla prossima milestone che tocca la curva. Quindi l'avvio e'
+## asserito come **relazione** (`_popolazione_davvio`) e il poligono asserisce
+## `count` **invariato**: il numero esce dalla misura ed e' stampato.
 ##
 ## Stringhe a schermo solo ASCII: la console di Windows e il pipe di
 ## `OS.execute` sono in codepage e mangiano gli accenti.
 
 const H = preload("res://tools/test_harness.gd")
+## La tabella delle onde di -orda, letta a runtime. Nessuna copia qui dentro.
+const Run = preload("res://src/sim/run.gd")
 
 const DT := 1.0 / 60.0
 const ARENA_SCENE := "res://scenes/arena_main.tscn"
@@ -132,6 +151,11 @@ var _weapon
 var _prog
 var _pool
 
+## Nemici vivi **misurati** all'avvio della scena vera. E' il riferimento del
+## poligono ("il riordino non ha ammazzato nessuno") e vale qualunque curva
+## scelga `-orda`: nessuna cifra scritta a mano. `-1` = non misurato.
+var _vivi_avvio: int = -1
+
 ## Quanti potenziamenti hanno emesso `upgrade_applied` dall'ultimo azzeramento.
 ## Serve al controllo negativo: un id inesistente che emettesse il segnale
 ## mentirebbe all'interfaccia anche senza toccare nessun numero.
@@ -192,22 +216,69 @@ func _prova(h) -> void:
 	_player.drive_manually()
 	_player.upgrade_applied.connect(func(_id: String) -> void: _emessi += 1)
 
-	h.eq(int(_horde.count), 200, "l'orda della scena vera parte con 200 nemici vivi")
+	_popolazione_davvio(h, _horde)
 	h.eq(int(_horde.wave), 1, "sull'onda 1, dove la scala delle vite e' 1.0")
 
-	_poligono(h)
+	if not _poligono(h):
+		return
 	_tutte(h)
 	_uno_per_uno(h)
 	_id_inesistente(h)
 	_ritorno_alla_base(h)
 	_scelta_del_livello(h)
 
+# --- La popolazione d'avvio: una relazione, non una cifra ----------------------
+
+## Cosa resta vero qualunque numero scelga `-orda` domani, e cosa il criterio
+## chiede davvero (che l'avvio sia **coerente con la curva dichiarata**, non che
+## la curva valga un numero fissato da questo test):
+##
+##     count      == population                il campo e' pieno al suo tetto
+##     population == Run.population_of(1)      il tetto e' quello che chiede la curva
+##
+## Il numero **esce** dalla misura ed e' stampato e messo in `_vivi_avvio`, che e'
+## il riferimento del poligono: nessuna cifra scritta a mano nell'asserzione.
+## Fino a m4 qui c'era `count == 200`; sostituire quella riga con `count == 25`
+## avrebbe fatto passare il gate e lasciato un test da riscrivere alla prossima
+## milestone che tocca la curva, che e' gia' successo.
+##
+## Il secondo `check` e' voluto: `population` deve essere **positivo**, altrimenti
+## la prima relazione (`count == population == 0`) passerebbe su un'orda vuota.
+func _popolazione_davvio(h, horde) -> void:
+	var tetto: Variant = horde.get("population")
+	if not h.check(typeof(tetto) == TYPE_INT,
+			"l'orda dichiara il campo `population`: senza, non si sa a cosa debba essere pieno"):
+		_vivi_avvio = -1
+		return
+	_vivi_avvio = int(horde.count)
+	h.eq(_vivi_avvio, int(tetto),
+		"l'orda della scena vera parte piena al suo tetto di popolazione")
+	h.eq(int(tetto), Run.population_of(1),
+		"e il tetto e' quello che chiede la curva delle onde sull'onda 1 (Run.population_of)")
+	h.check(int(tetto) > 0,
+		"un'onda che parte vuota non e' un'onda: %d nemici vivi" % int(tetto))
+	print("upgrades: avvio, onda %d, %d nemici vivi = tetto di popolazione %d "
+		% [int(horde.wave), _vivi_avvio, int(tetto)]
+		+ "(Run.population_of(1) = %d, Run.POP_BASE = %d)" % [Run.population_of(1), Run.POP_BASE])
+
 # --- Il poligono ---------------------------------------------------------------
 
 ## Riordina l'orda in una posizione di tiro ripetibile. Vedi la nota lunga in
 ## testa al file: e' impalcatura dichiarata, e senza la griglia ricostruita
 ## `nearest_enemy` darebbe indici di una disposizione che non esiste piu'.
-func _poligono(h) -> void:
+##
+## Ritorna `false` solo se il campo e' troppo piccolo per il poligono: e' l'unico
+## numero scritto a mano qui dentro (`1 + N_BERSAGLI` slot da riempire), ed e'
+## una **precondizione** con il perche' scritto, non una stima della curva di
+## `-orda`. Senza questo controllo, una curva che scendesse sotto 9 farebbe
+## scrivere fuori dagli array e le misure che vengono dopo sarebbero tutte
+## numeri inventati.
+func _poligono(h) -> bool:
+	var slot := 1 + N_BERSAGLI
+	if not h.check(_vivi_avvio >= slot,
+			"l'orda deve avere almeno %d nemici per il poligono (1 bersaglio + %d fila), ne' ha %d: Run.population_of(1) = %d"
+			% [slot, N_BERSAGLI, _vivi_avvio, Run.population_of(1)]):
+		return false
 	var tr: PackedVector3Array = _horde.transforms.duplicate()
 	var kin: PackedInt32Array = _horde.kinds.duplicate()
 	var hp: PackedFloat32Array = _horde.hp.duplicate()
@@ -236,12 +307,22 @@ func _poligono(h) -> void:
 		"l'indice 2 nella tabella di -orda e' il bruto: e' il bersaglio grosso davanti")
 	h.eq(str(_horde.kind_name(1)), "runner",
 		"l'indice 0 nella tabella di -orda e' il runner: e' la fila dietro")
-	h.eq(int(_horde.count), 200, "il poligono ha lasciato vivi tutti i 200 nemici")
+	# Il riferimento e' il **conteggio di prima**, misurato all'avvio: il
+	# riordino sposta e rietichetta, non ammazza e non crea. Scrivere qui un
+	# numero fisso (era 200) legava il test alla curva di -orda; la relazione
+	# richiesta e' "tutti i nemici che c'erano ci sono ancora", e nient'altro.
+	h.eq(int(_horde.count), _vivi_avvio,
+		"il poligono ha lasciato vivi tutti i nemici che c'erano")
+	h.eq(int(_horde.count), int(_horde.get("population")),
+		"e il campo e' ancora pieno al suo tetto di popolazione")
 	var iprimo: int = _game.nearest_enemy(_player.position, 26.0)
 	h.eq(iprimo, 0, "e il nemico piu' vicino e' il bersaglio grosso davanti")
 	h.near(float(_horde.hp[0]), VITA_BERSAGLIO, 0.01,
 		"il bersaglio grosso ha vita altissima: non puo' morire e falsare la somma degli HP")
 	h.eq(int(_horde.hit_count), 0, "e nessun colpo e' partito durante l'allestimento")
+	print("upgrades: poligono di %d slot su %d nemici vivi, il resto a %.0f m"
+		% [slot, int(_horde.count), LONTANO])
+	return true
 
 # --- Tutte le misure, insieme --------------------------------------------------
 

@@ -1,8 +1,9 @@
 extends SceneTree
 ## Test dell'HUD di terminal-gun. -ui, milestone 2.
 ##
-## Verifica i tre numeri che m2 chiede all'interfaccia (piano sez. 1.1, criteri
-## n. 2 e n. 4, e la consegna di questa foglia):
+## Verifica i tre numeri che m2 chiede all'interfaccia, i numeri duplicati fra
+## un avvio e un restart, e il punto in cui l'HUD deve **leggere** invece di
+## sapere (piano sez. 1.1, criteri n. 2 e n. 4, e la consegna di questa foglia):
 ##
 ##   1. **barra XP in [0, next] sempre**: mai `NaN`, mai `INF`, mai una larghezza
 ##      negativa, nemmeno con `next` a zero e nemmeno con un `INF` o un `NaN`
@@ -11,7 +12,25 @@ extends SceneTree
 ##      **torna a 1 dopo il restart**;
 ##   3. **game over a 0 HP**, e che sparisce al restart;
 ##   4. **nessun nodo duplicato** fra due restart: l'HUD ha un numero di nodi
-##      fisso e lo conserva.
+##      fisso e lo conserva;
+##   5. **il numero di nemici viene dall'orda, non da un letterale**: l'HUD
+##      mostra il `count` che l'orda ha **adesso**, e lo segue quando l'orda
+##      cambia. La popolazione d'avvio e' un numero di `-orda`
+##      (`Run.population_of(1)`, in `src/sim/run.gd`) e non un dato di questa
+##      foglia: qui dentro non c'e' nessun `25` e nessun `200`, perche' un
+##      letterale diventa falso alla prima milestone che tocca la curva e,
+##      intanto, fa passare un HUD con un numero scritto dentro;
+##   6. **il numero che arriva all'HUD e' anche il numero che si vede**: le
+##      verifiche sui campi (`xp_ratio()`, `wave_ratio()`) non bastano, perche'
+##      un HUD puo' ricevere 0.995 e scrivere 1.0 sul `ProgressBar`. Ogni barra
+##      viene quindi confrontata anche sul **valore disegnato**, letto dal nodo.
+##      Il caso che ha reso la verifica necessaria e' `Range.step`, che vale
+##      0.01 per default e **arrotonda a scatti** quello che gli viene scritto:
+##      su un'onda da 200 uccisioni (`Run.population_of` e' di -orda) una
+##      uccisione vale 0.005, meta' scatto, e la barra dell'onda restava ferma
+##      per meta' onda. Il fix e' `step = 0.0` su tutte e tre le barre, e
+##      qui si verifica su tutte e tre perche' una decisione dichiarata solo in
+##      un commento decade senza rumore.
 ##
 ## ## Perche' due parti e non una
 ##
@@ -35,6 +54,21 @@ extends SceneTree
 ## costruendo l'altra foglia in parallelo. Il rumore e' voluto: un contatore
 ## d'onda fermo a 1 senza che nessuno lo noti e' il difetto che questa verifica
 ## deve rendere visibile.
+##
+## Il terzo numero che questa parte controlla, il **conteggio dei nemici**, non
+## arriva da `refresh()` ma dal canale di m1: `src/render/arena.gd::_process`
+## chiama `set_state(...)` con `Game.horde.count`. Quindi anche qui il confronto
+## e' sul contratto vero, e sullo stesso campo che il chiamante legge: il numero
+## che l'HUD mostra e' quello che `-orda` ha adesso, mai una copia messa qui.
+##
+## ## Perche' esiste `_tick` e non un `arena.call("_process")` solo
+##
+## I due canali muoiono in due modi diversi. Un'uccisione cambia `horde.count`
+## **e** `run.wave_killed`, quindi muove l'etichetta dei nemici (canale di m1,
+## `set_state`) e la barra d'onda (canale di m2, `refresh`) **nello stesso
+## istante**. Rilanciando un `_process` solo, si legge meta' della partita e si
+## conclude che l'HUD segue l'orda quando invece segue solo una delle due.
+## `_tick` chiama entrambi, ed e' l'unico posto che lo fa.
 ##
 ## ## La trappola del `const preload` (piano sez. 5.3)
 ##
@@ -68,6 +102,16 @@ const NOT_FINITE := [INF, -INF, NAN]
 ## e in `scenes/arena_main.tscn`: se un giorno cambiasse, fallirebbe qui e non in
 ## silenzio.
 const HUD_NODE := "Hud"
+
+## Un numero che **non** sta sulla griglia di arrotondamento del default di
+## `Range` (`step = 0.01`): 3.3333 non e' un multiplo di 0.01.
+##
+## Serve a provare che le barre disegnano il numero che l'HUD ha ricevuto e non
+## quello che il nodo ha arrotondato. Con lo step di default questa verifica
+## fallisce (3.33 contro 3.3333), ed e' esattamente il difetto che ha reso muta
+## la barra dell'onda: il dato giusto che non si vede. Non usare qui un valore
+## multiplo di 0.01, altrimenti la verifica passa senza aver mai provato niente.
+const OFF_GRID := 3.3333
 
 var _h: H = null
 var _ran: bool = false
@@ -118,6 +162,8 @@ func _run() -> void:
 		% [int(first["hud_nodes"]), int(second["hud_nodes"]), int(third["hud_nodes"])])
 	print("test_ui: un solo nodo \"%s\" sotto root in ogni avvio: %d / %d / %d"
 		% [HUD_NODE, int(first["huds"]), int(second["huds"]), int(third["huds"])])
+	print("test_ui: popolazione d'avvio letta da horde.count e mostrata dalla HUD: %d / %d / %d"
+		% [int(first["boot_pop"]), int(second["boot_pop"]), int(third["boot_pop"])])
 
 	quit(h.finish("test_ui"))
 
@@ -145,6 +191,7 @@ func _hud_alone(h) -> void:
 	h.check(not hud.is_game_over(), "all'avvio la partita non e' finita")
 
 	_xp_bar(h, hud)
+	_health_bar(h, hud)
 	_wave_counter(h, hud)
 	_game_over_screen(h, hud)
 
@@ -184,6 +231,43 @@ func _xp_bar(h, hud) -> void:
 	h.check(hud.xp_text().contains("4"),
 		"il testo della barra deve dire quanta XP manca: \"%s\"" % hud.xp_text())
 
+	# ## La stessa verifica sulla barra dell'XP, fuori dalla griglia del nodo
+	#
+	# `Range.step` vale 0.01 per default e arrotonda a scatti quello che gli viene
+	# scritto, quindi questa barra si salva solo per scala: con `max_value = 8` uno
+	# scatto e' un quarantesimo di barra, invisibile. Il difetto e' che si salva
+	# **per caso**, non perche' il nodo non arrotondi: `hud.gd` mette `step = 0.0`
+	# su tutte e tre le barre perche' qui il numero non e' di questa foglia e non
+	# e' niente di suo da ri-arrotondare. Il valore scelto e' fuori dalla griglia
+	# del default di proposito: 3.3333 non e' un multiplo di 0.01, e con lo step
+	# di default questa verifica fallirebbe invece di passare senza aver
+	# provato niente.
+	hud.set_progression(OFF_GRID, XP_SPAN)
+	h.near(hud.xp_bar_value(), OFF_GRID, 0.0001,
+		"la barra dell'XP deve disegnare il numero che le e' stato dato, anche se non sta sulla griglia di arrotondamento del nodo: se il nodo arrotonda, la barra mente e il difetto si vede solo a occhio")
+
+## La barra della vita: stessa regola delle altre due, e per la stessa ragione.
+##
+## `hud.gd` dichiara `step = 0.0` su tutte e tre le ProgressBar. Sulla barra della
+## vita il difetto non si vede, perche' il suo `max_value` e' 100 e uno scatto da
+## 0.01 ci sta dentro un decimo di pixel: si salva per **scala**, non perche' il
+## nodo smetta di arrotondare. Percio' qui la verifica serve a **bloccare la
+## decisione**: se qualcuno rimette il default di `Range` solo su questa barra,
+## la difetta non romperebbe niente oggi e romperebbe tutto alla prima
+## milestone che cambia la scala, che e' esattamente com'e' andata con la barra
+## dell'onda.
+func _health_bar(h, hud) -> void:
+	hud.set_state(OFF_GRID * 20.0, 100.0, 0, "-", 0, 1)
+	h.near(hud.health_bar_max(), 100.0, 0.0001, "il massimo della barra della vita e' quello dato")
+	h.near(hud.health_bar_value(), OFF_GRID * 20.0, 0.0001,
+		"la barra della vita deve disegnare i HP che le sono stati dati, non un numero arrotondato a scatti dal nodo: con il default di Range non si accorgerebbe nessuno, e la barra mentirebbe dal primo danno frazionario")
+
+	# E i due estremi, che sono i numeri che si vedono davvero in partita.
+	hud.set_state(100.0, 100.0, 0, "-", 0, 1)
+	h.near(hud.health_bar_value(), 100.0, 0.0001, "a piena vita la barra della vita e' piena")
+	hud.set_state(1.0, 100.0, 0, "-", 0, 1)
+	h.near(hud.health_bar_value(), 1.0, 0.0001, "a un HP la barra della vita e' quasi vuota, non vuota")
+
 ## Il contatore d'onda sale, e non scende mai sotto 1.
 func _wave_counter(h, hud) -> void:
 	hud.set_wave(4)
@@ -210,6 +294,25 @@ func _wave_counter(h, hud) -> void:
 	for raw in NOT_FINITE:
 		hud.set_wave_progress(raw)
 		_assert_wave_bar_sane(h, hud, "barra d'onda a %s" % raw)
+
+	# ## Il rapporto che il nodo riesce davvero a disegnare
+	#
+	# `wave_ratio()` legge un **campo**, e un campo puo' dire 0.995 mentre il
+	# `ProgressBar` ne disegna 1.0: e' il caso peggiore di tutti, perche' il
+	# numero e' arrivato giusto e non si vede, quindi un HUD che si ispeziona
+	# sembra a posto mentre a schermo mente. `Range.step` (che in Godot vale
+	# 0.01 per default) arrotonda a scatti quello che gli viene scritto, e su
+	# un'onda da 200 uccisioni una uccisione vale 0.005, cioe' meta' scatto: la
+	# barra non si muove affatto.
+	#
+	# Qui il rapporto e' scelto **fuori** dalla griglia di arrotondamento
+	# (0.995 non e' un multiplo di 0.01), altrimenti la verifica passerebbe
+	# senza aver mai provato niente.
+	hud.set_wave_progress(0.995)
+	h.near(hud.wave_ratio(), 0.995, 0.0001,
+		"la barra d'onda deve dire il rapporto che le e' stato dato")
+	h.near(hud.wave_bar_value(), 0.995, 0.0001,
+		"la barra d'onda deve poter disegnare un rapporto che non sta sulla griglia del nodo: se il nodo arrotonda, il numero arriva e non viene mostrato")
 
 ## La schermata di game over: compare, e sparisce. Comparire e basta non basta:
 ## una schermata che non si ritira e' un HUD che mente per il resto della partita.
@@ -279,26 +382,29 @@ func _open_arena(h, game: Node):
 
 ## Un avvio della partita vera, verificato come si verifica un boot.
 ##
-## Restituisce un dizionario con i due numeri da confrontare fra gli avvii: i
-## nodi dell'HUD e quanti nodi `%Hud` ci sono sotto `root`. Il secondo e' il
-## contatore che nessuno dei due test di m1 guarderebbe: se il restart creasse
-## un secondo HUD **senza liberare il primo**, il primo sarebbe gia' sparito dalla
-## scena e nessun test di numero di nemici lo noterebbe.
+## Restituisce un dizionario con i tre numeri da confrontare fra gli avvii: i
+## nodi dell'HUD, quanti nodi `%Hud` ci sono sotto `root`, e la popolazione
+## d'avvio **letta dall'orda** (non un letterale: e' il numero che l'HUD ha
+## mostrato, e serve alla stampa di `_run` per riportare un fatto misurato
+## invece di una copia di uno scritto qui). Il secondo e' il contatore che
+## nessuno dei due test di m1 guarderebbe: se il restart creasse un secondo HUD
+## **senza liberare il primo**, il primo sarebbe gia' sparito dalla scena e
+## nessun test di numero di nemici lo noterebbe.
 func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	if not h.check(arena != null, "avvio %d: la scena non e' stata caricata" % round_no):
-		return {"arena": null, "hud_nodes": -1, "huds": -1}
+		return {"arena": null, "hud_nodes": -1, "huds": -1, "boot_pop": -1}
 	var hud = arena.get_node_or_null(HUD_NODE)
 	if not h.check(hud != null, "avvio %d: la scena deve avere il nodo \"%s\"" % [round_no, HUD_NODE]):
-		return {"arena": arena, "hud_nodes": -1, "huds": -1}
+		return {"arena": arena, "hud_nodes": -1, "huds": -1, "boot_pop": -1}
 
 	var huds := _count_named(root, HUD_NODE)
 	h.eq(huds, 1, "avvio %d: sotto root deve esserci un solo nodo \"%s\": se il restart ne lascia due, nessuno dei test di m1 lo vede" % [round_no, HUD_NODE])
 
-	# L'HUD alimentato dalla scena vera, non a mano: si esegue il `_process` di
-	# arena, che e' il chiamante di `set_state` nella partita.
-	arena.call("_process", 0.0)
-	h.check(hud.enemy_text().contains("200"),
-		"avvio %d: la HUD alimentata dalla scena deve mostrare i 200 nemici: \"%s\"" % [round_no, hud.enemy_text()])
+	# L'HUD alimentato dalla scena vera, non a mano: si rilanciano i due
+	# `_process` della partita, che sono i due canali di ingresso dell'HUD
+	# (`set_state` da arena, `refresh` dall'HUD stesso). Vedi `_tick`.
+	_tick(arena, hud)
+	var boot_pop := _enemies_from_contract(h, game, arena, hud, round_no)
 	h.eq(hud.wave_number(), 1, "avvio %d: il contatore d'onda parte da 1" % round_no)
 	h.check(not hud.game_over_visible(), "avvio %d: nessuna schermata di game over all'avvio" % round_no)
 
@@ -306,7 +412,148 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	_wave_from_contract(h, game, hud, round_no)
 	_death_from_contract(h, arena, hud, round_no)
 
-	return {"arena": arena, "hud_nodes": _count_nodes(hud), "huds": huds}
+	return {"arena": arena, "hud_nodes": _count_nodes(hud), "huds": huds, "boot_pop": boot_pop}
+
+## Il numero di nemici che l'HUD mostra e' quello che l'orda ha **adesso**, e il
+## numero lo prende l'orda, non questo file.
+##
+## Qui dentro non c'e' nessun letterale, ed e' il punto. La popolazione d'avvio e'
+## di `-orda` (`Run.population_of(1)`, in `src/sim/run.gd`) ed e' gia' cambiata
+## una volta, dalla milestone 1 a m4: un `200` scritto in questa riga non
+## sarebbe un test sbagliato, sarebbe un test che aspetta di essere riscritto
+## alla prossima milestone che tocca la curva, e intanto fa passare un HUD con un
+## numero stampato dentro. Leggendo `horde.count` al momento del confronto, il
+## test dice una cosa di piu': che l'HUD **legge**.
+##
+## Restituisce il numero letto, o -1 se non e' stato possibile leggerlo: serve
+## alla stampa di `_run`, che riporta la popolazione d'avvio **misurata** invece
+## di ripeterne una copia.
+func _enemies_from_contract(h, game, arena, hud, round_no: int) -> int:
+	# Il contratto e' la strada che usano gia' i due chiamanti veri di questo
+	# numero: `src/render/arena.gd::_enemies()` per il valore che arriva a
+	# `set_state`, e `hud.gd` per gli altri. Se `Game.horde` non c'e', l'HUD non
+	# ha nulla da leggere. `is_instance_valid` perche' dopo un restart il
+	# contratto puo' puntare ancora all'orda liberata: chiamare un metodo su
+	# un'istanza liberata e' un errore a ogni frame.
+	var horde = game.get("horde")
+	if not h.check(horde is Object and is_instance_valid(horde),
+			"avvio %d: il contratto deve esporre un \"horde\" valido: l'HUD non ha nulla da leggere" % round_no):
+		return -1
+	# E deve essere l'orda **di questa scena**: dopo un restart il contratto
+	# punta alla nuova, ma se un giorno non puntasse piu' a nessuna il confronto
+	# sarebbe fra due partite diverse e passerebbe lo stesso.
+	if not h.check(horde is Node and arena.is_ancestor_of(horde),
+			"avvio %d: l'orda del contratto non e' un nodo di questa scena: il confronto sarebbe con un'altra partita" % round_no):
+		return -1
+
+	var raw = (horde as Object).get("count")
+	if not h.check(typeof(raw) == TYPE_INT or typeof(raw) == TYPE_FLOAT,
+			"avvio %d: l'orda non espone \"count\": il nome su cui l'HUD fa affidamento non esiste piu'" % round_no):
+		return -1
+	var alive: int = int(raw)
+	h.check(alive > 0,
+		"avvio %d: all'avvio l'orda deve avere nemici vivi, ne ha %d" % [round_no, alive])
+
+	var shown := _shown_enemies(hud)
+	if not h.check(shown >= 0,
+			"avvio %d: la scritta dei nemici deve finire con un numero: \"%s\"" % [round_no, hud.enemy_text()]):
+		return alive
+	h.eq(shown, alive,
+		"avvio %d: la HUD alimentata dalla scena deve mostrare i %d nemici che l'orda ha adesso" % [round_no, alive])
+
+	_hud_follows_the_horde(h, arena, horde, hud, round_no)
+	return alive
+
+## L'HUD **segue** il conteggio, non lo ha stampato una volta sola.
+##
+## Il confronto di sopra dice che i due numeri sono uguali, non che il primo
+## venga dal secondo: un HUD con un numero dentro passerebbe anche quello, e
+## passerebbe proprio nel giorno in cui `-orda` cambia la curva. Quindi qui si
+## ammazza un nemico per davvero, con l'API pubblica di `-orda`
+## (`damage_enemy`, che toglie il nemico e riallinea gli array: scrivere su
+## `count` a mano romperebbe l'invariante `transforms.size() == count` che
+## `horde.gd` dichiara) e poi si rilegge **tutto** quello che l'HUD mostra.
+##
+## ## Perche' `_tick` e non un `call("_process")` solo
+##
+## L'HUD ha **due** canali di ingresso e muoiono in due modi diversi:
+## `src/render/arena.gd::_process` chiama `set_state(...)` (vite, punteggio,
+## livello, nemici, arma), mentre `src/ui/hud.gd::_process` chiama `refresh()`,
+## che legge il contratto (XP, numero d'onda, barra d'onda, stato della partita).
+## Rilanciare solo il primo lascia il secondo fermo al valore di prima:
+## un'uccisione cambia `horde.count` **e** `run.wave_killed`, quindi muove
+## l'etichetta dei nemici e la barra dell'onda insieme, e un test che ne
+## rilesse uno solo misurerebbe meta' della partita. `_tick` chiama
+## entrambi, in quest'ordine, ed e' l'unico posto dove lo fa.
+##
+## ## Cosa NON tocca questa funzione
+##
+## La morte di un nemico non tocca nessuna delle altre verifiche: il passo di
+## simulazione che chiuderebbe l'onda e cambierebbe il numero d'onda sta in
+## `horde.step()`, e qui non gira. Percio' `horde.wave` resta quello che era e
+## il contatore d'onda non sale: quello lo verifica `_wave_from_contract`.
+func _hud_follows_the_horde(h, arena, horde, hud, round_no: int) -> void:
+	if not h.check(horde.has_method("damage_enemy"),
+			"avvio %d: l'orda non espone \"damage_enemy\": questo test non puo' provare che l'HUD segua il conteggio" % round_no):
+		return
+	var prima: int = int(horde.get("count"))
+	if not h.check(prima > 0, "avvio %d: non c'e' nessun nemico da ammazzare" % round_no):
+		return
+	var ucciso: bool = horde.call("damage_enemy", 0, 1000000.0, Vector3.ZERO)
+	if not h.check(ucciso, "avvio %d: damage_enemy sul primo nemico avrebbe dovuto ucciderlo" % round_no):
+		return
+
+	_tick(arena, hud)
+
+	# Canale di m1: l'etichetta dei nemici, che arriva con `set_state`.
+	var adesso: int = int(horde.get("count"))
+	h.eq(adesso, prima - 1,
+		"avvio %d: un nemico ammazzato deve abbassare il conteggio dell'orda" % round_no)
+	h.eq(_shown_enemies(hud), adesso,
+		"avvio %d: la HUD deve seguire il conteggio dell'orda, non un numero scritto dentro" % round_no)
+
+	# Canale di m2: la barra dell'onda, che arriva con `refresh()`. La stessa
+	# uccisione la muove, perche' `horde.gd::_kill` chiama `run.register_kill()`:
+	# verificare solo l'etichetta e passarebbe con una barra d'onda ferma a 1.0
+	# per tutta l'onda, che e' il difetto che questa funzione cerca.
+	if not horde.has_method("wave_bar_ratio"):
+		print("test_ui: nota, avvio %d: l'orda non espone \"wave_bar_ratio()\": non posso verificare che la barra dell'onda segua l'uccisione" % round_no)
+		return
+	var atteso: float = horde.call("wave_bar_ratio")
+	h.finite(atteso, "avvio %d: wave_bar_ratio() dopo l'uccisione deve essere un numero" % round_no)
+	h.near(hud.wave_ratio(), atteso, 0.001,
+		"avvio %d: dopo un'uccisione la barra d'onda dell'HUD deve essere il numero di -orda" % round_no)
+	h.near(hud.wave_bar_value(), atteso, 0.001,
+		"avvio %d: dopo un'uccisione la barra d'onda **disegnata** deve essere il numero di -orda, non quello di prima" % round_no)
+	# E il contatore non deve essere salito: l'uccisione non e' un cambio d'onda.
+	h.eq(hud.wave_number(), int(horde.get("wave")),
+		"avvio %d: un'uccisione non cambia l'onda: il contatore deve dire ancora quello dell'orda" % round_no)
+
+## I due `_process` della partita vera, in quest'ordine.
+##
+## Non e' un vezzo: sono i due canali dichiarati in testa al file, e un test che
+## ne rilancia uno solo legge meta' dei numeri dell'HUD. `delta` a zero e' la
+## scelta giusta perche' nessuno dei due deve muovere qualcosa: qui si vuole
+## il ridisegno, non un passo di simulazione.
+func _tick(arena, hud) -> void:
+	arena.call("_process", 0.0)
+	hud.call("_process", 0.0)
+
+## L'intero **scritto** nella Label dei nemici, o -1 se non c'e'.
+##
+## Si prende l'ultima parola e la si prova come intero invece di usare
+## `contains()`: `contains("25")` accetterebbe anche una Label che dice
+## "ENEMIES 250", e un numero sbagliato che *sembra* quello giusto e'
+## esattamente il difetto che questa verifica cerca.
+func _shown_enemies(hud) -> int:
+	var text: String = hud.enemy_text()
+	var cut: int = text.rfind(" ")
+	if cut < 0:
+		return -1
+	var tail: String = text.substr(cut + 1).strip_edges()
+	if not tail.is_valid_int():
+		return -1
+	return int(tail)
 
 ## L'XP che l'HUD espone e' quello che `-gameplay` espone. E' l'unico modo che
 ## l'HUD abbia di prendere i numeri che non sono suoi: se il campo si chiama
@@ -399,7 +646,7 @@ func _wave_from_contract(h, game: Node, hud, round_no: int) -> void:
 		h.near(hud.wave_ratio(), expected, 0.001,
 			"avvio %d: la barra dell'HUD deve essere il numero di -orda, non uno ricalcolato" % round_no)
 		h.near(hud.wave_bar_value(), expected, 0.001,
-			"avvio %d: la barra d'onda disegnata deve essere il numero di -orda" % round_no)
+			"avvio %d: la barra d'onda disegnata deve essere il numero di -orda: se il nodo arrotonda quello che gli viene scritto, il numero arriva e non viene disegnato" % round_no)
 	else:
 		print("test_ui: nota, avvio %d: Game.horde non espone ancora \"wave_bar_ratio()\": "
 			% round_no
@@ -414,7 +661,7 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 	if not h.check(player is Object, "avvio %d: la scena deve avere il nodo Player" % round_no):
 		return
 	player.set("hp", 0.0)
-	arena.call("_process", 0.0)
+	_tick(arena, hud)
 	h.check(hud.game_over_visible(),
 		"avvio %d: il player a 0 HP deve mostrare la schermata di game over" % round_no)
 	h.check(hud.health_ratio() <= 0.001,
@@ -423,7 +670,7 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 	# E il ritorno: il restart rimette il giocatore in piedi, quindi la
 	# schermata non deve essere un'insegna appesa per sempre.
 	player.set("hp", 100.0)
-	arena.call("_process", 0.0)
+	_tick(arena, hud)
 	h.check(not hud.game_over_visible(),
 		"avvio %d: tornato in vita il giocatore, la schermata di game over deve sparire" % round_no)
 

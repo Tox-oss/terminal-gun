@@ -18,7 +18,7 @@ Milestone 1 — **vertical slice giocabile**. Deve valere tutto questo, verifica
 |---|---|---|
 | 1 | La porta è verde | `godot --headless --path . --script tools/gate.gd` esce `0` e stampa `GATE: 4/4` |
 | 2 | La scena si apre senza errori | `godot --headless --path . --quit-after 300` esce `0`, zero `SCRIPT ERROR` nel log |
-| 3 | 200 nemici vivi, senza un nodo per nemico | `node_count < 120` con `horde.count == 200` (test arena) |
+| 3 | Il motore regge 200 nemici vivi **senza un nodo per nemico** | `node_count < 120` con `horde.count == 200` **raggiunto durante la partita** (test arena). **Riscritto il 2026-10-12**: prima diceva `horde.count == 200` *al primo frame*, che era una scelta di design travestita da criterio — vedi §1.4. Il tetto di 120 e il numero 200 **non cambiano**: cambia *quando* si misura |
 | 4 | Il player spara e uccide | `tests/test_arena.gd` sulla scena **vera**: HP scende di **esattamente un colpo** e resta fermo (30 frame, `pierce=3`, proiettile ancora in volo), knockback ≥ 0.3 unità **sulle specie su cui è progettato per funzionare** (§5.4). `tests/test_gameplay.gd` copre danno-una-volta-sola anche con nemici sovrapposti, traiettoria entro 5°, e l'impulso passato **grezzo e non normalizzato** |
 | 5 | Si sente il "bonk" | `assets/sfx/bonk.wav` esiste, < 0.6 s, 44100 Hz mono |
 | 6 | Niente binari nel Git normale | `git lfs ls-files` elenca `.glb` e `.wav` |
@@ -123,7 +123,181 @@ significato. Sono due semantiche diverse e il vertice non le sceglie al posto su
 è di -orda, il commento che la dichiara è obbligatorio**, e il criterio n. 3 di m3 vale con
 qualsiasi delle due purché il test sappia quale sta usando.
 
-## 2. Toolchain
+## 1.4 Milestone 4 — il ritmo: la partita parte piccola e cresce per onda
+
+**L'unica milestone di questo piano che nasce da una persona che ha giocato.** m1, m2 e m3
+sono nate da misure; m4 nasce da un foglio di feedback di chi ci ha passato trenta secondi
+giocando, e quella è la classe di informazione che mancava del tutto.
+
+**Il fatto, con le parole di chi ha giocato:** *«troppi nemici da subito, non riesco neanche a
+muovermi, non subisco danni»*. I primi due sintomi sono il tema di m4; il terzo è un difetto
+diverso e più grosso, dichiarato subito sotto e **fuori** da m4.
+
+**La causa dei primi due è una singola riga.** `src/sim/horde.gd:212` chiama
+`_populate(MAX_ENEMIES)` dentro `_build()`: **200 nemici vivi al primo frame**, e poi
+`_top_up()` li riporta a 200 **a ogni passo**. Quindi l'arena non è piena all'inizio, è piena
+**per sempre**, e nessun colpo la svuota: è il numero di `population` a tenerla lì. Non è un
+difetto di conteggio, è una scelta di design scritta dentro un criterio di test.
+
+**Perché quel numero esisteva, e perché va distinto da quello che misurava.** Il criterio n. 3
+di m1 chiede `node_count < 120` **con** `horde.count == 200`. La parte che vale è la prima:
+*il motore regge 200 nemici senza un nodo per nemico*. La seconda dice che *la partita deve
+iniziare con 200*, e quella è una scelta di design che nessuno aveva mai visto applicata.
+m4 le separa: **la capacità resta un criterio, il numero iniziale diventa una curva**.
+
+Fuori m4, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | La porta è verde | `GATE: 8/8` (il gate conta i file su disco, §6) e `PERM: 15/15` rieseguite **dal vertice** |
+| 2 | **La capacità non regredisce** | il criterio n. 3 di m1 è riscritto: `node_count < 120` con `horde.count == 200` **raggiunto durante la partita**, non al primo frame. Il tetto di 120 e il numero 200 restano quelli: cambia **quando** si misura, non quanto si permette |
+| 3 | **La popolazione cresce per onda** | `population` strettamente crescente da `wave 1` a `wave N`, e **mai** sopra `MAX_ENEMIES`. Nessuna cifra scritta in questo piano: la curva la sceglie la misura (§1.4b) |
+| 4 | **L'arena non si riempie in un frame** | il tempo di riempimento di un'onda è **maggiore di zero** e **misurato**: il numero di nemici vivi non può saltare da `0` a `population` nello stesso passo. È il sintomo «arrivano tutti insieme», ed è il primo a dover sparire |
+| 5 | **L player's velocità resta quella** | la tabella delle specie **non si tocca** in m4, e il motivo è dichiarato sotto. Se la rampa non basta, è m5, con il suo protocollo |
+| 6 | **I denti, provati e rimossi** | forzata una `population` costante e piatta, l'asserzione di crescita deve dire `FAIL`; poi rimossa. Un'invariante che non sa fallire non è un'invariante |
+
+### 1.4a Il difetto più grosso che la stessa partita ha scoperto: **il giocatore non può morire**
+
+`take_damage` esiste (`src/player/player.gd:285`) e **non è chiamato da nessuna parte del gioco**.
+Gli unici chiamanti al mondo sono in `tests/test_gameplay.gd:714` e `tests/test_upgrades.gd:577`.
+
+| conseguenza | perché è vera |
+|---|---|
+| **game over irraggiungibile** in una partita vera | serve `hp == 0`, e `hp` non scende mai |
+| **restart irraggiungibile** in una partita vera | `player.restart_run()` scatta solo `if ... is_dead()`, e non lo si è mai |
+| **il criterio n. 4 di m2 è verde sul vuoto** | il test applica il danno **a mano** e misura che la macchina reagisce. La macchina reagisce; niente nel gioco la fa reagire mai |
+
+**Questo è il difetto più importante trovato finora, e nessuna porta lo prende.** I sei criteri
+di m1 e i sei di m2 sono tutti verdi, e tutti quanti misurano una macchina che il gioco non
+chiama: il danno lo mette il test, lo spawn i test lo pilotano a mano, il game over lo innesca
+il test. **Il gate misura che i pezzi funzionino, non che il gioco li usi** — che è la differenza
+fra `GATE: 8/8` e un gioco.
+
+**Perché è fuori da m4 e non dentro.** Una wave fa una cosa. Il ritmo degli spawn e la sorgente
+di danno sono due difetti distinti, in file distinti, con test distinti, e misurarli insieme
+renderebbe impossibile sapere quale dei due ha cambiato il numero. **m5 è questo difetto**, e
+come m4 vuole la stessa cosa: un numero che nessuno aveva mai misurato giocando.
+
+**E perché non è «un bug» ma una lacuna di specifica.** Il piano non ha mai scritto «i nemici
+fanno danno». I criteri di m1 e m2 parlano di danno **al nemico**, mai al giocatore. Quindi non
+è che qualcuno ha scritto il codice male: è che **nessuno ha scritto la regola**, e il codice
+l'ha resa fedele. È la stessa classe del `dropped` che m4 non ha ancora scritto: una parola che
+manca diventa un comportamento che nessuno ha deciso.
+
+### 1.4b Il protocollo: perché qui non c'è un numero, e come si sceglie
+
+**Nessuna cifra di questa milestone è scritta sopra.** È la lezione di §1.2 applicata al suo
+caso più pericoloso: lì l'ipotesi era un margine di 0,011 su una soglia, qui sarebbe il numero
+di nemici con cui qualcuno si sveglia la mattina. Un numero scelto a occhio da chi non ha
+giocato è esattamente il difetto che m4 sta correggendo.
+
+**Le mosse, in quest'ordine.**
+
+1. **Misurare il prima, senza cambiare niente.** Quanti secondi servono oggi, dall'avvio, perché
+   l'arena raggiunga la sua popolazione piena? Quanto ci mette un'onda a svuotarsi con la
+   popolazione costante? Il numero che esce è la base, e va **stampato** in testa al file di
+   test con il perché.
+2. **Scegliere la curva sul dato, non sull'estetica.** La crescita per onda è un **invariante**
+   (§1.3 criterio n. 3) e la sua forma è una **scelta**: una curva, non un numero. La
+   costante va dichiarata in `src/sim/run.gd` con il motivo e con il numero che l'ha prodotta,
+   come fa `BUCKET_SLOTS` con il suo. Se il primo tentativo è sbagliato, si cambia e si
+   **dichiara** che il primo era sbagliato.
+3. **Il tempo di riempimento è il criterio che misura il sintomo**, non la curva. «Arrivano
+   tutti insieme» è un fatto sul **tempo**, e una curva che cresce per onda ma si riempie
+   comunque in un frame ha risolto il conteggio e lasciato il sintomo.
+
+**Perché le tabelle delle specie non si toccano, e la tentazione è forte.** Il sintomo
+include «troppo veloci, troppo presto», e la risposta immediata sarebbe abbassare le
+velocità. È **escluso** in m4 per tre motivi, e sono motivi, non preferenze:
+
+- **c'è un accoppiamento misurato.** §1.2 ha stabilito che la velocità d'inseguimento entra
+  nel knockback: la velocità netta dopo un colpo è `KNOCKBACK × (1 - resistenza) - inseguimento`,
+  e il criterio n. 4 di m1 asserva uno **spostamento** sul runner che sta a **0,011** dalla
+  soglia. Cambiare le tabelle muove un numero che oggi passa con margine sottile, e lo muove
+  per un motivo che nessuno ha isolato.
+- **il sintomo è probabilmente collaterale.** 200 nemici che convergono tutti insieme sono un
+  muro che avanza a 6,6 m/s; toglierne 170 cambia l'esperienza più di quanto cambi la velocità
+  del singolo. **La rampa va provata prima del nerf**, perché è la leva maggiore.
+- **una wave fa una cosa.** Se m4 cambiasse anche le velocità, un peggioramento del knockback
+  sarebbe ambiguo: effetto della rampa o effetto della tabella? 
+
+Se dopo m4 il sintomo «troppo veloci» resta, quello è **m5** o **m6**, con il suo protocollo e
+la sua misura, non una riga cambiata di sfuggita.
+
+### 3.6 Scope della milestone 4: due foglie, e una riga che non torna indietro
+
+Come m3, e per la stessa ragione: le scope sono **già nelle allowlist**, quindi m4 non richiede
+alcun atto dell'utente e `PERM: 15/15` va confermata **prima** di lanciare.
+
+| agente | modello | in m4 scrive | note |
+|---|---|---|---|
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/horde.gd`, `src/sim/run.gd`, `src/sim/spawner.gd`, `tests/test_orda.gd`, `tests/test_gameloop.gd` | `_build()` **non** riempi più a `MAX_ENEMIES` al primo frame; `_top_up()` **non** riporta a `population` in un passo; la curva per onda sta in `run.gd`. **`src/sim/enemy.gd` non si tocca**: le tabelle delle specie sono fuori, per i tre motivi di §1.4b |
+| `terminal-gun-arena` | `space-bunny-free#max` | `tests/test_arena.gd` | riscrive il criterio n. 3 di m1 sulla **scena vera**: `node_count < 120` con `horde.count == 200` **durante** la partita, non al primo frame |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | i criteri e la riscrittura del n. 3; il contratto se serve una superficie nuova |
+
+### 3.6-bis I quattro file che mancavano, e perché la tabella sopra li aveva persi
+
+**Errore del vertice, misurato il 2026-10-12, non dichiarato.** m4 ha cambiato una cosa che
+non è sua: **la popolazione all'avvio**. E ci sono **tre test di altri due proprietari** che
+affidavano a quel numero. Nessuno dei tre file era nella tabella qui sopra, quindi nessuno li ha
+toccati, e il primo gate di m4 è tornato **`GATE: 3/8`**.
+
+| test | cosa si aspettava | file di chi |
+|---|---|---|
+| `tests/test_progression.gd` | «l'orda della scena vera parte con **200** nemici vivi» | `-gameplay` |
+| `tests/test_upgrades.gd` | lo stesso, e «il poligono ha lasciati vivi tutti i 200 nemici» | `-gameplay` |
+| `tests/test_ui.gd` | «la HUD alimentata dalla scena deve mostrare i **200** nemici», ne ha mostrati 25 | `-ui` |
+
+**Perché è la stessa classe del difetto di m2-w1, in una forma che quella non aveva.** Lì il
+piano assegnava path che nessuno aveva messo nelle allowlist: le allowlist erano sbagliate.
+Qui le allowlist sono **giuste** — `-gameplay` e `-ui` hanno già quei tre file nei propri allow
+`edit` — e il difetto è che **io non li avevo assegnati a nessuno**. Il file aveva un
+proprietario e un compito, ma nessuno gli aveva detto che il compito era cambiato.
+
+**La regola che ne esce, e che vale da subito: quando il vertice riscrive un criterio, deve
+chiedersi chi altro ci fa affidamento.** Un criterio è un contratto con chi lo verifica, e
+cambiarne il testo cambia il lavoro di **tutti** quelli che ci si appoggiano, non solo di chi
+lo esegue. Il modo per trovarli non è indovinare: è `grep` del numero che ho cambiato su
+`t**/test_*.gd`, fatto **prima** di scrivere la tabella di scope.
+
+### 4.4 Onde della milestone 4
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m4-w0** | vertice | — | criterio n. 3 di m1 riscritto **nel piano**, specifica scritta, `PERM: 15/15` confermata prima di lanciare |
+| **m4-w1** | orda ∥ arena | 2 agenti, una stessa risposta | **NON chiusa**: `GATE: 3/8`, cinque fallimenti su tre cause |
+| **m4-w2** | orda ∥ arena ∥ gameplay ∥ ui | 4 agenti, una stessa risposta | `GATE: 8/8` exit 0, `--quit-after 300` pulito, denti provati e rimossi, rieseguiti **dal vertice** |
+
+**m4-w2 ha quattro foglie e le scope sono disgiunte**: `-orda` su `src/sim/**` e i suoi due
+test, `-arena` su `test_arena.gd`, `-gameplay` su `test_progression.gd` e `test_upgrades.gd`,
+`-ui` su `test_ui.gd`. Nessuna riga di permesso nuova: quei quattro file sono **già** negli
+allow `edit` dei rispettivi proprietari, che è la differenza rispetto al caso di m2-w1.
+
+**Un file, un proprietario, e la riga che non torna indietro**: `src/sim/spawner.gd` è di
+`-orda` anche se nessuno lo aveva nominato prima in una wave. Non è una riapertura di scope, è
+il file che contiene `layout_point` e `spawn_point`, cioè **la disposizione iniziale** che è il
+soggetto di m4. Va detto qui perché è una scoperta dell'ondata, non una cosa che il piano sapeva.
+
+**Il criterio n. 3 di m1 è del vertice, non di `-arena`.** Il testo del criterio è in questo
+file e il vertice lo riscrive **prima** di lanciare; `-arena` riceve il numero nuovo già scritto
+e lo rende verificabile. È l'ordine giusto: un test non riscrive il criterio che lo giudica.
+
+### 4.4 Onde della milestone 4
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m4-w0** | vertice | — | criterio n. 3 di m1 riscritto **nel piano**, specifica scritta, `PERM: 15/15` confermata prima di lanciare |
+| **m4-w1** | orda ∥ arena | 2 agenti, una stessa risposta | `GATE: 8/8` exit 0 e `--quit-after 300` pulito, rieseguiti **dal vertice**, e i denti provati e rimossi |
+| **m4-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+**Il rischio di questa onda, dichiarato prima che succeda.** `-arena` riscrive l'asserzione del
+criterio n. 3 mentre `-orda` cambia il numero che quell'asserzione misura: è una **race di
+significato**, non di file. I file sono disgiunti, ma se `-arena` scrive il tetto prima che
+`-orda` abbia deciso la curva, il test asserisce contro un numero che non esiste più. Il
+rimedio è l'ordine: **il vertice scrive il criterio con la curva dichiarata, e `-orda` non può
+cambiarla senza dirlo.**
+
+
 
 Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nessuno deve cercare i binari per conto proprio: legge `tools/env.sh`.
 
@@ -496,6 +670,73 @@ Il verde di `PERM: 15/15` da solo non bastava a dichiarare il debito chiuso: sen
 la terza riga sarebbe stato lo stesso numero di una sessione **non governata**, che è
 compatibile con `15/15`. La differenza tra le due è un `Permission denied`, e il piano la
 dichiarava non misurata da nessuna parte.
+
+### Le onde della milestone 4, e i quattro criteri chiusi
+
+| onda | agenti | esito | gate |
+|---|---|---|---|
+| **m4-w0** | vertice | criterio n. 3 di m1 riscritto **prima** di lanciare; specifica §1.4/§1.4a/§1.4b/§3.6 scritta | `PERM: 15/15` confermata prima di lanciare |
+| **m4-w1** | orda ∥ arena | misura del «prima» fatta **prima** di toccare il codice; curva e meccanismo in `src/sim/`; bonus: `layout_point` metteva un nemico **a raggio 0**, cioè addosso al giocatore | **`GATE: 3/8`**, cinque fallimenti su tre cause |
+| **m4-w2** | orda, arena, gameplay, ui | `test_gameloop` chiuso; `test_arena` ricompilato; i due test di `-gameplay` e quello di `-ui` riallineati **sulla relazione, non sul numero** | `GATE: 7/8`: restava `test_ui` |
+| **m4-w3** | arena ∥ ui | `-arena`: denti **provati due volte e rimossi**, costo a orologio **2,38 s**. `-ui`: **smentita la mia ipotesi** con la misura, e trovato il difetto vero | `GATE: 7/8` |
+| **m4-w4** | ui | `step = 0.0` sulle tre `ProgressBar`, in `scenes/hud.tscn`; denti riprovati **prima** del fix | **`GATE: 8/8`**, `--quit-after 300` pulito, `PERM: 15/15`, rieseguiti dal vertice |
+
+### I numeri di m4, prima e dopo
+
+| cosa | prima | dopo |
+|---|---|---|
+| vivi al primo frame | **200** | **25** (`Run.POP_BASE`) |
+| primo contatto col giocatore | **0,02 s** | **2,28 s** |
+| riempimento da 0 a pieno | **1 passo** (0,0167 s) | **188 passi** (3,13 s) |
+| curva per onda | piatta a 200 | 25/50/75/100/125/150/175/**200 all'onda 8** |
+| i 200 arrivano | al primo frame | dopo **16 538 passi = 275,63 s** di partita |
+
+**Il numero che nessuno aveva previsto e che vale più di tutti**: `Spawner.layout_point` metteva
+l'indice `count - 1` a **raggio 0** — cioè **un nemico nasceva esattamente addosso al giocatore
+al primo frame**. Non era «troppi nemici»: era **un nemico dentro il giocatore**, e spiega da
+solo il «non riesco a muovermi» che nessuna porta aveva mai visto.
+
+### Il difetto che m4 ha trovato per strada, e che nessun criterio guardava
+
+`ProgressBar.step` in Godot vale **0,01** di default. Su un'onda da 200 uccisioni **una
+uccisione vale 0,005 = metà scatto**, e la barra **non si muoveva**. Il numero di `-orda`
+arrivava giusto (`hud.wave_progress = 0.995`) e la barra disegnava `1.0`: il dato entrava e non
+si vedeva.
+
+Il merito di averlo trovato è di `-ui`, e il merito del metodo è che **ha smentito la mia
+ipotesi prima di confermarla**: io avevo scritto che l'ordine di lettura era sbagliato, e la
+misura ha detto no. Poi ha corretto anche una premessa mia sbagliata sulla barra della vita
+(`step = 0.01` non è «uno scatto per HP intero», è per centesimo: l'intero lo fa già la Label).
+
+**Il fix è in `scenes/hud.tscn` e non in `hud.gd`**, dichiarato con il perché: `step` è una
+proprietà del **nodo**, come il `show_percentage` due righe sotto, e scriverla nel codice che
+*aggiorna* la barra la renderebbe un valore perdibile a ogni rigenerazione della scena.
+`step = 0.0` su **tutte e tre** le barre, non solo quella che falliva: il difetto non è «la barra
+dell'onda è speciale», è che **una `ProgressBar` usata come display puro del numero di un'altra
+foglia ne arrotonda il valore**. Chi aggiungerà una quarta barra lo eredita dalla scena senza
+doverlo riscoprire — che è esattamente com'è andata con `Run.population_of`.
+
+### I due difetti che m4 **non** ha chiuso, dichiarati
+
+- **§1.4a: il giocatore non può morire.** `take_damage` non è chiamato da nessuna parte del
+  gioco. Game over e restart restano irraggiungibili in una partita vera. È **m5**.
+- **Le velocità delle specie non sono state toccate**, per i tre motivi di §1.4b. Il sintomo
+  «troppo veloci» è stato ridotto di fatto dalla rampa (il primo contatto è passato da 0,02 s
+  a 2,28 s), ma **non è stato misurato di nuovo**. Se resta, è **m6** con il suo protocollo, e
+  non una riga cambiata di sfuggita.
+
+### Una cosa che va detto sul metodo, e non è un elogio
+
+**m4 è costata quattro onde invece di una, e tre delle quattro cause erano evitabili.** La
+prima è stata mia: la tabella di scope non comprendeva tre file di altri due proprietari, e
+l'ho trovata con `grep` **dopo** che il gate era rosso, mentre avrei potuto farla prima (§3.6-bis).
+La seconda è stata che due foglie hanno esaurito i passi e consegnato a metà. La terza è stata
+un'intera onda persa perché due foglie non sapevano che **i comandi composti sono negati**.
+
+L'ultima è la più umiliante e la più utile: la mia stessa allowlist nega `godot ...; echo` e
+permette `godot ...` da solo, e l'ho scoperto **su me stesso** in questa sessione. Due foglie
+hanno perso un'onda intera per la stessa cosa che sapevo da ore e non ho scritto nei brief.
+**Scrivere la cosa che si è imparata nel prompt delle foglie è un atto, non un dettaglio.**
 
 ### Le onde della milestone 3
 

@@ -15,6 +15,36 @@ extends SceneTree
 ##      nodi, oggetti e memoria;
 ##   6. `damage_enemy` uccide e il conteggio scende, per scambio-ultimo.
 ##
+## ## LA MISURA DEL PRIMA, e perche' questo file la porta in testa
+##
+## Il numero di sotto e' la base di tutta la milestone 4, ed e' stato misurato
+## **prima** di toccare una riga di `src/sim/`. Strumento: questo stesso file,
+## con un blocco di misura temporaneo poi rimosso, sull'orda isolata con il fuoco
+## al centro dell'arena (raggio 28 m) e passo fisso 1/60 s.
+##
+## | cosa si misura | prima di m4 | dopo m4 |
+## |---|---|---|
+## | nemici vivi al **primo frame** | **200** | **25** (`Run.POP_BASE`) |
+## | tempo per arrivare alla popolazione piena, dall'avvio | **0.0000 s** (0 passi: era gia' pieno) | 0.0000 s (25, che e' il tetto dell'onda 1) |
+## | tempo per riempire **dopo uno svuotamento totale** | **0.0167 s** (1 passo, da 0 a 200) | **3.13 s** (188 passi, da 0 a 25) |
+## | primo contatto, nessun vivo entro 3 m dal bersaglio | **t = 0.02 s** | **t = 2.28 s** |
+## | 25 nemici entro 6 m dal bersaglio | **t = 1.68 s** | **t = 5.52 s** |
+## | a regime (t = 20 s) con 200 vivi | **104 entro 6 m** (52%) | 76 entro 6 m su 160 vivi (il campo e' ancora in rampa) |
+##
+## **Perche' la riporta questo file e non `run.gd`.** `run.gd` dichiara i numeri
+## che sono usciti da questa misura, e dichiarare una derivazione senza la
+## misura sarebbe un numero scelto a occhio: `run.gd` rimanda a qui, e qui la
+## tabella e' scritta per prima, coi numeri di allora.
+##
+## ## Perche' il test continua a volere 200 nemici
+##
+## La capacita' e' un criterio di m1 e resta un criterio: questo file pilota
+## **la propria** `population` (`horde.population = HORDE.MAX_ENEMIES`) e la porta
+## a 200 col ritmo di `run.spawn_rate()`, quindi non dipende dalla curva delle
+## onde e non smette di esistere quando la curva cambia. Il tempo che ci mette e'
+## anche una misura: viene stampato, ed e' il numero che rende visibile che
+## raggiungere 200 ora costa dei secondi e non un passo.
+##
 ## Nota sul contratto: `nearest_enemy` e' `-> int` e `damage_enemy` e' `-> bool`
 ## (piano 5.2), quindi qui si chiama **anche** il contratto, non solo
 ## `horde.nearest_enemy_index(...)`: se le due strade dessero risposte diverse,
@@ -23,9 +53,18 @@ extends SceneTree
 
 const H = preload("res://tools/test_harness.gd")
 const HORDE = preload("res://src/sim/horde.gd")
+const RUN = preload("res://src/sim/run.gd")
 const GRID = preload("res://src/sim/spatial_grid.gd")
 const POOL = preload("res://src/sim/object_pool.gd")
 const ENEMY = preload("res://src/sim/enemy.gd")
+
+## Passo di simulazione: quello di `tests/test_gameloop.gd`, cosi' i due numeri
+## di -orda sono confrontabili. Un passo fisso e' l'unica misura riproducibile.
+const DT := 1.0 / 60.0
+## Seme della disposizione con cui il benchmark di griglia viene misurato.
+## Vedi `_population`: serve a tornare alla condizione ad anelli e a rendere il
+## numero di oggi confrontabile con quello di m1.
+const SEME_CAPACITY := 20260912
 
 ## Bersaglio dei nemici in questo test: il centro dell'arena, perche' -gameplay
 ## non e' registrato in questo processo.
@@ -84,7 +123,55 @@ func _run() -> void:
 # --- 1. Popolazione -----------------------------------------------------------
 
 func _population(h, horde: HORDE) -> void:
-	h.eq(horde.count, 200, "nemici vivi al riempimento iniziale")
+	# ## Perche' questo test continua a volere 200 e l'avvio no
+	#
+	# `_build()` riempie a `Run.population_of(1)` = 25 dal primo di m4, e la
+	# prima cosa che questo test verifica e' proprio quello: l'avvio **non** e'
+	# pieno. Poi il test pilota la propria `population` e la porta a
+	# `HORDE.MAX_ENEMIES`, perche' la capacita' e' un criterio di m1 e non
+	# diventa inesistente quando la curva delle onde cambia.
+	h.eq(horde.wave, 1, "l'orda appena costruita e' sull'onda 1")
+	h.eq(horde.population, RUN.population_of(1),
+		"alla costruzione la popolazione e' quella che chiede la curva")
+	h.eq(horde.population, RUN.POP_BASE, "che sull'onda 1 e' Run.POP_BASE")
+	h.eq(horde.count, horde.population, "e il campo e' gia' a quel numero")
+	h.check(horde.count < HORDE.MAX_ENEMIES,
+		"l'avvio NON e' gia' pieno: %d vivi su %d di capienza" % [horde.count, HORDE.MAX_ENEMIES])
+
+	# La rampa fino alla capienza, **misurata**: e' il numero che rende
+	# visibile che 200 nemici ora costa dei secondi e non un passo.
+	horde.auto_respawn = true
+	horde.population = HORDE.MAX_ENEMIES
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
+		horde.step(DT)
+		passi += 1
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "%d nemici vivi per il criterio di m1" % HORDE.MAX_ENEMIES)
+	h.check(passi > 1,
+		"la capienza NON si raggiunge in un passo: %d passi = %.2f s"
+			% [passi, float(passi) * DT])
+	# e nessun passo ne aggiunge piu' di uno
+	var aggiunti_max := 0
+	for _i in 30:
+		var prima := horde.count
+		horde.step(DT)
+		aggiunti_max = maxi(aggiunti_max, horde.count - prima)
+	h.eq(aggiunti_max, 0, "a pieno non si aggiunge niente")
+	horde.auto_respawn = false
+
+	# La rampa appena fatta ha lasciato i primi nemici **convergi sul centro**:
+	# il campo che il benchmark di sotto misura sarebbe un grappolo addensato, e
+	# il confronto griglia/scansione cambierebbe di numero per un motivo che non
+	# ha a che fare con la griglia. `reseed()` ridisegna la disposizione a 200
+	# nemici ad anelli, che e' la condizione con cui quel confronto e' stato
+	# misurato in m1, e rende il numero di oggi confrontabile con quello di
+	# allora. Il seme e' fisso perche' il benchmark legga un numero, non una
+	# disposizione casuale.
+	horde.reseed(SEME_CAPACITY)
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "dopo il reseed ci sono ancora %d nemici" % HORDE.MAX_ENEMIES)
+	h.eq(horde.transforms.size(), horde.count, "e gli array sono allineati")
+	h.eq(horde.grid_unknown_cells, 0, "il reseed non ha creato celle nuove")
+
 	h.eq(horde.transforms.size(), horde.count,
 		"transforms e' lunga quanto count: e' l'invariante che arena usa per il MultiMesh")
 	h.eq(horde.colors.size(), horde.count, "un colore per nemico")
@@ -123,6 +210,9 @@ func _population(h, horde: HORDE) -> void:
 	h.check(census[ENEMY.RUNNER] > 0, "qualche runner")
 	h.check(census[ENEMY.BOSS] < horde.count / 4,
 		"il boss resta raro: %d su %d" % [census[ENEMY.BOSS], horde.count])
+	print("orda: avvio a %d nemici (Run.POP_BASE), portati a %d in %d passi = %.2f s "
+		% [RUN.POP_BASE, horde.count, passi, float(passi) * DT]
+		+ "(Run.SPAWN_RATE = %.1f/s)" % RUN.SPAWN_RATE)
 	print("orda: %d nemici su %d celle, specie %s, raggio %.1f m"
 		% [horde.count, horde.occupied_cells(), str(census), horde.arena_radius])
 
@@ -134,7 +224,7 @@ func _no_node_per_enemy(h, horde: HORDE) -> void:
 		% [horde.count, nodi])
 	h.check(nodi < 120,
 		"node_count deve stare sotto 120 con 200 nemici vivi: sono %d" % nodi)
-	h.check(horde.count == 200, "e i nemici sono davvero 200 mentre si conta")
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "e i nemici sono davvero 200 mentre si conta")
 	h.eq(horde.get_child_count(), 0,
 		"l'orda non ha figli: nessun nodo per nemico, nemmeno per accenderlo")
 
@@ -557,17 +647,48 @@ func _damage_kills(h, horde: HORDE) -> void:
 	h.eq(horde.nearest_enemy_index(Vector3.ZERO, 1000.0), -1,
 		"senza nemici la vicina piu' vicina da' -1")
 
-	# il riempimento automatico: da 0 a 200 in un passo, senza allocare celle
+	# ## Il riempimento automatico: NON da 0 a 200 in un passo
+	#
+	# Questo e' il criterio n. 4 della milestone 4, dal lato della macchina: un
+	# campo svuotato torna a `population` **al ritmo di `run.spawn_rate()`**, e
+	# `population` nel frattempo e' cambiata con l'onda (svuotare l'orda ha
+	# chiuso l'onda 1, quindi siamo sull'onda 2).
 	horde.auto_respawn = true
-	horde.step(1.0 / 60.0)
-	h.eq(horde.count, 200, "l'orda si riempie da sola fino a population")
+	horde.step(DT)
+	h.eq(horde.count, 0,
+		"un passo dopo lo svuotamento il campo e' ancora vuoto: nessuna raffica")
+	h.eq(horde.population, RUN.population_of(horde.wave),
+		"e la popolazione inseguita e' quella della curva sull'onda corrente")
+
+	var passi_pieno := 0
+	while horde.count < horde.population and passi_pieno < 6000:
+		horde.step(DT)
+		passi_pieno += 1
+	h.eq(horde.count, horde.population, "l'orda arriva a `population`, e non oltre")
+	h.check(passi_pieno > 1,
+		"e ci mette piu' di un passo: %d passi = %.2f s" % [passi_pieno, float(passi_pieno) * DT])
 	h.eq(horde.transforms.size(), horde.count, "allineata dopo il riempimento")
 	h.eq(horde.colors.size(), horde.count, "colori allineati dopo il riempimento")
-	h.eq(horde.grid_unknown_cells, 0, "i 200 spawn nuovi non hanno creato celle")
+	h.eq(horde.grid_unknown_cells, 0, "i %d spawn nuovi non hanno creato celle" % horde.count)
 	h.check(horde.nearest_enemy_index(Vector3.ZERO, 100.0) >= 0,
 		"dopo il riempimento si trova qualcuno")
+
+	# e adesso la capienza, di nuovo pilotata a mano, con lo stesso ritmo
+	horde.population = HORDE.MAX_ENEMIES
+	var passi_capienza := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi_capienza < 6000:
+		horde.step(DT)
+		passi_capienza += 1
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "la capienza si raggiunge anche per riempimento")
+	h.check(passi_capienza > 1, "anche da %d vivi ci mette piu' di un passo: %d passi = %.2f s"
+		% [RUN.population_of(horde.wave), passi_capienza, float(passi_capienza) * DT])
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "e non la supera")
 	print("orda: svuotata e riempita di nuovo, uccisioni in tutto %d, specie %s"
 		% [horde.kills, str(horde.census())])
+	print("orda: da 0 a %d in %.2f s, da %d a %d in %.2f s (Run.SPAWN_RATE = %.1f/s)"
+		% [RUN.population_of(horde.wave), float(passi_pieno) * DT,
+			RUN.population_of(horde.wave), HORDE.MAX_ENEMIES,
+			float(passi_capienza) * DT, RUN.SPAWN_RATE])
 
 # --- Interno ------------------------------------------------------------------
 

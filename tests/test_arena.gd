@@ -1,8 +1,25 @@
 extends SceneTree
 ## Test di arena di terminal-gun. E' il test del **criterio n. 3** della milestone:
 ##
-##     200 nemici vivi, SENZA un nodo per nemico:  node_count < 120  con
-##     horde.count == 200
+##     il motore regge 200 nemici vivi, SENZA un nodo per nemico:
+##     node_count < 120  con  horde.count == 200  **RAGGIUNTO DURANTE LA PARTITA**
+##
+## ## Perche' `== 200` non e' piu' una condizione del primo frame
+##
+## Il criterio diceva `horde.count == 200` **al primo frame**, e li' stava dentro
+## una riga sola mescolando due cose diverse: che il motore regga 200 nemici
+## senza un nodo per nemico (una **capacita'**, ed e' la cosa che questo test
+## sa misurare) e che la partita **parta** con 200 nemici (una **scelta di
+## design**, che nessuno aveva mai visto applicata finche' qualcuno non ha
+## giocato e ha scritto che cosi' non riesce a muoversi). Il tetto di 120 e il
+## numero 200 **non cambiano**: cambia **quando** si misurano.
+##
+## Quindi i 200 qui non sono un'attesa ma una **meta**: la sezione porta avanti la
+## partita con l'API vera di -orda (`damage_enemy` per chiudere un'onda, `step`
+## per far correre il tempo, `run` per la barra) e misura i nodi nell'istante in
+## cui l'orda arriva a 200 vivi. Nessun record scritto a mano: se l'orda non ci
+## arriva, il test lo dice e fallisce, invece di riempire l'array da solo e
+## dichiarare misurato un numero che ha deciso lui.
 ##
 ## ## Perche' questo test carica `scenes/arena_main.tscn` per intero
 ##
@@ -33,9 +50,21 @@ const H = preload("res://tools/test_harness.gd")
 const ARENA_SCENE := "res://scenes/arena_main.tscn"
 const ARENA_SCRIPT := "res://src/render/arena.gd"
 
-## Il numero del criterio n. 3.
+## Il numero del criterio n. 3. Non e' il numero di nemici con cui la partita
+## parte: e' il numero di nemici **vivi contemporaneamente** di cui si vuole
+## provata la capacita' del motore, e il test lo **raggiunge** guidando la
+## partita (vedi `_drive_to_full_arena`).
 const ENEMY_TARGET := 200
 const NODE_BUDGET := 120
+## Lavoro che il test accetta di fare portando avanti la partita: passi di
+## `horde.step()` piu' uccisioni, in un unico conteggio. Non e' un numero della
+## curva delle onde -- quella e' di -orda e non la conosco -- e' il tetto oltre
+## il quale il test smette di guidare e **riporta un ritorno** invece di girare.
+const DRIVE_MAX_WORK := 400000
+## Passi consecutivi senza che i nemici vivi crescano, quando l'orda e' gia' alla
+## quota del criterio: e' il modo di accorgersi che il riempimento e' fermo e
+## che la misura non arrivera' mai.
+const DRIVE_STALL_STEPS := 30
 ## Quanta capienza fissa ha la MultiMesh dei nemici: se l'orda ne chiede di
 ## piu', il renderer deve fermarsi qui e non crescere.
 const ENEMY_CAPACITY := 256
@@ -184,6 +213,12 @@ func _wiring(h, arena: Node3D, game: Node) -> void:
 ## Il cuore del test: `node_count < 120` **con** `horde.count == 200`, e i nodi
 ## non crescono quando i nemici crescono. E' la differenza fra "disegnare 200
 ## nemici" e "avere 200 nemici".
+##
+## Il 200 **non** e' una condizione del primo frame: e' una condizione **da
+## raggiungere**. Quindi qui l'ordine e' misurare il vuoto, poi guidare la
+## partita fino al pieno, e contare i nodi **in quel momento**. Nessuna delle
+## due misure e' inventata: il vuoto si fa svuotando l'orda con l'API di -orda,
+## il pieno si fa giocando la partita con l'API di -orda.
 func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	# Variabili senza tipo: `horde` e' un `Node` e i suoi tre campi non sono
 	# campi di `Node`, quindi l'accesso deve restare dinamico.
@@ -195,23 +230,51 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	enemies.set_time(0.0)
 	enemies.set_horde(horde)
 
-	h.eq(horde.count, ENEMY_TARGET, "l'orda deve avere 200 nemici vivi al primo frame")
+	# ## Il PRIMA, misurato e non asserito
+	#
+	# Quanti nemici vivi ci sono quando la partita comincia. Non e' un numero su
+	# cui scrivere un tetto: e' una scelta di design di -orda, ed e' il numero
+	# che questa milestone cambia di proposito. Qui viene solo stampato e non
+	# entra in nessuna asserzione: sotto, il 200 che conta e' il **massimo** che
+	# la partita raggiunge, non quello con cui parte.
+	print("test_arena: partenza misurata: %d nemici vivi al primo frame, population %d, onda %d"
+		% [horde.count, horde.population, horde.wave])
 
-	# Conto i nodi con l'orda vuota e poi con l'orda piena: la differenza deve
-	# essere zero. E' un'affermazione piu' forte di "il totale sta sotto 120",
-	# perche' non si puo' passare con un totale piccolo che pero' cresce.
+	# Conto i nodi con l'orda **vuota**: e' il termine di paragone. Con l'orda
+	# vuota e con l'orda piena il numero deve essere lo stesso, altrimenti si
+	# puo' passare il tetto con un totale piccolo che pero' cresce.
 	_kill_all(h, horde)
 	enemies.refresh()
 	var bare_nodes := _count_nodes(arena)
 
-	_refill(horde)
+	# E il pieno, **raggiunto durante la partita**.
+	var drive := _drive_to_full_arena(h, horde)
 	enemies.refresh()
+	var live: int = horde.count
+	if live == ENEMY_TARGET:
+		print("test_arena: i 200 nemici vivi sono arrivati all'onda %d, dopo %d passi di simulazione (%.2f s di partita) e %d uccisioni: curva %s"
+			% [horde.wave, int(drive["steps"]), float(drive["steps"]) * DT,
+				int(drive["kills"]), str(drive["curve"])])
+	else:
+		print("test_arena: i %d nemici vivi NON sono arrivati: %s (curva %s)"
+			% [ENEMY_TARGET, str(drive["reason"]), str(drive["curve"])])
+
+	# Il numero e' quello **raggiunto**, e il motivo del fallimento porta con se'
+	# dove la partita si e' fermata: un "200 non raggiunti" senza altro dice che il
+	# test e' rotto, non dove.
+	h.eq(live, ENEMY_TARGET,
+		"i 200 nemici vivi devono essere raggiunti DURANTE la partita: %s" % str(drive["reason"]))
+	if live != ENEMY_TARGET:
+		# Le sezioni sotto leggono il nemico 200 e chiamano `refresh()` su un'orda
+		# piena: senza questo `return` avrebbero letto fuori dal vettore e il
+		# fallimento verrebbe da li' invece che da qui.
+		return
+
 	var loaded_nodes := _count_nodes(arena)
 
-	print("test_arena: node_count=%d horde.count=%d" % [loaded_nodes, horde.count])
+	print("test_arena: criterio n. 3 misurato al pieno: node_count=%d horde.count=%d"
+		% [loaded_nodes, live])
 
-	h.eq(horde.count, ENEMY_TARGET, "l'orda si e' svuotata e non e' tornata a 200")
-	h.eq(enemies.drawn_count(), ENEMY_TARGET, "il renderer deve aver disegnato tutti i 200 nemici")
 	h.eq(loaded_nodes, bare_nodes, "200 nemici non devono aggiungere ne' un nodo")
 	h.check(loaded_nodes < NODE_BUDGET,
 		"node_count deve essere < 120 con 200 nemici vivi: e' %d" % loaded_nodes)
@@ -219,6 +282,8 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 		"il renderer dei nemici non deve avere figli: un nodo per nemico e' esattamente il difetto che il criterio vieta")
 
 	var mm = enemies.multimesh
+	h.eq(enemies.drawn_count(), ENEMY_TARGET,
+		"il renderer deve aver disegnato tutti i 200 nemici")
 	h.check(mm != null, "il renderer deve aver costruito la MultiMesh")
 	if mm != null:
 		h.check(mm.use_colors, "la MultiMesh deve avere i colori per istanza: e' cosi' che la tinta per specie arriva all'arena")
@@ -260,6 +325,128 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	horde.transforms = saved_x
 	horde.colors = saved_c
 
+## Porta la partita avanti fino a `ENEMY_TARGET` nemici vivi, e dice quanto ci ha
+## messo. Guida **solo** con l'API di -orda: `damage_enemy` per uccidere, `step`
+## per far correre il tempo, `wave_remaining()` per sapere quanti ne restano da
+## ammazzare, `population` per sapere quanti l'onda corrente ne puo' tenere.
+## Nessun array scritto a mano e nessuna aritmetica sulla popolazione: se il
+## test scrivesse `population = 200` per poi misurare i 200, il numero che
+## misura sarebbe uno che ha decito lui.
+##
+## Il ciclo e' quello di **chi gioca**, non quello che -orda ha scritto in
+## `run.gd`: uccidi quello che c'e', l'orda si riempie, la barra arriva a zero,
+## l'onda finisce e comincia la successiva. Non conosce le cifre della curva e
+## non deve: sono di -orda e cambiano in queste ore, e un test che le sapesse
+## asserirebbe contro un numero che non e' suo. L'unica cosa che legge e' **se la
+## quota dell'onda corrente e' gia' quella del criterio**: sotto quella soglia il
+## numero non puo' arrivarci e uccidere non aiuta, quindi l'unica mossa possibile
+## e' uccidere fino a chiudere l'onda; a quella soglia si smette di uccidere e si
+## lascia che l'arena si riempia da sola, che e' quello che vede il giocatore a
+## meta' onda.
+##
+## Restituisce solo numeri **misurati**: `steps` (passi di `step()`), `kills`
+## (uccisioni), `curve` (quanti vivi e quanta quota a ogni onda attraversata),
+## `reason` (perche' non e' arrivata, se non e' arrivata).
+func _drive_to_full_arena(h, horde) -> Dictionary:
+	var steps := 0
+	var kills := 0
+	var work := 0
+	var fill_stalls := 0
+	var last_wave: int = horde.wave
+	var curve: Array[String] = []
+	var reason := ""
+
+	while work < DRIVE_MAX_WORK and horde.count < ENEMY_TARGET:
+		if horde.is_game_over():
+			reason = "la partita e' finita (game over) con %d nemici vivi" % horde.count
+			break
+
+		# 1. La quota dell'onda corrente e' quella che il criterio chiede: da
+		#    qui in poi il conteggio cresce **da solo** e non si uccide piu'
+		#    niente. Il tempo che ci mette e' la misura, non una pausa: e il
+		#    numero di passi senza crescita sotto e' il modo di accorgersi che
+		#    l'orda si e' fermata prima di arrivarci.
+		if horde.population >= ENEMY_TARGET:
+			var last: int = horde.count
+			horde.step(DT)
+			steps += 1
+			work += 1
+			if horde.count <= last:
+				fill_stalls += 1
+				if fill_stalls >= DRIVE_STALL_STEPS:
+					reason = ("la quota dell'onda corrente e' %d ma l'orda si e' fermata a %d vivi: il riempimento non arriva al numero del criterio"
+						% [horde.population, horde.count])
+					break
+			else:
+				fill_stalls = 0
+			continue
+
+		# 2. Sotto la quota del criterio non si puo' misurare niente: l'unica
+		#    strada per cambiare onda e' ammazzare, ed e' quello che fa il
+		#    giocatore con l'arma. Uccide tutto quello che c'e' e lascia che il
+		#    passo successivo rimetta sul campo il credito di spawn di -orda.
+		kills += _kill_all_quiet(horde)
+		horde.step(DT)
+		steps += 1
+		work += 1
+
+		# 3. L'onda e' cambiata? La curva si **stampa**, non si asserisce: le
+		#    sue cifre sono di -orda. Quello che si controlla, e che e' un
+		#    invariante dichiarato, e' che nessuno dei due numeri superi mai il
+		#    massimo che l'orda puo' tenere.
+		if horde.wave != last_wave:
+			last_wave = horde.wave
+			curve.append("w%d %d/%d" % [last_wave, horde.count, horde.population])
+			_watch_population(h, horde)
+
+	if horde.count < ENEMY_TARGET and reason == "":
+		reason = ("dopo %d passi e %d uccisioni l'orda e' a %d vivi su population %d, onda %d, senza mai arrivare a %d"
+			% [steps, kills, horde.count, horde.population, horde.wave, ENEMY_TARGET])
+
+	return {
+		"reached": horde.count >= ENEMY_TARGET,
+		"steps": steps,
+		"kills": kills,
+		"curve": curve,
+		"reason": reason,
+	}
+
+## Gli invarianti che il vertice ha dichiarato per questa milestone (piano 1.4,
+## criterio n. 3), controllati **mentre** la partita viene guidata:
+## `population` non sale mai sopra `MAX_ENEMIES`, e i vivi non superano mai ne'
+## il massimo ne' la popolazione della loro onda.
+##
+## La **forma** della curva non e' asserita qui e il motivo e' scritto sopra: le
+## cifre sono di -orda e cambiano in queste stesse ore, e un test che le
+## asserisse starebbe valutando un numero che non e' suo. Quello che qui si
+## sorveglia e' che la curva, qualunque forma abbia, **non torni indietro** e non
+## esca dal tetto dichiarato da -orda.
+func _watch_population(h, horde) -> void:
+	var cap := _max_enemies(horde)
+	if cap <= 0:
+		return
+	h.check(horde.population <= cap,
+		"population (%d) non deve mai superare MAX_ENEMIES (%d)" % [horde.population, cap])
+	h.check(horde.count <= cap,
+		"i nemici vivi (%d) non devono mai superare MAX_ENEMIES (%d)" % [horde.count, cap])
+	h.check(horde.count <= horde.population,
+		"i nemici vivi (%d) non devono superare la popolazione della loro onda (%d)"
+			% [horde.count, horde.population])
+
+## `MAX_ENEMIES` letto **dal codice di -orda**, non scritto qui. Il tetto e' suo,
+## e il suo numero non e' un numero che questo test deve ricordare: se lo
+## cambiasse, il confronto giusto cambia con lui e l'invariante resta quello.
+## Restituisce -1 se la costante non c'e' piu': in quel caso il controllo viene
+## saltato **e detto**, non aggirato in silenzio.
+func _max_enemies(horde) -> int:
+	var scr = horde.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return -1
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has("MAX_ENEMIES"):
+		return -1
+	return int(map["MAX_ENEMIES"])
+
 ## Svuota l'orda con l'API vera di -orda, `damage_enemy`, che toglie il nemico
 ## dal vettero subito. Non si scrive `horde.count = 0` a mano: cosi' il test
 ## verificherebbe se stesso invece di verificare il gioco.
@@ -277,11 +464,22 @@ func _kill_all(h, horde) -> void:
 	h.check(horde.count == 0,
 		"l'orda non si e' svuotata: %d nemici rimasti dopo %d passate" % [horde.count, guard])
 
-## Il contrario di `_kill_all`: un passo di simulazione e l'orda si riempie da
-## sola, perche' `auto_respawn` e' acceso. Sempre l'orda vera, mai una aritmetica
-## di array scritta qui.
-func _refill(horde) -> void:
-	horde.step(1.0 / 60.0)
+## Come `_kill_all`, ma **senza asserzione** e con il numero delle uccisioni come
+## risultato. La si chiama dentro il ciclo che guida la partita, dove la stessa
+## asserzione verrebbe ripetuta centinaia di volte e il suo numero non direbbe
+## niente; li' dentro il conteggio delle uccisioni e' invece la misura di quanto
+## lavoro ha costato arrivare al pieno.
+func _kill_all_quiet(horde) -> int:
+	var killed := 0
+	var guard := 0
+	while horde.count > 0 and guard < 64:
+		guard += 1
+		killed += horde.count
+		for i in range(horde.count):
+			if horde.count == 0:
+				break
+			horde.damage_enemy(i, 1000000.0, Vector3.ZERO)
+	return killed
 
 # --- 4. Il terreno chiuso ------------------------------------------------------
 
@@ -338,9 +536,18 @@ func _hud(h, arena: Node3D, game: Node) -> void:
 	# che legge sul contratto, quindi qui si esegue il suo `_process` e si legge
 	# quello che c'e' scritto. E' il collegamento HUD <-> contratto, verificato
 	# con l'orda e il giocatore veri e non con un `set_state()` a mano.
+	#
+	# Il numero di nemici e' **quello che c'e' in questo momento**, letto adesso
+	# dalla scena e non scritto qui: un 200 hardcoded passerebbe anche con la HUD
+	# scollegata dall'orda, e fallirebbe con la HUD collegata quando l'orda e'
+	# diversa -- cioe' passerebbe e fallirebbe per motivi che non sono il motivo.
+	var horde = arena.get_node("Horde")
+	var vivi: int = horde.count
 	arena.call("_process", 0.0)
-	h.check(hud.enemy_text().contains("200"),
-		"la HUD alimentata dalla scena deve mostrare i 200 nemici dell'orda vera: \"%s\"" % hud.enemy_text())
+	h.check(vivi > 0, "la scena deve avere nemici vivi quando la HUD viene alimentata")
+	h.check(hud.enemy_text().contains(str(vivi)),
+		"la HUD alimentata dalla scena deve mostrare i %d nemici vivi dell'orda vera: \"%s\""
+			% [vivi, hud.enemy_text()])
 	h.check(hud.weapon_state_text().contains("DMG"),
 		"la HUD alimentata dalla scena deve mostrare lo stato dell'arma vera: \"%s\"" % hud.weapon_state_text())
 
@@ -481,14 +688,29 @@ func _criterion_4(h, arena: Node3D, game: Node) -> void:
 				% [r["predicted"], REAL_ACCEL, REAL_SPEED_MAX]
 				+ "fisica di src/sim/enemy.gd e' diversa, e' qui che si vede")
 
-	# Riporta e lascia l'orda com'era: population e auto_respawn tornano ai
-	# valori veri e un passo la riporta a 200.
+	# Riporta e lascia l'orda com'era: i campi toccati tornano ai valori veri e
+	# un passo lascia all'orda il tempo di riprendere.
 	horde.population = population_before
 	horde.auto_respawn = respawn_before
 	weapon.fire_interval = fire_before
 	weapon.pierce = pierce_before
 	horde.step(DT)
-	h.eq(horde.count, ENEMY_TARGET, "la sezione knockback deve lasciare l'orda a 200 nemici")
+	# Qui il numero di vivi **non** e' un numero che questo test possa asserire:
+	# la sezione ha appena ridotto l'orda a un nemico solo e un solo passo non
+	# la riporta a 200, perche' da m4 il riempimento non avviene in un passo (ed
+	# e' proprio questo il difetto che m4 chiude). Si asserisce invece che la
+	# sezione abbia rimesso a posto quello che ha toccato e che la scena resti
+	# coerente: e' la stessa domanda di prima, senza la cifra della curva dentro.
+	h.eq(horde.population, population_before,
+		"la sezione knockback deve rimettere a posto population")
+	h.eq(horde.auto_respawn, respawn_before,
+		"la sezione knockback deve rimettere a posto auto_respawn")
+	h.eq(horde.transforms.size(), horde.count,
+		"dopo la sezione knockback transforms resta allineata a count")
+	h.eq(horde.colors.size(), horde.count,
+		"dopo la sezione knockback colors resta allineata a count")
+	h.check(horde.count > 0,
+		"la sezione knockback deve lasciare l'orda viva, non vuota")
 
 	print("criterio 4, knockback reale: %s unita' in %d frame (tetto %.1f)"
 		% [", ".join(rows), KNOCKBACK_FRAMES, KNOCKBACK_MIN])
@@ -840,11 +1062,23 @@ const GRID_CEILING := 11
 ## da `_rng`, quindi con un altro seme si muove **tutti**: e' il massimo possibile,
 ## non un caso.
 ##
-## Il tetto e' **180**, cioe' il 90%. Non 200: un numero che pretende che tutti i
-## 200 si muovano rende l'asserzione fragile per un motivo che non c'entra (due
-## nemici che si toccano e restano fermi insieme). Non 1: quello e' la parola
-## "diversi" del criterio riscritta in codice, e non aggiunge niente.
-const REPRO_DIFF_MIN := 180
+## Il tetto e' il **90%** dei nemici vivi, cioe' 180 su 200 nel campione misurato.
+## Non 100%: un numero che pretende che tutti i 200 si muovano rende l'asserzione
+## fragile per un motivo che non c'entra (due nemici che si toccano e restano
+## fermi insieme). Non 1 posizione: quello e' la parola "diversi" del criterio
+## riscritta in codice, e non aggiunge niente.
+##
+## ## PERCHE' UNA FRAZIONE E NON UN NUMERO
+##
+## Era `180`, cioe' 200 - 20. Da m4 il numero di nemici vivi **non e' piu' una
+## costante**: e' una curva che cresce per onda, ed e' di -orda. Un tetto
+## assoluto qui sarebbe un numero scritto contro una curva che non e' mia, e
+## fallirebbe -- o peggio, passerebbe -- per un motivo che non e' la
+## riproducibilita'. La frazione e' la stessa soglia detta nella sua unita' vera:
+## "quasi tutti i nemici si muovono quando il seme cambia". Con l'orda al
+## massimo (che e' come questa sezione misura, vedi `_milestone_3`) la frazione
+## vale esattamente il 180 di prima.
+const REPRO_DIFF_FRACTION := 0.9
 
 func _milestone_3(h, arena: Node3D) -> void:
 	var horde = arena.get_node_or_null("Horde")
@@ -857,8 +1091,29 @@ func _milestone_3(h, arena: Node3D) -> void:
 		if not h.check(horde.has_method(m),
 				"m3: l'orda della scena vera non espone \"%s()\": e' la superficie congelata in src/core/contracts.gd, sezione \"Supersficie di milestone 3\"" % m):
 			return
-	_riproducibilita(h, horde)
-	_sweep(h, horde)
+	# `reseed` ripopola a `population` (contratto di m3, punto 3), quindi il
+	# numero di nemici su cui questa sezione misura **non e' una cifra scritta
+	# qui**: e' la popolazione dell'onda in corso. Il tetto di densita'
+	# `GRID_CEILING` e' stato derivato con l'arena **piena**, e su un'arena mezza
+	# vuota ogni densita' starebbe sotto il tetto per il motivo sbagliato -- il
+	# tetto passerebbe perche' non c'e' piu' nessuno, non perche' la griglia
+	# tiene. Quindi `population` viene portata al massimo **dichiarato da -orda**,
+	# letto dal suo codice, salvata e rimessa a posto, e il fatto e' stampato.
+	var cap := _max_enemies(horde)
+	if not h.check(cap > 0,
+			"m3: l'orda della scena vera non espone piu' la costante MAX_ENEMIES: la densita' non si puo' piu' confrontare con un tetto dichiarato"):
+		return
+	var saved_pop: int = horde.population
+	horde.population = cap
+	print("test_arena: m3 densita' misurata con population=%d (massimo dichiarato di -orda), ripristinata a %d"
+		% [cap, saved_pop])
+	_riproducibilita(h, horde, cap)
+	_sweep(h, horde, cap)
+	# Ripristino **sempre**: `check()` non interrompe, e una sezione che lascia
+	# l'orda con una popolazione diversa da quella trovata sporca tutto quello
+	# che viene dopo.
+	horde.population = saved_pop
+	horde.reseed(SEED_A)
 
 ## ## 8.1 Riproducibilita': stesso seme due volte IDENTICO, seme diverso DIVERSO
 ##
@@ -866,12 +1121,16 @@ func _milestone_3(h, arena: Node3D) -> void:
 ## passerebbe anche con un `reseed` che riscrive sempre la stessa disposizione, la
 ## seconda da sola passerebbe anche con un `reseed` che mette un rumore casuale
 ## sopra una disposizione fissa. Insieme dicono "funzione del seme".
-func _riproducibilita(h, horde) -> void:
+##
+## `cap` e' la popolazione con cui la sezione misura: il contratto di m3 dice che
+## `reseed` riempie fino a `population`, quindi e' il numero di vivi che ci deve
+## essere dopo, non una cifra che questo test sceglie.
+func _riproducibilita(h, horde, cap: int) -> void:
 	horde.reseed(SEED_A)
 	var a: PackedVector3Array = horde.transforms.duplicate()
 	var a_colors: PackedColorArray = horde.colors.duplicate()
-	h.eq(horde.count, ENEMY_TARGET,
-		"m3: dopo reseed l'orda deve avere 200 nemici vivi, come all'avvio")
+	h.eq(horde.count, cap,
+		"m3: dopo un reseed l'orda deve essere riempita fino a population (%d), che e' il punto 3 del contratto di m3" % cap)
 	h.eq(horde.transforms.size(), horde.count,
 		"m3: transforms.size() deve combaciare con count dopo un reseed")
 	h.eq(horde.colors.size(), horde.count,
@@ -899,9 +1158,10 @@ func _riproducibilita(h, horde) -> void:
 	horde.reseed(SEED_B)
 	var c: PackedVector3Array = horde.transforms.duplicate()
 	var moved := _differing(a, c)
-	h.check(moved >= REPRO_DIFF_MIN,
-		"m3: due semi diversi devono dare disposizioni DIVERSE: %d posizioni su %d diverse, tetto dichiarato %d"
-			% [moved, mini(a.size(), c.size()), REPRO_DIFF_MIN])
+	var diff_min := _diff_min(mini(a.size(), c.size()))
+	h.check(moved >= diff_min,
+		"m3: due semi diversi devono dare disposizioni DIVERSE: %d posizioni su %d diverse, tetto dichiarato il %.0f%% = %d"
+			% [moved, mini(a.size(), c.size()), REPRO_DIFF_FRACTION * 100.0, diff_min])
 
 	print("test_arena: m3 riproducibilita': seme %d due volte -> %d/%d posizioni diverse, somma %.6f; seme %d -> %d/%d diverse"
 		% [SEED_A, _differing(a, b), a.size(), _checksum(a), SEED_B, moved, mini(a.size(), c.size())])
@@ -916,7 +1176,11 @@ func _riproducibilita(h, horde) -> void:
 ## derivato dalla misura che questo sweep stampa. Nessun numero qui e' scritto
 ## prima di averlo misurato: e' la lezione di piano 1.2, dove un'ipotesi sul margine
 ## si e' rivelata sbagliata solo dopo misurata.
-func _sweep(h, horde) -> void:
+##
+## `cap` e' la popolazione con cui si misura: vedi `_milestone_3`. Il tetto di
+## densita' e' derivato a pieno, e su un'orda piu' piccola ogni densita' ci
+## starebbe sotto senza che la griglia abbia fatto niente.
+func _sweep(h, horde, cap: int) -> void:
 	var samples: Array[int] = []
 	var raw: Array[int] = []
 	var seeds: Array[int] = []
@@ -936,7 +1200,7 @@ func _sweep(h, horde) -> void:
 		var here: PackedVector3Array = horde.transforms.duplicate()
 		if i > 0:
 			var d := _differing(prev, here)
-			if d >= REPRO_DIFF_MIN:
+			if d >= _diff_min(here.size()):
 				steps_differ += 1
 			else:
 				steps_alike.append("%d/%d:%d" % [seeds[i - 1], s, d])
@@ -949,8 +1213,8 @@ func _sweep(h, horde) -> void:
 		# nome sull'orda e' `nearest_enemy_index`: `nearest_enemy` e' il nome
 		# dell'API **del contratto**, che -orda registra su `Game`.)
 		horde.nearest_enemy_index(Vector3.ZERO, 12.0)
-		h.eq(horde.count, ENEMY_TARGET,
-			"m3: il seme %d deve lasciare 200 nemici vivi" % s)
+		h.eq(horde.count, cap,
+			"m3: il seme %d deve lasciare l'orda piena fino a population (%d)" % [s, cap])
 		var w: int = horde.worst_bucket()
 		if horde.grid_overflowed():
 			overflowed.append(s)
@@ -977,11 +1241,11 @@ func _sweep(h, horde) -> void:
 
 	# Il campione non sta misurando sempre la stessa disposizione sotto vestiti
 	# diversi. La soglia e' **tutte** le coppie: misurate 23 su 23, e sotto un
-	# seme diverso tutti i 200 nemici si muovono, quindi una coppia simile
+	# seme diverso tutti i nemici si muovono, quindi una coppia simile
 	# sarebbe un difetto di `reseed` e non una coincidenza.
 	h.check(steps_differ == SWEEP_COUNT - 1,
-		"m3: ogni coppia di semi consecutivi dello sweep deve dare una disposizione diversa (almeno %d posizioni su %d): %d su %d, e le coppie simili sono %s"
-			% [REPRO_DIFF_MIN, ENEMY_TARGET, steps_differ, SWEEP_COUNT - 1, str(steps_alike)])
+		"m3: ogni coppia di semi consecutivi dello sweep deve dare una disposizione diversa (almeno il %.0f%%, cioe' %d posizioni su %d): %d su %d, e le coppie simili sono %s"
+			% [REPRO_DIFF_FRACTION * 100.0, _diff_min(cap), cap, steps_differ, SWEEP_COUNT - 1, str(steps_alike)])
 
 	# Il traboccamento e' il fatto vero, e la sua segnalazione e' dedicata:
 	# `worst_bucket()` non puo' superare `BUCKET_SLOTS` e non puo' dire da solo
@@ -1036,6 +1300,13 @@ func _semantica_worst_bucket(h, horde, seeds: Array[int], raw: Array[int]) -> vo
 		+ "Se resta fermo al massimo, il numero sta accumulando da setup() e ogni lettura di questo test e' sbagliata")
 	print("test_arena: m3 semantica worst_bucket(): dopo il seme %d (picco %d) il seme %d lo riporta a %d: e' il picco del frame ricostruito, non un massimo storico"
 		% [seeds[i_hi], raw[i_hi], seeds[i_lo], back])
+
+## Quante posizioni devono moversi fra due semi diversi, su `live` nemici vivi:
+## la frazione dichiarata, arrotondata per eccesso. `maxi(1, ...)` perche' un
+## tetto di zero posizioni sarebbe un'asserzione che non puo' fallire, cioe'
+## esattamente la cosa che questa sezione sta cercando di evitare.
+func _diff_min(live: int) -> int:
+	return maxi(1, int(ceil(REPRO_DIFF_FRACTION * float(live))))
 
 ## Quante posizioni di due disposizioni sono diverse. Il confronto e' esatto
 ## (`!=` su `Vector3`), non una tolleranza: "identici" nel criterio n. 2 di m3

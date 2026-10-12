@@ -53,6 +53,98 @@ const HP_SCALE_STEP := 0.25
 ## piu' lunga, e una partita non ha fine.
 const HP_SCALE_MAX := 4.0
 
+# --- LA CURVA DELLA POPOLAZIONE (milestone 4) --------------------------------
+#
+# `population` e' quanti nemici sono vivi **contemporaneamente** nell'onda `w`.
+# Fino a m4 non esisteva una curva: `horde.gd::_build()` riempiva a
+# `MAX_ENEMIES` e `_top_up()` riportava a quel numero **a ogni passo**, quindi
+# l'arena era gia' piena al primo frame e nessun colpo la svuotava. Era una
+# scelta di design travestita da criterio di test.
+#
+# ## LA MISURA DEL PRIMA, e da dove escono i numeri qui sotto
+#
+# Misurata il 2026-10-12 su `tests/test_orda.gd` **prima** di toccare una riga,
+# sull'orda isolata, con il fuoco al centro dell'arena (28 m) e passo fisso
+# 1/60 s:
+#
+# | cosa si misura | numero |
+# |---|---|
+# | tempo dall'avvio alla popolazione piena | **0.0000 s**: 200 vivi al primo frame, 0 passi |
+# | tempo per riempire dopo uno svuotamento totale | **1 passo = 0.0167 s** (da 0 a 200) |
+# | primo contatto (nessun vivo entro 3 m dal bersaglio) | **t = 0.02 s** |
+# | 25 nemici vivi entro 6 m dal bersaglio | **t = 1.68 s** |
+# | a regime (t = 20 s), con 200 vivi | **104 entro 6 m**, cioe' il 52% della popolazione |
+# | la stessa frazione a 25 / 50 / 100 vivi | 100% / 90% / 63% / 52% |
+#
+# La riga che lega tutte e due le tabelle e' una sola: **la frazione della
+# popolazione che si ritrova addosso al giocatore e' circa costante**, quindi la
+# pressione e' **lineare** in `population`. Ridurre la popolazione riduce la
+# pressione nella stessa proporzione, e non c'e' nessun altro numero da indovinare.
+#
+# ## POP_BASE = 25
+#
+# Un ottavo della pressione misurata (104 entro 6 m -> 25 -> 13). Perche' un
+# ottavo e non meta': a meta' (100) resterebbero ~52 nemici addosso, cioe' meta'
+# del sintomo che la milestone sta correggendo; a un quarto (50) resterebbero 45,
+# che e' gia' piu' di quanti ne occorrono per coprire l'arena in un'onda. Un
+# ottavo lascia un campo che si guarda e che si spara, ed e' la prima cifra che
+# il piano non scriveva e che il gioco non aveva mai visto applicata.
+#
+# ## POP_STEP = 25
+#
+# Passa da 25, 50, 75, 100, 125, 150, 175 a 200: cresce di POP_BASE ogni onda,
+# cioe' raddoppia in quattro onde e satura all'onda 8. Il numero viene dal
+# **budget di uccisioni** misurato nella stessa tabella: le prime 7 onde chiedono
+# 200+230+260+290+320+350+380 = **2030 uccisioni**, che al ritmo di 10/s usato
+# nella colonna dei tempi sono 203 s, cioe' poco piu' di 3 minuti di partita.
+# La capacita' di 200 arriva quindi a meta' partita e non alla fine: e' quello che
+# serve al criterio di m1 (che chiede 200 *durante* la partita) e quello che un
+# giocatore deve poter vedere prima che la partita finisca.
+#
+# ## Gli invarianti che questa tabella deve soddisfare
+#
+#   1. `population` e' **strettamente crescente** dall'onda 1 all'onda
+#      `POP_SATURATION` e poi sta al tetto: una sequenza di interi bounded non puo'
+#      crescere per sempre, e la soglia che si dichiara e' quella onda, non "per
+#      sempre". `tests/test_gameloop.gd` asserisce le due metà separatamente.
+#   2. `population` **non supera mai** `POP_MAX`, che vale `Horde.MAX_ENEMIES`.
+#   3. `population` non puo' saltare da 0 a tutto in un passo: e' il compito di
+#      `SPAWN_RATE` qui sotto e di `horde.gd::_top_up`.
+
+## Nemici vivi contemporaneamente sull'onda 1: un ottavo della capienza.
+const POP_BASE := 25
+## Quanti in piu' vivi a ogni onda.
+const POP_STEP := 25
+## Tetto della popolazione: **deve valere `Horde.MAX_ENEMIES`**, ed e' scritto
+## qui perche' `run.gd` non puo' fare `preload` di `horde.gd` (sarebbe un
+## riferimento circolare, piano sez. 5 regola 3). Due copie di un numero in due
+## file divergono senza che nessuno se ne accorga, quindi `tests/test_gameloop.gd`
+## verifica che siano uguali: e' il controllo che rende la copia onesta.
+const POP_MAX := 200
+## Prima onda in cui la popolazione arriva al tetto. Da questa in poi la curva e'
+## piatta perche' non puo' crescere oltre: dichiararlo e' parte dell'invariante 1.
+const POP_SATURATION := 8
+
+## Quanti nemici al secondo l'orda puo' **guadagnare** (`horde.gd::_top_up`).
+##
+## Il numero e' stretto da due fatti misurati, non scelto a occhio:
+##
+## - **Il pavimento.** `wave_total` dell'onda 1 e' 200 uccisioni e quelle devono
+##   poter arrivare. Con 5 al secondo l'onda 1 durerebbe almeno 40 s, che e'
+##   gia' il caso peggiore misurato **prima** di m4 (criterion 1.4b): sotto questa
+##   soglia la curva renderebbe la prima onda piu' lenta di com'e' adesso, e il
+##   giocatore non potrebbe piu' accorciarla con l'arma. Quindi `>= 5/s`.
+## - **Il soffitto.** Prima di m4 un campo vuoto si riempiva in 1 passo. La
+##   misura del contatto e' 1.68 s per arrivare a 25 nemici entro 6 m: con
+##   `SPAWN_RATE` nemici al secondo, in quella finestra ne arrivano
+##   `1.68 * SPAWN_RATE`, e il tetto e' che siano **meno dei 25** misurati allora,
+##   altrimenti un campo svuotato ti riaddossa la folla piu' in fretta di quella
+##   che ti si era appena liberata. Da qui `SPAWN_RATE < 15`.
+##
+## **8/s**: sta dentro la finestra (25 passerebbero in 3.1 s) e tiene l'onda 1 a
+## un pavimento di 200/8 = **25 s**, dentro la banda 5-40 s misurata prima di m4.
+const SPAWN_RATE := 8.0
+
 # --- Stato --------------------------------------------------------------------
 
 ## `PLAYING` o `GAME_OVER`. Campo pubblico e non metodo: e' una parola, e un
@@ -82,6 +174,30 @@ static func wave_size(w: int) -> int:
 static func hp_scale_of(w: int) -> float:
 	return clampf(HP_SCALE_BASE + float(maxi(w, 1) - 1) * HP_SCALE_STEP,
 		HP_SCALE_BASE, HP_SCALE_MAX)
+
+## Quanti nemici vivi **contemporaneamente** sull'onda `w`.
+##
+## Non e' `wave_size(w)`: quello e' il numero di **uccisioni** che chiudono
+## l'onda, questo e' quanti se ne vedono insieme. Sull'onda 1 sono 25 vivi e 200
+## uccisioni da fare, ed e' la differenza fra un bullet heaven e un'orda sola.
+##
+## **Statica**, come `wave_size`: la curva e' una domanda, non uno stato, e il
+## test deve poter chiederla per un'onda qualsiasi senza costruire una partita.
+##
+## Strettamente crescente da `POP_BASE` fino a `POP_SATURATION`, poi `POP_MAX`.
+## Il `clampi` finale e' quello che rende vero l'invariante 2 (mai sopra il
+## tetto) e insieme quello che rende la coda piatta: dichiararlo e' un invariante
+## con denti, non una scivolinata.
+static func population_of(w: int) -> int:
+	var n := maxi(w, 1)
+	if n >= POP_SATURATION:
+		return POP_MAX
+	return mini(POP_BASE + (n - 1) * POP_STEP, POP_MAX)
+
+## Quanti nemici al secondo l'orda puo' guadagnare. Vedi `SPAWN_RATE`, che
+## dichiara la misura da cui viene.
+func spawn_rate() -> float:
+	return SPAWN_RATE
 
 ## Il moltiplicatore di vita dell'onda in corso.
 func hp_scale() -> float:

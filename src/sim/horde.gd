@@ -43,6 +43,14 @@ extends Node3D
 ## **contemporaneamente**. Quanti ne vanno ammazzati in tutto lo dice la barra,
 ## e sono due numeri diversi (vedi `src/sim/run.gd`).
 ##
+## ## m4: `population` non e' piu' una costante
+##
+## Prima di m4 questo campo valeva `MAX_ENEMIES` e `_build()` riempiva a quel
+## numero: 200 nemici vivi al primo frame, e `_top_up()` li riportava a 200 a
+## ogni passo. Nessun colpo svuotava l'arena. La **curva per onda** sta in
+## `src/sim/run.gd` (`Run.population_of`), con la misura da cui e' uscita scritta
+## li'; qui dentro ci sono solo il meccanismo e il credito di spawn.
+##
 ## ## Le tre API del contratto (registrate in `_ready`)
 ##
 ##     Game.horde = self
@@ -83,8 +91,12 @@ const SEPARATION_CHECKS := 6
 const SEPARATION_FORCE := 11.0
 ## Dalla zona dei colpi dello sparo, un nemico non deve arrivare addosso.
 const MIN_SPAWN_GAP := 12.0
-## Popolazione a cui si riporta l'orda quando un nemico muore.
-var population: int = MAX_ENEMIES
+## Popolazione viva **contemporaneamente** dell'onda corrente. **Non e' una
+## costante**: e' uno specchio di `Run.population_of(run.wave)`, tenuto allineato
+## da `_sync_population()` negli stessi punti in cui cambia `wave` (vedi il
+## commento di quel metodo). Il valore di partenza non e' 200 ma
+## `Run.POP_BASE` = 25: la curva e la sua misura sono in `src/sim/run.gd`.
+var population: int = 0
 ## Se falsa, l'orda non si riempie da sola: serve al test per vedere il
 ## conteggio scendere davvero.
 var auto_respawn: bool = true
@@ -146,6 +158,11 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 ## posizione, altrimenti il centro dell'arena.
 var _focus: Vector3 = Vector3.ZERO
 var _sep_buf: PackedInt32Array = PackedInt32Array()
+## Credito di spawn accumulato, in nemici. `_top_up()` lo riempie di
+## `run.spawn_rate() * delta` e ne spende solo interi: e' il posto dove vive il
+## "non tutti insieme" di m4. Il tetto a 1 (in `_top_up`) vuol dire che un passo
+## lento non accumula un raffica e la scarica tutta al passo dopo.
+var _budget: float = 0.0
 var _built: bool = false
 var _registered: bool = false
 var _grid_dirty: bool = true
@@ -207,9 +224,12 @@ func _build() -> void:
 	run = Run.new()
 	_sync_wave()
 	_sync_weights()
-	population = clampi(population, 0, MAX_ENEMIES)
-	# Disposizione iniziale a pieno: 200 nemici vivi al primo frame.
-	_populate(MAX_ENEMIES)
+	# La curva decide quanti nemici ci sono **al primo frame**: 25, non 200. Il
+	# numero e la misura da cui e' uscito stanno in `src/sim/run.gd`.
+	_sync_population()
+	_budget = 0.0
+	# Disposizione iniziale **a `population`**, non a `MAX_ENEMIES`.
+	_populate(population)
 	_rebuild_grid()
 
 func _register() -> void:
@@ -308,10 +328,10 @@ func step(delta: float) -> void:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius)
 	_sweep_dead()
-	_wave_tick()
+	_wave_tick(delta)
 
 ## Fine dell'onda e riempimento, in un passo solo.
-func _wave_tick() -> void:
+func _wave_tick(delta: float) -> void:
 	# La barra a zero e' l'unica condizione che chiude un'onda. Non si guarda
 	# anche che il campo sia vuoto: col riempimento continuo un'onda da 230
 	# uccisioni con 200 vivi non ha mai il campo vuoto al momento giusto, e
@@ -323,7 +343,13 @@ func _wave_tick() -> void:
 		# un runner.
 		_sync_wave()
 		_sync_weights()
-	_top_up()
+		# E con l'onda cambia anche **quanti** ne devono essere vivi: la curva
+		# di `run.gd`. Rialineata qui e non dentro `next_wave()` per lo stesso
+		# motivo dei pesi, e non in `_top_up()` perche' li' il numero deve
+		# arrivare gia' giusto: uno specchio allineato in due posti e' una
+		# combinazione che non e' mai vera.
+		_sync_population()
+	_top_up(delta)
 
 ## Rende il campo pubblico `wave` uguale a quello di `run`. Chiamata dagli
 ## **tre** punti in cui l'onda cambia, e da nessun altro: uno specchio
@@ -332,6 +358,19 @@ func _wave_tick() -> void:
 func _sync_wave() -> void:
 	if run != null:
 		wave = run.wave
+
+## Rende il campo pubblico `population` uguale a quello che `run` chiede per
+## l'onda corrente. Chiamata dagli stessi **tre** punti di `_sync_wave()`
+## (`_build()`, cambio d'onda, restart) e da nessun altro.
+##
+## Non e' una copia per comodita': e' l'unico posto in cui la curva di
+## `src/sim/run.gd` entra nell'orda. `_top_up()` legge **solo** il campo, quindi
+## un test che pilota `population` a mano (il test di capacita') ottiene un'orda
+## di 200 senza dipendere dalla curva, ed e' esattamente il motivo per cui i due
+## numeri sono separati.
+func _sync_population() -> void:
+	if run != null:
+		population = clampi(run.population_of(run.wave), 0, MAX_ENEMIES)
 
 ## Rimette a posto i nemici rimasti senza vita. `damage_enemy` li toglie subito,
 ## quindi di norma non trova niente: e' la rete di sicurezza, non il caso normale.
@@ -343,14 +382,43 @@ func _sweep_dead() -> void:
 			continue
 		i += 1
 
-## Se la popolazione e' scesa, riporta l'orda a `population`.
-func _top_up() -> void:
-	if not auto_respawn:
+## Riporta l'orda verso `population`, ma **al ritmo di `run.spawn_rate()`**.
+##
+## ## Perche' non "finche' `count < population`" come prima
+##
+## La versione di m1 e di m3 era un `while` che riempiva tutto in un passo:
+## misurato, da 0 a 200 in **0.0167 s**, cioe' un passo. E' il sintomo «arrivano
+## tutti insieme addosso», ed e' un fatto sul **tempo**, non sul conteggio: una
+## curva per onda che si riempisse comunque in un frame avrebbe risolto il
+## numero e lasciato il sintomo.
+##
+## Quindi qui il numero di spawn per passo e' il **credito** meno uno, e il
+## credito cresce di `spawn_rate() * delta`. Intero per intero: con 8/s e un
+## passo a 1/60 lo spawn arriva ogni 7.5 passi, mai piu' di uno per passo.
+##
+## Il credito non puo' accumularsi oltre **1**: un passo lento (o un `delta`
+## enorme) non deve poter scaricare una raffica tutta insieme al passo dopo,
+## altrimenti il tetto esisterebbe solo nella media e il sintomo tornerebbe
+## proprio nei momenti in cui il gioco e' andato a scatti.
+func _top_up(delta: float) -> void:
+	if not auto_respawn or count >= population:
 		return
-	var guard := MAX_ENEMIES
-	while count < population and guard > 0:
-		guard -= 1
+	if delta <= 0.0:
+		return
+	_budget += (SPAWN_RATE_FALLBACK if run == null else run.spawn_rate()) * delta
+	var n := int(_budget)
+	if n <= 0:
+		return
+	# mai piu' di quanti ne servono, e mai piu' della capienza fisica
+	n = mini(n, population - count)
+	n = mini(n, MAX_ENEMIES - count)
+	_budget = minf(_budget - float(n), 1.0)
+	for _i in n:
 		_spawn_one()
+
+## Usato solo se `run` non c'e' ancora, cioe' mai: sta qui perche' `population`
+## si puo' pilotare a mano anche su un'orda senza partita.
+const SPAWN_RATE_FALLBACK := 8.0
 
 func _spawn_one() -> void:
 	if count >= MAX_ENEMIES:
@@ -452,7 +520,9 @@ func wave_hp_scale() -> float:
 	return 1.0 if run == null else run.hp_scale()
 
 ## Ricomincia la partita: **onda 1**, barra piena, niente `game_over`, e l'orda
-## di nuovo piena di `MAX_ENEMIES` nemici.
+## di nuovo piena **di `population`**, che sull'onda 1 e' `Run.POP_BASE` = 25 e
+## non `MAX_ENEMIES`. Prima di m4 il restart ripartiva da 200 nemici vivi; era
+## la stessa scelta di design sbagliata dell'avvio, ripetuta al secondo posto.
 ##
 ## Nessun nodo viene creato e nessuno viene liberato: si riscrivono gli array che
 ## già esistono. Il criterio n. 4 chiede che un restart non lasci nodi
@@ -468,11 +538,12 @@ func restart_run() -> void:
 	if not _built:
 		return
 	run.restart()
-	population = MAX_ENEMIES
 	kills = 0
 	hit_count = 0
 	_sync_wave()
 	_sync_weights()
+	_sync_population()
+	_budget = 0.0
 	_populate(population)
 
 ## Ridispone l'orda su un altro seme: il **semplice** e' la disposizione, non

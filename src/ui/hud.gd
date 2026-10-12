@@ -48,6 +48,56 @@ extends CanvasLayer
 ## **XP non finito compreso**: un `INF` o un `NaN` che entra da `set_progression`
 ## esce come `0.0`, non come una barra invisibile.
 ##
+## ## Il passo delle barre: `step = 0.0`, dichiarato in `scenes/hud.tscn`
+##
+## ## Perche' questo difetto e' peggiore di una divisione per zero
+##
+## Una divisione per zero fa sparire la barra e il test la vede subito, perche'
+## il valore disegnato non sta dentro il suo denominatore. Il difetto di
+## `Range.step` e' il contrario: **il numero arriva giusto e non si vede**.
+## `step` vale 0.01 per default e il nodo arrotonda a scatti quello che gli
+## viene scritto, quindi `hud.wave_ratio()` diceva 0.995 mentre
+## `Root/WaveBar.value` diceva 1.0. Un HUD che si ispeciona sembra a posto e a
+## schermo mente, ed e' per questo che `tests/test_ui.gd` confronta **anche** il
+## valore disegnato letto dal nodo e non solo il campo.
+##
+## Il caso che l'ha fatto scattare e' la barra dell'onda, e la scala la decide
+## `-orda`: `wave_bar_ratio()` vale `1 - uccise/popolazione`, e su 200 nemici
+## una uccisione vale 0.005, meta' scatto. La barra restava ferma per meta'
+## dell'onda. Qui dentro non c'e' nessun `200`, per la stessa ragione per cui in
+## `tests/test_ui.gd` non c'e' nessun `200`: la risoluzione del dato non e' di
+## questa foglia, e per questo il fix non puo' essere "abbasso lo step a 0.005".
+##
+## ## Perche' `step = 0.0` su tutte e tre, e non solo su quella dell'onda
+##
+## Il passo e' una griglia che il nodo impone a un numero che **non e' suo**, e
+## qui non e' niente di mio: e' di `-gameplay` (XP) o di `-orda` (vita lo e' del
+## player, ma la barra la disegno io). L'HUD e' un display, senza cursore e senza
+## animazione: non ha nessuna ragione di ri-arrotondare un numero che gli e'
+## stato detto, quindi non arrotonda.
+##
+## La barra della vita e quella dell'XP **oggi** non soffrono: il loro
+## `max_value` e' 100 e la soglia del livello, e uno scatto da 0.01 ci sta
+## dentro un decimo di pixel. Quindi si salvano per **scala**, non perche' il
+## nodo non arrotondi, e questa e' la ragione per cui il fix e' dichiarato su
+## tutte e tre e non solo su quella che falliva: un difetto che sopravvive per
+## caso di scala e' un difetto che aspetta la milestone che cambia la scala, ed e'
+## esattamente quello che e' successo qui con `Run.population_of`.
+##
+## Nota sul numero intero: `step = 0.01` **non** vuol dire "uno scatto per HP
+## intero", vuol dire "uno scatto per centesimo di HP", quindi sulla barra della
+## vita non c'e' nemmeno uno snap a HP intero da difendere. L'intero c'e' gia' e
+## lo fa la Label, con `roundi`, che e' il posto giusto per arrotondare: la
+## barra disegna il numero vero e la Label dice quello che si legge. Se un giorno
+## si volesse la barra ad HP interi, la snap si decide qui e si dichiara, non e'
+## un effetto collaterale del default di `Range`.
+##
+## Il valore vive nella **scena** e non qui perche' `step` e' una proprieta' del
+## nodo, come `show_percentage = false` che sta due righe sotto: dichiararlo nel
+## codice che *scrive* sul nodo lo renderebbe un valore che si puo' perdere
+## senza che nessuno se ne accorga, che e' il difetto che questo file e' fatto
+## per evitare.
+
 ## ## Stringhe a schermo
 ##
 ## Solo ASCII: l'HUD viene letto anche nei log di `--headless`, e la console di
@@ -217,6 +267,20 @@ func wave_ratio() -> float:
 ## Il valore che la barra dell'onda sta disegnando, letto dal nodo.
 func wave_bar_value() -> float:
 	return _wave_bar.value if _wave_bar != null else 0.0
+
+## Il valore e il massimo che la barra della **vita** sta disegnando, letti dal
+## nodo e non ricalcolati, come per le altre due.
+##
+## Esistono perche' la decisione "`step = 0.0` su tutte e tre le barre" non puo'
+## restare un commento: se domani qualcuno rimette il default di `Range` solo
+## sulla barra della vita, la difetta sarebbe invisibile finche' la scala non
+## la espone, e un difetto invisibile non e' un difetto che si e' deciso di
+## correggere. Vedi `tests/test_ui.gd::_health_bar`.
+func health_bar_value() -> float:
+	return _health.value if _health != null else 0.0
+
+func health_bar_max() -> float:
+	return _health.max_value if _health != null else 0.0
 
 ## Cosa c'e' scritto, per il test: leggo le Label invece di ricostruire qui la
 ## stringa che metterei dentro.
@@ -396,6 +460,10 @@ func redraw() -> void:
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
 ## la larghezza del controllo.
+##
+## Quello che qui NON si fa e' arrotondare: il nodo ha `step = 0.0` (dichiarato in
+## `scenes/hud.tscn`, perche' perche' e' li'). Vedi la sezione sul passo in testa
+## al file.
 func _redraw_xp() -> void:
 	var need := _finite_or_zero(xp_next)
 	var span := maxf(need, XP_MIN_SPAN)
@@ -405,6 +473,9 @@ func _redraw_xp() -> void:
 	if _xp_text != null:
 		_xp_text.text = "XP %d / %d" % [roundi(_finite_or_zero(xp)), roundi(need)]
 
+## Qui il `step = 0.0` non e' una scelta estetica ma e' il fix: con il default di
+## `Range` questa barra arrotondava 0.995 a 1.0 e restava ferma per meta' di
+## un'onda da 200 uccisioni. Vedi la sezione sul passo in testa al file.
 func _redraw_wave() -> void:
 	if _wave != null:
 		_wave.text = "WAVE %d" % wave

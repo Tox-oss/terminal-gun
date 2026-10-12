@@ -9,9 +9,11 @@ extends SceneTree
 ##   3. `restart_run()` -> onda 1, `horde.count` azzerato e **ripopolato**, nessun
 ##      nodo duplicato.
 ##
-## E il criterio n. 3 di m1, che non deve regredire: `horde.count == 200` con
-## `node_count < 120`, misurato sulla **scena vera**, non su un'orda costruita in
-## isolamento.
+## E il criterio n. 3 di m1, che non deve regredire: `node_count < 120` con
+## `horde.count == 200`, misurato sulla **scena vera**, non su un'orda
+## costruita in isolamento. Da m4 il numero 200 non si misura piu' all'avvio ma
+## **durante** la partita (piano sez. 1.4, n. 2): lo esercita
+## `_capacita_sulla_scenavera`.
 ##
 ## ## Le due parti, e perche' due
 ##
@@ -45,6 +47,29 @@ extends SceneTree
 ##
 ## Stringhe a schermo solo ASCII: la console di Windows e il pipe di
 ## `OS.execute` sono in codepage e mangiano gli accenti.
+##
+## ## m4: la curva delle onde e cosa cambia in questo file
+##
+## Prima di m4 l'arena partiva gia' piena (200 nemici al primo frame) e
+## `_top_up()` la riportava a 200 a ogni passo: l'onda non creava mai un vuoto.
+## Ora `population` e' una **curva per onda** (`Run.population_of`), 25, 50, 75,
+## 100, 125, 150, 175, 200 all'onda 8, e il campo si riempie al ritmo di
+## `Run.SPAWN_RATE`.
+##
+## **I numeri che questo file verifica, ricalcolati sulla curva nuova:**
+##
+## | | prima di m4 | dopo m4 |
+## |---|---|---|
+## | nemici vivi al primo frame | 200 | **25** (`Run.POP_BASE`) |
+## | `wave_total` onda 1 / 2 / 3 | 200 / 230 / 260 | **invariati**: sono uccisioni, non vivi |
+## | popolazione di onda 1 / 2 / 3 | 200 / 200 / 200 | **25 / 50 / 75** |
+## | tempo per riempire un'onda da 0 | 1 passo = 0.0167 s | **25/8 = 3.1 s**; a 200 vivi **25 s** |
+## | riempimento a `game_over` | ripartiva in 1 passo | fermo: la simulazione e' ferma |
+##
+## Quello che **non** e' cambiato e che questo file continua a pretendere: la
+## capacita' di 200 nemici vivi senza un nodo per nemico, e' verificata in
+## `_capacita_sulla_scenavera` pilotando `population` a mano come fa
+## `tests/test_orda.gd`, quindi il criterio di m1 non dipende dalla curva.
 
 const H = preload("res://tools/test_harness.gd")
 const HORDE = preload("res://src/sim/horde.gd")
@@ -107,6 +132,9 @@ const TETTO_NODI := 120
 const SEME := 177
 
 var _horde: HORDE = null
+## Quando il corpo del test e' partito, in millisecondi di motore. Serve al
+## numero di tempo stampato in fondo: vedi la nota li'.
+var _t0: int = 0
 
 func _initialize() -> void:
 	# L'orda isolata entra nell'albero qui, come in `tests/test_orda.gd`: sotto
@@ -131,6 +159,7 @@ func _process(_delta: float) -> bool:
 	return true
 
 func _run() -> void:
+	_t0 = int(Time.get_ticks_msec())
 	var h := H.new()
 	# Senza tipo dichiarato: il contratto e' un nodo che dichiara metodi che
 	# `Node` non ha, quindi su una variabile tipizzata la chiamata non
@@ -143,6 +172,7 @@ func _run() -> void:
 		return
 
 	_apertura(h, _horde)
+	_curva(h, _horde)
 	_onde(h, _horde)
 	_rientro_in_gioco(h, _horde)
 	_restart(h, _horde, game)
@@ -154,6 +184,15 @@ func _run() -> void:
 	# "manca" per un registro che c'e'. E li' e' anche il posto giusto: la
 	# superficie di m2 e' cio' che le foglie si scambiano **sulla scena vera**.
 	_nessun_nodo_appeso(h)
+	# ## Perche' il tempo di pareggio e' stampato
+	#
+	# m4 ha moltiplicato per sei i passi di simulazione necessari (chiudere
+	# un'onda costa `wave_size / SPAWN_RATE` secondi, e le cinque onde chiuse
+	# da questo file sono ~13 400 giri). `tools/gate.gd` ha un timeout per
+	# test, e un timeout che scatta perche' un test e' diventato piu' lento e'
+	# un test che si rompe senza dire perche'. Il numero va a schermo.
+	print("gameloop: sezione chiusa, %d asserzioni in %d ms"
+		% [h.checks, int(Time.get_ticks_msec()) - _t0])
 	quit(h.finish("test_gameloop"))
 
 # --- Parte 1, numero 1: l'avvio ------------------------------------------------
@@ -161,7 +200,16 @@ func _run() -> void:
 ## Lo stato iniziale: il numero e' preso dal contratto di `run.gd`, non riscritto
 ## qui. Se le due copie divergono, il test mente sulla barra dell'onda.
 func _apertura(h, horde: HORDE) -> void:
-	h.eq(horde.count, 200, "200 nemici vivi al primo frame")
+	# m4: l'avvio NON e' pieno. Il numero e' preso dalla curva di `run.gd`, non
+	# riscritto qui, e il fatto che sia diverso da 200 e' l'invariante 1 del
+	# criterio n. 3 di m1 riscritto ("capienza resta un criterio, il numero
+	# iniziale diventa una curva").
+	h.eq(horde.count, RUN.population_of(1),
+		"l'avvio riempie a `population_of(1)`: %d nemici vivi" % RUN.population_of(1))
+	h.eq(horde.count, RUN.POP_BASE, "che sull'onda 1 e' Run.POP_BASE = %d" % RUN.POP_BASE)
+	h.check(horde.count < HORDE.MAX_ENEMIES,
+		"l'avvio non e' gia' pieno: %d vivi su %d di capienza" % [horde.count, HORDE.MAX_ENEMIES])
+	h.eq(horde.population, horde.count, "e il campo e' gia' al suo tetto: nessuno deve arrivare")
 	h.eq(horde.transforms.size(), horde.count,
 		"transforms e' lunga quanto count: e' l'invariante che arena usa per il MultiMesh")
 	h.eq(horde.colors.size(), horde.count, "un colore per nemico")
@@ -184,9 +232,118 @@ func _apertura(h, horde: HORDE) -> void:
 
 	_specchio(h, horde, "all'avvio")
 	_orda_sana(h, horde, "all'avvio")
-	print("gameloop: avvio, onda %d, barra %d/%d, scala vita %.2f, %d nemici"
+	print("gameloop: avvio, onda %d, barra %d/%d, scala vita %.2f, %d nemici (POP_BASE %d)"
 		% [horde.wave, horde.wave_killed(), horde.wave_total(),
-			horde.wave_hp_scale(), horde.count])
+			horde.wave_hp_scale(), horde.count, RUN.POP_BASE])
+
+# --- m4: la curva per onda ----------------------------------------------------
+#
+# I tre invarianti che il piano scrive, resi numerici:
+#   1. `population` cresce strettamente da onda 1 a onda N (N = quella in cui
+#      arriva al tetto: una sequenza di interi con tetto non puo' crescere per
+#      sempre, e la soglia va dichiarata invece che lasciata a "per sempre");
+#   2. `population` non supera mai `MAX_ENEMIES`;
+#   3. il campo non salta da 0 a `population` in un passo.
+#
+# La sezione verifica i tre **sulle due facce**: la tabella dichiarata in
+# `run.gd` e il campo `population` dell'orda vera letto dopo un cambio d'onda
+# reale. Il secondo e' quello che conta: la tabella puo' essere giusta e lo
+# specchio rotto, e in quel caso il gioco non crescerebbe.
+
+## Quante onde attraversa la sezione di crescita osservata. Tre onde costano
+## 200+230+260 = 690 uccisioni, e a `Run.SPAWN_RATE` quelle arrivano in 690/8 =
+## 86 s, cioe' ~5180 passi: e' il costo dichiarato di misurare la curva per
+## davvero invece di leggerla dalla tabella.
+const ONDE_OSSERVATE := 3
+
+func _curva(h, horde: HORDE) -> void:
+	# --- faccia 1: la tabella dichiarata
+	h.eq(RUN.POP_MAX, HORDE.MAX_ENEMIES,
+		"Run.POP_MAX e Horde.MAX_ENEMIES sono lo stesso numero: due copie che divergono in silenzio")
+	var tabella := PackedInt32Array()
+	for w in range(1, RUN.POP_SATURATION + 2):
+		tabella.append(RUN.population_of(w))
+	print("gameloop: curva per onda, da 1 a %d: %s" % [RUN.POP_SATURATION + 1, str(tabella)])
+	h.check(_cresce_stretta(tabella.slice(0, RUN.POP_SATURATION)),
+		"population cresce strettamente dall'onda 1 all'onda %d: %s"
+			% [RUN.POP_SATURATION, str(tabella.slice(0, RUN.POP_SATURATION))])
+	var sopra := 0
+	for w in range(1, 40):
+		if RUN.population_of(w) > HORDE.MAX_ENEMIES:
+			sopra += 1
+	h.eq(sopra, 0, "su 39 onde nessuna popolazione supera la capienza")
+	h.eq(RUN.population_of(0), RUN.population_of(1),
+		"l'onda 0 non esiste: si parte dall'onda 1")
+	h.eq(RUN.population_of(RUN.POP_SATURATION + 1), HORDE.MAX_ENEMIES,
+		"dopo la saturazione la curva sta al tetto, e la dichiara invece di fingere di crescere")
+
+	# --- faccia 2: l'orda vera, onda dopo onda
+	# Ogni volta che la barra si chiude l'onda avanza e `population` deve
+	# salire. `_svuota_onda` uccide davvero e il cambio avviene al passo
+	# successivo, quindi qui il numero e' **osservato**, non dichiarato.
+	var osservate := PackedInt32Array()
+	osservate.append(horde.population)
+	var attese := PackedInt32Array()
+	attese.append(RUN.population_of(1))
+	for _w in ONDE_OSSERVATE:
+		_svuota_onda(h, horde, horde.wave)
+		osservate.append(horde.population)
+		attese.append(RUN.population_of(horde.wave))
+	h.eq(horde.wave, ONDE_OSSERVATE + 1,
+		"la sezione ha attraversato %d onde davvero" % ONDE_OSSERVATE)
+	h.eq(osservate, attese,
+		"a ogni cambio d'onda `population` vale quello che chiede la curva: %s" % str(osservate))
+	h.check(_cresce_stretta(osservate),
+		"e l'orda vera cresce di onda in onda: %s" % str(osservate))
+
+	# --- invariante 3: il tempo di riempimento
+	# Il numero di nemici vivi non puo' saltare da 0 a `population` nello stesso
+	# passo. E' il sintomo «arrivano tutti insieme» ed e' un fatto sul tempo:
+	# misurato, era 1 passo = 0.0167 s prima di m4.
+	var svuotati := 0
+	while horde.count > 0 and svuotati < 1000:
+		if not _kill_uno(horde):
+			break
+		svuotati += 1
+	h.eq(horde.count, 0, "campo svuotato per misurare il riempimento")
+	h.eq(horde.population, RUN.population_of(horde.wave),
+		"il tetto da raggiungere e' quello dell'onda corrente: %d" % horde.population)
+	var passi := 0
+	var profilo := ""
+	var primo_a_meta := -1
+	while horde.count < horde.population and passi < 20000:
+		horde.step(DT)
+		passi += 1
+		if primo_a_meta < 0 and horde.count >= horde.population / 2:
+			primo_a_meta = passi
+		if passi in [1, 8, 30, 60, 120, 240, 480]:
+			profilo += " %d:%d" % [passi, horde.count]
+	h.check(passi > 1,
+		"l'arena NON si riempie in un passo: %d passi = %.2f s per arrivare a %d"
+			% [passi, float(passi) * DT, horde.population])
+	h.eq(horde.count, horde.population, "e arriva esattamente al tetto, non oltre")
+	h.check(float(passi) * DT >= float(horde.population) / RUN.SPAWN_RATE * 0.95,
+		"il tempo di riempimento e' quello che `SPAWN_RATE` prescrive: %.2f s contro %.2f s di teoria"
+			% [float(passi) * DT, float(horde.population) / RUN.SPAWN_RATE])
+	h.check(primo_a_meta > 1,
+		"neanche a meta' strada il campo e' pieno: %d di %d al passo %d"
+			% [horde.population / 2, horde.population, primo_a_meta])
+	print("gameloop: inv. 3, da 0 a %d in %d passi = %.2f s (SPAWN_RATE %.1f/s); profilo (passi:vivi) %s"
+		% [horde.population, passi, float(passi) * DT, RUN.SPAWN_RATE, profilo])
+
+	# la sezione lascia l'orda come l'ha trovata, per le asserzioni dopo
+	horde.restart_run()
+
+## Il predicato dell'invariante 1: **strettamente** crescente.Uguale non passa.
+## Sta in una funzione perche' i denti (milestone 4, criterio n. 6) si provano
+## forzandola su una sequenza piatta e guardando l'asserzione dire `FAIL`: per
+## farlo l'asserzione deve chiamare **questa** funzione e non ripetere il
+## confronto nel corpo del test.
+func _cresce_stretta(valori: PackedInt32Array) -> bool:
+	for i in range(1, valori.size()):
+		if valori[i] <= valori[i - 1]:
+			return false
+	return true
 
 # --- Parte 1, numero 1: il cambio d'onda --------------------------------------
 
@@ -209,25 +366,31 @@ func _onde(h, horde: HORDE) -> void:
 		_orda_sana(h, horde, "sull'onda %d" % (wave_da + 1))
 		_barra_sana(h, horde, "sull'onda %d" % (wave_da + 1))
 
-	# La barra, non il campo. Un'onda da 230 uccisioni con 200 vivi non può
-	# diventare vuota al momento giusto, quindi una fine d'onda che guardasse il
-	# campo non finirebbe mai: e' il numero che distingue un bullet heaven da
-	# un'orda sola.
+	# La barra, non il campo. Un'onda da 230 uccisioni con 25 vivi contemporanei
+	# non puo' diventare vuota al momento giusto, quindi una fine d'onda che
+	# guardasse il campo non finirebbe mai: e' il numero che distingue un bullet
+	# heaven da un'orda sola. Dopo m4 il distacco e' anche piu' netto: 230
+	# uccisioni con 50 vivi significa che il campo si riempie **mentre** uccidi.
+	h.check(RUN.wave_size(2) > horde.population,
+		"l'onda 2 chiede %d uccisioni con %d nemici vivi contemporanei: il campo da solo non puo' chiuderla"
+			% [RUN.wave_size(2), horde.population])
 	h.check(RUN.wave_size(2) > HORDE.MAX_ENEMIES,
-		"l'onda 2 chiede %d uccisioni con %d nemici vivi: il campo da solo non puo' chiuderla"
-			% [RUN.wave_size(2), HORDE.MAX_ENEMIES])
-	print("gameloop: onde 1->3 superate, %d uccisioni in tutto, scala vita ora %.2f"
-		% [horde.kills, horde.wave_hp_scale()])
+		"e anche piu' della capienza: %d uccisioni contro %d vivi" % [RUN.wave_size(2), HORDE.MAX_ENEMIES])
+	h.eq(horde.population, RUN.population_of(horde.wave),
+		"dopo il passaggio all'onda %d la popolazione e' quella della curva" % horde.wave)
+	print("gameloop: onde 1->3 superate, %d uccisioni in tutto, scala vita ora %.2f, %d vivi"
+		% [horde.kills, horde.wave_hp_scale(), horde.population])
 
-## Svuota l'onda `wave_da` e restituisce quanti passi di riempimento sono
-## serviti. `damage_enemy` uccide subito, ma il cambio d'onda avviene al passo
-## di simulazione successivo: e' l'ordine che `horde.gd::_wave_tick` dichiara, e
-## qui viene verificato invece che supposto.
+## Svuota l'onda `wave_da` e restituisce quanti giri sono serviti. `damage_enemy`
+## uccide subito, ma il cambio d'onda avviene al passo di simulazione successivo:
+## e' l'ordine che `horde.gd::_wave_tick` dichiara, e qui viene verificato
+## invece che supposto.
 func _svuota_onda(h, horde: HORDE, wave_da: int) -> int:
 	h.eq(horde.wave, wave_da, "si parte dall'onda %d" % wave_da)
 	var bersaglio := horde.wave_total()
 	var giri := 0
-	while horde.wave == wave_da and giri < 40:
+	var tetto := _giri_per_chiudere(wave_da)
+	while horde.wave == wave_da and giri < tetto:
 		giri += 1
 		# Il contratto, non solo il metodo diretto: e' la strada che il gioco usa.
 		_kill_uno(horde)
@@ -242,7 +405,32 @@ func _svuota_onda(h, horde: HORDE, wave_da: int) -> int:
 				"le uccisioni da sole non cambiano onda: il cambio avviene al passo")
 		_barra_sana(h, horde, "durante l'onda %d" % wave_da)
 		horde.step(DT)
+	h.check(horde.wave == wave_da + 1,
+		"l'onda %d si chiude entro %d giri (ne sono serviti %d): il tetto e' `wave_size / SPAWN_RATE / DT`"
+			% [wave_da, tetto, giri])
 	return giri
+
+## Quanti giri puo' costare chiudere l'onda `w`: **derivato, non scelto**.
+##
+## Il tetto e' sorto da un numero che m4 ha cambiato e che m1 aveva reso falso.
+## Prima di m4 bastavano ~8 giri: `_top_up()` riportava il campo alla popolazione
+## in un passo, quindi a ogni giro il campo era pieno e l'onda 1 (200
+## uccisioni) si chiudeva in 8. Dopo m4 il campo si riempie al ritmo di
+## `Run.SPAWN_RATE`, e **il ritmo delle uccisioni non puo' superarlo**: se
+## arrivano `SPAWN_RATE` nemici al secondo, chiudere `wave_size(w)` uccisioni
+## richiede almeno `wave_size(w) / SPAWN_RATE` secondi. Il tetto e' quel
+## minimo diviso per `DT`, con un margine.
+##
+## Il margine copre i due effetti che lo rendono non esatto, entrambi a favore
+## della rapidita': le uccisioni dei nemici **gia' vivi** all'inizio dell'onda
+## (il campo parte pieno, e quelle non le ha prodotte lo spawn) e
+## l'arrotondamento del credito di spawn a interi. Un tetto strettamente
+## derivato avrebbe fatto fallire il test per aritmetica, non per un difetto.
+const MARGINE_GIRI := 1.6
+
+func _giri_per_chiudere(wave_da: int) -> int:
+	var secondi := float(RUN.wave_size(wave_da)) / RUN.SPAWN_RATE
+	return int(ceil(secondi / DT * MARGINE_GIRI))
 
 ## Una uccisione attraverso il **contratto**, non solo attraverso il metodo
 ## diretto: e' la strada che il gioco usa, e il suo valore di ritorno dice chi e'
@@ -260,6 +448,30 @@ func _kill_uno(horde: HORDE) -> bool:
 ## gonfino niente. Qui il giro e' diverso e serve a m2: i 600 passi **attraversano
 ## un cambio d'onda**, che e' il posto dove si riempie l'orda, quindi e' li' che
 ## un'allocazione nel ciclo di gioco si farebbe vedere.
+## ## m4: i due blocchi, e perche' non ne basta uno
+##
+## Prima di m4 bastavano 600 passi con un'uccisione ogni due: il campo si
+## riempiva in un passo, quindi in 600 passi (10 s) arrivavano 6000 nemici e la
+## barra si chiudeva ampiamente. Adesso **il limite non e' il ritmo delle
+## uccisioni, e' la consegna**: a `SPAWN_RATE = 8/s` in 600 passi arrivano 80
+## nemici, e l'onda corrente ne chiede 260. Quindi i 600 passi sono ancora un
+## blocco che si misura (e' il criterio di m1), ma il cambio d'onda va cercato
+## con un secondo blocco che gira finche' non arriva, e il **numero di passi che
+## ci vuole** e' la misura: prima ne servivano ~300, adesso ne servono ~1950,
+## cioe' 260 uccisioni a 8 al secondo. E' la stessa identita' che nella tabella
+## di `run.gd`, misurata dal lato dell'orda.
+##
+## Il secondo blocco uccide **tutto quello che c'e'**: se il limite fosse il
+## ritmo, l'attesa sarebbe quella di prima; il fatto che servano ~1950 passi e'
+## la prova che il limite e' la rampa.
+
+## Passi minimi del primo blocco: il criterio di m1.
+const BLOCCHI := 600
+## Tetto del secondo blocco, in passi. 260 uccisioni a 8/s sono 32.5 s = 1950
+## passi: il tetto e' il doppio, per non far fallire il test perche' un giorno
+## `SPAWN_RATE` cambiera' di un filo.
+const TETTO_ATTESA := 4000
+
 func _rientro_in_gioco(h, horde: HORDE) -> void:
 	var wave_iniziale := horde.wave
 	var nodi0 := _count_nodes(root)
@@ -267,35 +479,75 @@ func _rientro_in_gioco(h, horde: HORDE) -> void:
 	var mem0 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
 	var morti := 0
 
-	for s in 600:
+	# Blocco 1: i 600 passi del criterio di m1, con un'uccisione ogni due passi
+	# quando il campo ha qualcosa da dare. Qui non si attraversa nessun confine
+	# d'onda, ed e' un fatto che va detto: lo spetta il blocco 2.
+	for s in BLOCCHI:
 		horde.step(DT)
-		# un'uccisione ogni due passi: la barra dell'onda corrente (230) si
-		# chiude a meta' del cammino, quindi un cambio d'onda avviene dentro il
-		# ciclo e non ai bordi
 		if s % 2 == 0 and horde.count > 0:
 			if _kill_uno(horde):
 				morti += 1
 
+	h.eq(horde.wave, wave_iniziale,
+		"in %d passi con la rampa di m4 l'onda non e' finita: %d uccisioni su %d richieste"
+			% [BLOCCHI, horde.wave_killed(), horde.wave_total()])
+	h.check(horde.count <= horde.population,
+		"e il campo non ha mai superato il tetto: %d su %d" % [horde.count, horde.population])
+	h.eq(horde.transforms.size(), horde.count, "allineata dopo %d passi" % BLOCCHI)
+	h.eq(horde.hp.size(), horde.count, "anche hp allineata dopo %d passi" % BLOCCHI)
+
+	# Blocco 2: il cambio d'onda, che ora costa secondi e non un passo.
+	var uccisioni_parte := horde.wave_killed()
+	var uccisioni := 0
+	var attesa := 0
+	while horde.wave == wave_iniziale and attesa < TETTO_ATTESA:
+		horde.step(DT)
+		attesa += 1
+		if horde.count > 0:
+			if _kill_uno(horde):
+				morti += 1
+				uccisioni += 1
 	h.eq(horde.wave, wave_iniziale + 1,
-		"un'uccisione ogni due passi per 600 passi attraversa esattamente un confine d'onda")
-	h.check(horde.wave_killed() > 0, "l'onda corrente non e' finita")
-	h.eq(horde.count, HORDE.MAX_ENEMIES, "l'orda torna piena dopo il riempimento")
-	h.eq(horde.transforms.size(), horde.count, "allineata dopo 600 passi")
-	h.eq(horde.hp.size(), horde.count, "anche hp allineata dopo 600 passi")
+		"il cambio d'onda arriva, e arriva tardi: %d passi dopo il blocco di m1" % attesa)
+	h.check(attesa > BLOCCHI / 2,
+		"l'attesa e' piu' lunga di meta' del blocco di m1: %d contro %d"
+			% [attesa, BLOCCHI / 2])
+	# ## Perche' si conta sulle uccisioni e non su `wave_killed()`
+	#
+	# Il cambio d'onda avviene **dentro** `horde.step(DT)`, e `run.next_wave()`
+	# azzera `wave_killed` nello stesso istante: quando il ciclo esce, la barra
+	# della nuova onda e' a zero. La vecchia riga `wave_killed() > 0` passava
+	# perche' prima di m4 il campo si riempiva in un passo e l'attesa si
+	# chiudeva con un uccisione nella nuova onda: era un incidente della rampa,
+	# non la proprieta' che si voleva verificare. La domanda vera e' **perche'**
+	# l'onda e' cambiata, e la risposta e' che la barra dell'onda precedente ha
+	# raggiunto lo zero: quindi si contano le uccisioni di **quell'** onda.
+	h.check(uccisioni_parte + uccisioni >= RUN.wave_size(wave_iniziale),
+		"il cambio e' stato causato dalla barra a zero: %d uccisioni sull'onda %d, che ne chiedeva %d"
+			% [uccisioni_parte + uccisioni, wave_iniziale, RUN.wave_size(wave_iniziale)])
+	h.check(horde.wave_killed() < horde.wave_total(),
+		"e la nuova onda non nasce gia' finita: %d uccisioni su %d" % [horde.wave_killed(), horde.wave_total()])
+	h.check(horde.count <= horde.population,
+		"il campo resta sotto il tetto anche dopo il cambio: %d su %d"
+			% [horde.count, horde.population])
+	h.eq(horde.population, RUN.population_of(horde.wave),
+		"e il tetto e' salito con l'onda: %d" % horde.population)
+	h.eq(horde.transforms.size(), horde.count, "allineata dopo il cambio d'onda")
+	h.eq(horde.hp.size(), horde.count, "anche hp allineata dopo il cambio d'onda")
 	h.eq(horde.grid_unknown_cells, 0,
-		"nessuna cella nuova dopo 600 passi e un cambio d'onda: nel ciclo non si alloca")
+		"nessuna cella nuova dopo %d passi e un cambio d'onda: nel ciclo non si alloca" % (BLOCCHI + attesa))
 	h.check(not horde.grid_overflowed(), "nessun secchiello traboccato")
-	_specchio(h, horde, "dopo 600 passi")
-	_barra_sana(h, horde, "dopo 600 passi")
+	_specchio(h, horde, "dopo il cambio d'onda")
+	_barra_sana(h, horde, "dopo il cambio d'onda")
 
 	var nodi1 := _count_nodes(root)
 	var obj1 := int(Performance.get_monitor(Performance.OBJECT_COUNT))
 	var mem1 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
-	h.eq(nodi1, nodi0, "600 passi non aggiungono nodi")
+	h.eq(nodi1, nodi0, "%d passi non aggiungono nodi" % (BLOCCHI + attesa))
 	h.check(obj1 <= obj0 + 16,
-		"600 passi non aggiungono oggetti: %d contro %d" % [obj1, obj0])
+		"%d passi non aggiungono oggetti: %d contro %d" % [BLOCCHI + attesa, obj1, obj0])
 	h.check(mem1 - mem0 < 4 * 1024 * 1024,
-		"600 passi non gonfiano la memoria: +%d KB" % ((mem1 - mem0) / 1024))
+		"%d passi non gonfiano la memoria: +%d KB" % [BLOCCHI + attesa, (mem1 - mem0) / 1024])
 
 	# e nessuna posizione spazzatura, che e' il modo in cui un array parallelo
 	# disallineato si manifesta
@@ -304,16 +556,27 @@ func _rientro_in_gioco(h, horde: HORDE) -> void:
 		var p := horde.transforms[i]
 		if not (is_finite(p.x) and is_finite(p.y) and is_finite(p.z)):
 			spazzatura += 1
-	h.eq(spazzatura, 0, "nessun nemico con una posizione spazzatura dopo 600 passi")
-	print("gameloop: 600 passi e %d uccisioni, onda %d -> %d, nodi %d -> %d, oggetti %d -> %d, memoria +%d KB"
-		% [morti, wave_iniziale, horde.wave, nodi0, nodi1, obj0, obj1, (mem1 - mem0) / 1024])
+	h.eq(spazzatura, 0, "nessun nemico con una posizione spazzatura dopo %d passi" % (BLOCCHI + attesa))
+	print("gameloop: %d+%d passi e %d uccisioni, onda %d -> %d, tetto %d vivi, nodi %d -> %d, oggetti %d -> %d, memoria +%d KB"
+		% [BLOCCHI, attesa, morti, wave_iniziale, horde.wave, horde.population,
+			nodi0, nodi1, obj0, obj1, (mem1 - mem0) / 1024])
 
 # --- Parte 1, numero 3: il restart --------------------------------------------
 
-## `restart_run()` tre volte di fila. Il numero da guardare non e' `wave == 1`:
-## e' che **l'orda e' di nuovo piena** e che **il numero di nodi non e' cambiato**,
+## `restart_run()` tre volte di fila. Il numero da guardare non e' `wave == 1`, e
+## non e' un numero scritto qui dentro: e' che **l'orda torna alla popolazione
+## che la curva assegna all'onda 1** e che **il numero di nodi non e' cambiato**,
 ## perche' un restart che ricrea l'orda da zero sembra funzionante e lascia
 ## appeso un nodo per nemico.
+##
+## ## Perche' `population_of(1)` e non un numero
+##
+## `horde.count == 200` era l'invariante di prima di m4: la partita partiva
+## piena, quindi il restart doveva ripartire pieno. Ora la partita parte a
+## `Run.POP_BASE` e cresce onda per onda: un test con dentro `200` va
+## riscritto alla prossima milestone, un test con dentro `population_of(1)`
+## no. Il numero che resta fermo, e che e' quello di m1, e' `MAX_ENEMIES`: e'
+## verificato a parte, in `_capacita_sulla_scenavera`.
 func _restart(h, horde: HORDE, game) -> void:
 	var nodi0 := _count_nodes(root)
 	var hordi0 := _count_named(root, NODO_HORDE)
@@ -334,8 +597,16 @@ func _restart(h, horde: HORDE, game) -> void:
 		h.near(horde.wave_hp_scale(), 1.0, 0.0001,
 			"restart %d: la scala delle vite torna a 1.0, le tabelle di m1 sono quelle di prima" % (giro + 1))
 		h.eq(horde.kills, 0, "restart %d: il contatore delle uccisioni riparte" % (giro + 1))
-		h.eq(horde.count, HORDE.MAX_ENEMIES,
-			"restart %d: horde.count azzerato e RIPOPOLATO" % (giro + 1))
+		# Il tetto inseguito e la curva dell'onda 1, non una copia del numero:
+		# e' la relazione che deve valere, e vale anche se `POP_BASE` cambia.
+		h.eq(horde.population, RUN.population_of(horde.wave),
+			"restart %d: il tetto inseguito e' quello della curva" % (giro + 1))
+		h.eq(horde.count, RUN.population_of(1),
+			"restart %d: horde.count azzerato e RIPOPOLATO a `population_of(1)` = %d"
+				% [giro + 1, RUN.population_of(1)])
+		h.check(horde.count < HORDE.MAX_ENEMIES,
+			"restart %d: l'avvio NON e' pieno: %d vivi su %d di capienza"
+				% [giro + 1, horde.count, HORDE.MAX_ENEMIES])
 		h.eq(horde.transforms.size(), horde.count, "restart %d: transforms allineata" % (giro + 1))
 		h.eq(horde.colors.size(), horde.count, "restart %d: colors allineata" % (giro + 1))
 		_specchio(h, horde, "restart %d" % (giro + 1))
@@ -354,7 +625,8 @@ func _restart(h, horde: HORDE, game) -> void:
 	for _i in 37:
 		_kill_uno(horde)
 	horde.restart_run()
-	h.eq(horde.count, HORDE.MAX_ENEMIES, "restart dopo 37 uccisioni: l'orda e' di nuovo piena")
+	h.eq(horde.count, RUN.population_of(1),
+		"restart dopo 37 uccisioni: l'orda torna a `population_of(1)` = %d" % RUN.population_of(1))
 	h.eq(horde.wave, 1, "restart dopo 37 uccisioni: onda 1")
 	h.eq(_count_nodes(root), nodi0, "restart dopo 37 uccisioni: nessun nodo in piu'")
 	print("gameloop: 4 restart, %d nodi prima e dopo, un nodo \"%s\" sotto root"
@@ -380,19 +652,25 @@ func _scena_vera(h, game) -> void:
 		_chiudi(arena)
 		return
 
-	# Il criterio n. 3 della milestone 1, rimesurato: se m2 aggiungesse un nodo
-	# per nemico, e' qui che lo si vede.
-	h.eq(horde.count, HORDE.MAX_ENEMIES, "nella scena vera ci sono %d nemici vivi" % HORDE.MAX_ENEMIES)
-	h.eq(horde.transforms.size(), horde.count, "e transforms e' allineata")
-	var nodi := _count_nodes(root)
-	h.check(nodi < TETTO_NODI,
-		"criterio n. 3 di m1 non regredisce: %d nemici vivi con %d nodi (tetto %d)"
-			% [horde.count, nodi, TETTO_NODI])
+	# m4: l'avvio della scena vera e' **sulla curva**, non pieno. Il numero che
+	# m1 chiede (200 nemici vivi con meno di 120 nodi) non e' sparito, e' stato
+	# spostato a **durante** la partita dal criterio riscritto (piano sez. 1.4
+	# n. 2): lo esercita `_capacita_sulla_scenavera` qui sotto, che e' la
+	# sezione che quel testo rende verificabile.
 	h.eq(horde.wave, 1, "la partita vera parte dall'onda 1")
+	h.eq(horde.count, RUN.population_of(horde.wave),
+		"nella scena vera l'orda nasce a `population_of(1)` = %d, non a capienza"
+			% RUN.population_of(1))
+	h.eq(horde.population, RUN.population_of(horde.wave), "e insegue quel tetto")
+	h.check(horde.count < HORDE.MAX_ENEMIES,
+		"l'avvio NON e' pieno: %d vivi su %d di capienza" % [horde.count, HORDE.MAX_ENEMIES])
+	h.eq(horde.transforms.size(), horde.count, "e transforms e' allineata")
 	h.eq(horde.run_state(), "playing", "e la partita e' in corso")
 	h.eq(horde.wave_remaining(), horde.wave_total(), "con la barra piena")
 	h.eq(_count_named(root, NODO_HORDE), 1,
 		"sotto root un solo nodo \"%s\": il totale dei nodi non lo direbbe" % NODO_HORDE)
+
+	_capacita_sulla_scenavera(h, horde)
 
 	_game_over(h, horde, player)
 	_riavvio(h, horde, player, game)
@@ -407,6 +685,75 @@ func _scena_vera(h, game) -> void:
 	_chiudi(arena)
 	h.eq(_count_named(root, NODO_HORDE), 0,
 		"la scena chiusa non lascia l'orda appesa sotto root: un nodo liberato a meto resta raggiungibile")
+
+## Il criterio n. 3 della milestone 1 **durante la partita**, sulla scena vera:
+## `node_count < 120` con `horde.count == 200` **raggiunto in partita**.
+##
+## ## Perche' questa sezione esiste solo da m4
+##
+## Prima di m4 bastava guardare l'avvio: la scena nasceva con 200 nemici vivi e
+## il numero era li', a portata di un `h.eq`. Il criterio n. 3 di m1 e' stato
+## riscritto (piano sez. 1.4, n. 2) perche' quella seconda meta' era una scelta
+## di design travestita da criterio: la partita non parte piena, parte a
+## `Run.POP_BASE` e cresce onda per onda. **Il tetto di 120 e il numero 200 non
+## cambiano: cambia quando si misurano.** E siccome il numero non arriva piu'
+## da solo, va esercitato: qui `population` viene pilotata a mano come fa
+## `tests/test_orda.gd`, e il tetto di nodi viene contato mentre 200 nemici sono
+## davvero vivi sulla scena che il gioco avvia.
+##
+## Il resto del test continua a lavorare sulla curva: la sezione finisce con un
+## `restart_run()`, che rimette a posto `population` passando da
+## `_sync_population()` e non da una copia del numero scritta qui.
+##
+## Perche' si conta **durante** e non dopo: il tetto di 120 nodi e' un numero
+## che deve valere mentre l'orda e' piena. Contarlo a campo svuoto passerebbe
+## anche con un nodo per nemico che nasce e muore tra due conteggi.
+func _capacita_sulla_scenavera(h, horde: HORDE) -> void:
+	var nodi_avvio := _count_nodes(root)
+	var avvio := horde.count
+	# `population` e' un campo pubblico dichiarato in `horde.gd` proprio per
+	# questo: e' la rampa che la curva pilota in partita, e qui la si porta a
+	# mano alla capienza senza dipendere dall'onda.
+	horde.population = HORDE.MAX_ENEMIES
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 20000:
+		horde.step(DT)
+		passi += 1
+
+	h.eq(horde.count, HORDE.MAX_ENEMIES,
+		"durante la partita l'orda della scena vera arriva a %d nemici vivi" % HORDE.MAX_ENEMIES)
+	# Il sintomo di m4 verificato sulla scena vera: la capienza non e' piu' un
+	# numero che il motore si trova gia' addosso al primo passo.
+	h.check(passi > 1,
+		"e non ci arriva in un passo: %d passi = %.2f s al ritmo di Run.SPAWN_RATE (%.1f/s)"
+			% [passi, float(passi) * DT, RUN.SPAWN_RATE])
+	h.check(float(passi) * DT >= float(HORDE.MAX_ENEMIES - avvio) / RUN.SPAWN_RATE * 0.95,
+		"il tempo di riempimento e' quello che `SPAWN_RATE` prescrive: %.2f s contro %.2f s di teoria"
+			% [float(passi) * DT, float(HORDE.MAX_ENEMIES - avvio) / RUN.SPAWN_RATE])
+
+	h.eq(horde.transforms.size(), horde.count, "gli array sono allineati a capienza piena")
+	h.eq(horde.colors.size(), horde.count, "anche i colori")
+	var nodi := _count_nodes(root)
+	h.check(nodi < TETTO_NODI,
+		"criterio n. 3 di m1: %d nemici vivi con %d nodi (tetto %d), sulla scena vera e DURANTE la partita"
+			% [horde.count, nodi, TETTO_NODI])
+	h.eq(horde.get_child_count(), 0,
+		"e l'orda non ha un nodo per nemico, nemmeno a capienza piena")
+	# Nessun nodo e' comparso per arrivarci: la rampa scrive dentro array, non
+	# nell'albero.
+	h.eq(nodi, nodi_avvio,
+		"riempire l'orda a capienza non ha aggiunto un nodo: %d prima, %d dopo" % [nodi_avvio, nodi])
+	print("gameloop: capienza sulla scena vera, da %d a %d vivi in %d passi = %.2f s, %d -> %d nodi"
+		% [avvio, horde.count, passi, float(passi) * DT, nodi_avvio, nodi])
+
+	# Il resto del file lavora sulla curva: si torna al numero che l'onda 1
+	# chiede, e il ritorno si verifica come **relazione**, non come numero.
+	horde.restart_run()
+	h.eq(horde.wave, 1, "dopo la capienza esercitata si torna all'onda 1")
+	h.eq(horde.population, RUN.population_of(horde.wave), "e al tetto della curva")
+	h.eq(horde.count, RUN.population_of(1),
+		"l'orda torna a `population_of(1)` = %d" % RUN.population_of(1))
+	h.eq(_count_nodes(root), nodi_avvio, "e nessun nodo e' rimasto appeso")
 
 ## Giocatore a 0 vite -> la partita e' finita, e la simulazione si ferma.
 func _game_over(h, horde: HORDE, player) -> void:
@@ -443,7 +790,9 @@ func _riavvio(h, horde: HORDE, player, game) -> void:
 	h.check(not horde.is_game_over(), "restart: niente game_over")
 	h.eq(horde.wave_remaining(), horde.wave_total(), "restart: la barra e' piena")
 	h.near(horde.wave_bar_ratio(), 1.0, 0.0001, "restart: rapporto della barra a 1")
-	h.eq(horde.count, HORDE.MAX_ENEMIES, "restart: horde.count azzerato e RIPOPOLATO")
+	h.eq(horde.count, RUN.population_of(1),
+		"restart: horde.count azzerato e RIPOPOLATO a `population_of(1)` = %d" % RUN.population_of(1))
+	h.eq(horde.population, RUN.population_of(horde.wave), "restart: il tetto inseguito e' quello della curva")
 	h.eq(horde.transforms.size(), horde.count, "restart: transforms allineata di nuovo")
 	h.eq(horde.wave_killed(), 0, "restart: nessuna uccisione contata")
 	h.eq(_count_nodes(root), nodi0,
@@ -495,7 +844,7 @@ func _riavvio(h, horde: HORDE, player, game) -> void:
 		"restart con il giocatore in piedi: la partita riprende")
 	h.eq(horde.run_state(), "playing", "e lo stato e' tornato in corso")
 	h.eq(horde.wave, 1, "sull'onda 1")
-	h.eq(horde.count, HORDE.MAX_ENEMIES, "e l'orda e' di nuovo piena")
+	h.eq(horde.count, RUN.population_of(1), "e l'orda e' di nuovo a `population_of(1)`")
 	h.eq(_count_nodes(root), nodi0, "e nessun nodo e' comparso nel frattempo")
 	var quieta := horde.transforms.duplicate()
 	horde.step(DT)

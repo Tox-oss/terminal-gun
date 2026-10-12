@@ -30,25 +30,45 @@ extends SceneTree
 ##      che `xp_earned` cresce di `xp_per_kill` per ogni uccisione.
 ##
 ## ## Il percorso delle uccisioni e' quello vero anche dove costa di piu'
-## Per chiudere l'onda 1 servono 200 uccisioni (`Run.WAVE_BASE`). Con il danno di
-## codice (10.0) servirebbero circa 1400 colpi e qualche migliaio di passi di
-## simulazione con 200 nemici vivi: il test per prima cosa **alza il danno** a un
-## valore che uccide con un colpo, e lo dichiara. Non e' una scorciatoia: e'
-## l'impalcatura del tempo, e la prova di "l'XP non e' finta" (sezione 1) gira
-## con il **danno di codice**, intatto. Cio' che il criterio n. 2 misura e' da
-## quanti `true` di `damage_enemy` passa, non da quanti punti fa un colpo.
+## L'onda 1 si chiude con `Run.WAVE_BASE` = 200 uccisioni: quel numero non e'
+## cambiato e non e' scritto qui dentro, arriva dalla tabella di `run.gd`. Con il
+## danno di codice (10.0) servirebbero circa 1400 colpi e qualche migliaio di
+## passi di simulazione: il test per prima cosa **alza il danno** a un valore che
+## uccide con un colpo, e lo dichiara. Non e' una scorciatoia: e' l'impalcatura del
+## tempo, e la prova di "l'XP non e' finta" (sezione 1) gira con il **danno di
+## codice**, intatto. Cio' che il criterio n. 2 misura e' da quanti `true` di
+## `damage_enemy` passa, non da quanti punti fa un colpo.
+##
+## Dal primo di m4 c'e' un secondo tetto al ritmo: l'orda non e' piena al primo
+## frame, si riempie a `Run.SPAWN_RATE` nemici al secondo, quindi le 200
+## uccisioni dell'onda 1 non costano piu' 200 passi ma ~`200 / SPAWN_RATE`
+## secondi di simulazione. Il numero di passi **misurato** e' stampato in fondo
+## alla sezione 3, e il tetto `TETTO_PASSI` e' dichiarato per quello.
 ##
 ## ## La trappola del `const preload` (piano sez. 5.3)
 ## `scenes/arena_main.tscn` si carica con `load()` **dentro il corpo del test**,
 ## mai in `const`: un `const preload` risolve gli script a tempo di compilazione,
 ## PRIMA che l'autoload `Game` sia fra le costanti globali, e `player.gd` usa
-## l'identificatore nudo `Game`. Solo `tools/test_harness.gd` e' in `const`, e non
-## tocca il contratto.
+## l'identificatore nudo `Game`. `res://src/sim/run.gd` invece e' un `RefCounted`
+## che non nomina mai `Game`: li' il `const preload` e' sicuro, ed e' la strada
+## che gia' usano `tests/test_orda.gd` e `tests/test_gameloop.gd` per non copiare
+## la tabella delle onde. `tools/test_harness.gd` non tocca il contratto.
+##
+## ## Perche' qui non c'e' piu' nessun numero scritto a mano
+##
+## Fino a m4 questo file asseriva `count == 200` all'avvio. Poi `-orda` ha messo la
+## curva per onda in `src/sim/run.gd` e l'avvio e' sceso a `Run.POP_BASE`: la
+## cifra e' cambiata, il criterio no. Sostituire `200` con `25` avrebbe fatto
+## passare il gate e lasciato un test da riscrivere alla prossima milestone che
+## tocca la curva, che e' gia' successo una volta. Quindi l'avvio e' asserito come
+## **relazione** (`_popolazione_davvio`) e il numero esce dalla misura.
 ##
 ## Stringhe a schermo solo ASCII: la console di Windows e il pipe di
 ## `OS.execute` sono in codepage e mangiano gli accenti.
 
 const H = preload("res://tools/test_harness.gd")
+## La tabella delle onde di -orda, letta a runtime. Nessuna copia qui dentro.
+const Run = preload("res://src/sim/run.gd")
 
 const DT := 1.0 / 60.0
 const ARENA_SCENE := "res://scenes/arena_main.tscn"
@@ -123,7 +143,7 @@ func _prova(h, game, arena) -> void:
 
 	h.check(game.get("player") == player, "Game.player e' il giocatore della scena vera")
 	h.check(game.get("horde") == horde, "e Game.horde e' l'orda della scena vera")
-	h.eq(int(horde.count), 200, "l'orda della scena vera parte con 200 nemici vivi")
+	_popolazione_davvio(h, horde)
 	h.eq(int(horde.wave), 1, "e sull'onda 1")
 
 	var prog = _progressione(h, game, player)
@@ -147,6 +167,38 @@ func _prova(h, game, arena) -> void:
 	_senza_uccisioni_niente_xp(h, prog, horde, player, weapon, per_kill, base, passo)
 	_barra_e_nan(h, prog, base, passo)
 	_xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill, base, passo)
+
+# --- 0. La popolazione d'avvio: una relazione, non una cifra --------------------
+
+## Cosa resta vero qualunque numero scelga `-orda` domani, e cosa il criterio
+## chiede davvero (che l'avvio sia **coerente con la curva dichiarata**, non che
+## la curva valga un numero fissato da questo test):
+##
+##     count      == population                il campo e' pieno al suo tetto
+##     population == Run.population_of(1)      il tetto e' quello che chiede la curva
+##
+## Il numero **esce** dalla misura ed e' stampato: nessuna cifra scritta a mano
+## nell'asserzione. Fino a m4 qui c'era `count == 200`; sostituire quella riga
+## con `count == 25` avrebbe fatto passare il gate e lasciato un test da
+## riscrivere alla prossima milestone che tocca la curva, che e' gia' successo.
+##
+## Il secondo `check` e' voluto: `population` deve essere **positivo**, altrimenti
+## la prima relazione (`count == population == 0`) passerebbe su un'orda vuota.
+func _popolazione_davvio(h, horde) -> void:
+	var tetto: Variant = horde.get("population")
+	if not h.check(typeof(tetto) == TYPE_INT,
+			"l'orda dichiara il campo `population`: senza, non si sa a cosa debba essere pieno"):
+		return
+	h.eq(int(horde.count), int(tetto),
+		"l'orda della scena vera parte piena al suo tetto di popolazione")
+	h.eq(int(tetto), Run.population_of(1),
+		"e il tetto e' quello che chiede la curva delle onde sull'onda 1 (Run.population_of)")
+	h.check(int(tetto) > 0,
+		"un'onda che parte vuota non e' un'onda: %d nemici vivi" % int(tetto))
+	print("progression: avvio, onda %d, %d nemici vivi = tetto di popolazione %d, %d uccisioni per chiudere l'onda"
+		% [int(horde.wave), int(horde.count), int(tetto), int(horde.wave_total())]
+		+ " (Run.population_of(1) = %d, Run.POP_BASE = %d)"
+		% [Run.population_of(1), Run.POP_BASE])
 
 # --- 1. Le uccisioni sono reali e il livello dipende da loro --------------------
 
@@ -207,13 +259,41 @@ func _uccisioni_reali(h, prog, horde, player, weapon, per_kill: float,
 
 ## Il contrario della stessa cosa, e senza il quale la sezione sopra non dice
 ## niente: **senza uccisioni l'XP non sale**. L'arma viene messa in attesa lunga,
-## il mondo gira per 180 passi con 200 nemici vivi intorno, e nessun numero della
-## progressione puo' muoversi. Se l'XP dipendesse da un frame, da un contatore o
-## da una euristica sulla vicinanza dei nemici, qui salirebbe.
+## il mondo gira per 180 passi con tutta l'orda viva intorno, e nessun numero
+## della progressione puo' muoversi. Se l'XP dipendesse da un frame, da un
+## contatore o da una euristica sulla vicinanza dei nemici, qui salirebbe.
+##
+## ## Perche' il pool si svuota **prima** della finestra
+##
+## La finestra dichiara "nessuna uccisione in 180 passi", ma l'ultimo colpo della
+## sezione precedente puo' essere **ancora in volo**: se arriva dentro la
+## finestra uccide un nemico, e il test vede un'uccisione mentre l'arma e' in
+## attesa. Non e' un difetto del codice: e' un proiettile partito **prima**, cioe'
+## un'uccisione che la sezione di sopra non ha ancora contato. Con l'orda a
+## `Run.POP_BASE` il bersaglio piu' vicino e' piu' lontano di quando ce n'erano a
+## `MAX_ENEMIES`, quindi il tempo di volo e' piu' lungo e la corsa e' piu' probabile
+## dentro quei 180 passi; col seme dell'orda casuale (`seed = 0`) e' una moneta.
+## La prima esecuzione dopo m4 e' passata e la seconda e' rossa su quello.
+##
+## Quindi il pool si svuota con `pool.reset()` -- lo stesso metodo che
+## `weapon.reset()` chiama, che riusa i 100 record e non ne libera nessuno -- e
+## sotto la finestra viene **misurata** la sua silenziosita' invece di darla per
+## scontata: nessun colpo partito (`weapon.shots`), nessun proiettile vivo,
+## nessuna morte. Se il test fallisce li', adesso dice perche'.
 func _senza_uccisioni_niente_xp(h, prog, horde, player, weapon, per_kill: float,
 		base: float, passo: float) -> void:
+	var pool = weapon.pool
+	if not h.check(pool != null,
+			"l'arma dichiara il campo `pool`: senza, la finestra non puo' essere misurata"):
+		return
+	pool.reset()
+	h.eq(int(pool.active_count()), 0,
+		"nessun proiettile in volo all'inizio della finestra")
+
 	var prima := _stato(prog)
 	var uccisi0 := int(horde.kills)
+	var spari0 := int(weapon.shots)
+	var intervallo0: float = weapon.fire_interval
 	weapon.fire_interval = 10000.0
 	weapon.cooldown = 10000.0
 	for _i in 180:
@@ -221,6 +301,10 @@ func _senza_uccisioni_niente_xp(h, prog, horde, player, weapon, per_kill: float,
 		horde.step(DT)
 	var dopo := _stato(prog)
 
+	h.eq(int(weapon.shots), spari0,
+		"180 passi con l'arma in attesa non fanno partire nessun colpo")
+	h.eq(int(pool.active_count()), 0,
+		"e nessun proiettile e' vivo: la finestra e' davvero silenziosa")
 	h.eq(int(dopo["kills"]), int(prima["kills"]),
 		"180 passi con l'arma in attesa non uccidono nessuno")
 	h.eq(int(horde.kills), uccisi0, "e l'orda non conta nessuna morte")
@@ -231,7 +315,10 @@ func _senza_uccisioni_niente_xp(h, prog, horde, player, weapon, per_kill: float,
 	h.check(_coerente(dopo, base, passo),
 		"e l'invariante xp_earned = xp + soglie consumate resta vera a fine ciclo")
 
-	weapon.fire_interval = CADENZA_COMPRESSA
+	# L'attesa lunga era di questo file: si rimette a posto quello che c'era
+	# prima, non un numero nuovo, cosi' la sezione dopo non parte da una
+	# regolazione che nessuno ha dichiarato.
+	weapon.fire_interval = intervallo0
 	weapon.cooldown = 0.0
 
 # --- 2. La barra e' un numero, sempre, anche se qualcuno prova a rompere il tetto
@@ -316,9 +403,12 @@ func _xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill: float,
 	var bersaglio_onda: int = horde.wave_total()
 
 	# Impalcatura del tempo, dichiarata in testa al file: un colpo uccide, cosi'
-	# le 200 uccisioni dell'onda 1 costano ~200 passi e non ~4000. Il danno e la
-	# spinta **del colpo** sono l'unica cosa che questo file cambia, e tornano ai
-	# numeri di codice prima di uscire.
+	# l'unico tetto al ritmo che resta e' `Run.SPAWN_RATE` (l'orda si riempie
+	# invece che essere gia' piena) e le `wave_total` uccisioni dell'onda costano
+	# ~`wave_total / SPAWN_RATE` secondi di simulazione invece di `wave_total`
+	# passi. Il numero di passi effettivamente speso e' `guard`, ed e' stampato
+	# in fondo a questa sezione. Il danno e la spinta **del colpo** sono l'unica
+	# cosa che questo file cambia, e tornano ai numeri di codice prima di uscire.
 	var danno0: float = weapon.damage
 	var spinta0: float = weapon.knockback
 	var intervallo0: float = weapon.fire_interval
@@ -425,6 +515,9 @@ func _xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill: float,
 	print("progression: onda %d -> %d dopo %d uccisioni, livello %d, XP %.1f di %.1f, %.1f guadagnati"
 		% [wave0, int(horde.wave), int(prog.kills), int(prog.level),
 			float(prog.xp), float(prog.xp_to_next()), float(prog.xp_earned)])
+	print("progression: l'onda %d si e' chiusa in %d passi (%.2f s) per %d uccisioni, "
+		% [wave0, guard, float(guard) * DT, bersaglio_onda]
+		+ "con il campo a %d vivi e Run.SPAWN_RATE = %.1f/s" % [int(horde.count), Run.SPAWN_RATE])
 	if not confine.is_empty():
 		print("progression: al confine dell'onda %d nessuna XP persa, %d uccisioni contate da -orda e da -gameplay"
 			% [wave0, uccisi_al_confine])

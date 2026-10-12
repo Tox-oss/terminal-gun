@@ -17,6 +17,31 @@
 ; quando la partita finisce: un pannello che nasce a meta' partita e' un nodo
 ; che si aggiunge a ogni morte, ed `tests/test_ui.gd` conta i nodi dell'HUD per
 ; verificare che fra due partite non ne cresca nessuno.
+;
+; ## `step = 0.0` su tutte e tre le ProgressBar
+;
+; `Range.step` vale 0.01 per default in Godot e **arrotonda** il valore che gli
+; viene scritto: l'HUD riceve 0.995 da `-orda` e il nodo lo disegna come 1.0. Il
+; numero arriva giusto e non si vede, che e' il difetto peggiore di quanti
+; se ne possano contare, perche' un HUD che si ispeciona sembra a posto.
+;
+; Il caso che ha rotto tutto e' la barra dell'onda: il suo `max_value` e' 1.0 e
+; il suo dato e' `horde.wave_bar_ratio()`, cioe' `1 - uccise/popolazione`, e la
+; popolazione la sceglie `-orda` (`Run.population_of`), non questo file. Su 200
+; nemici una uccisione vale 0.005, cioe' **meta' scatto**: la barra restava
+; ferma per meta' dell'onda e l'unica verifica che ne risentiva era quella che
+; confronta il numero con quello che il nodo sta davvero disegnando.
+;
+; Perche' tutte e tre e non solo quella: `step` e' una griglia di arrotondamento
+; **imposta dal nodo su un numero che non e' suo**, e l'HUD qui non e' un
+; cursore ma un display, senza input e senza animazione: non ha nessuna ragione
+; di ri-arrotondare quello che `-gameplay` e `-orda` gli hanno detto. Le barre
+; della vita e dell'XP oggi non soffrono del difetto solo per caso di scala --
+; il loro `max_value` e' 100 e la soglia del livello, e uno scatto da 0.01 ci
+; sta dentro un decimo di pixel -- e un bug che sopravvive per scala e' un bug
+; che aspetta la prossima milestone che cambia la scala. Il ragionamento per
+; esteso e' in `src/ui/hud.gd`; `tests/test_ui.gd` verifica che tutte e tre
+; disegnino un numero fuori dalla griglia del default.
 
 [ext_resource type="Script" path="res://src/ui/hud.gd" id="1_hud"]
 
@@ -34,6 +59,7 @@ offset_top = 20.0
 offset_right = 324.0
 offset_bottom = 44.0
 show_percentage = false
+step = 0.0
 
 [node name="HealthText" type="Label" parent="Root"]
 offset_left = 32.0
@@ -61,6 +87,7 @@ offset_top = 84.0
 offset_right = 324.0
 offset_bottom = 104.0
 show_percentage = false
+step = 0.0
 
 [node name="XpText" type="Label" parent="Root"]
 offset_left = 32.0
@@ -105,12 +132,15 @@ theme_override_font_sizes/font_size = 20
 text = "WAVE 1"
 horizontal_alignment = 2
 
+; Questa e' la barra che il difetto rendeva muta: `max_value` 1.0, dato di
+; -orda, una uccisione = 0.005 su un'onda da 200. Vedi la nota in testa.
 [node name="WaveBar" type="ProgressBar" parent="Root"]
 offset_left = 956.0
 offset_top = 112.0
 offset_right = 1256.0
 offset_bottom = 128.0
 show_percentage = false
+step = 0.0
 
 [node name="Weapon" type="Label" parent="Root"]
 offset_left = 24.0

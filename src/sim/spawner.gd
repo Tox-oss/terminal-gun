@@ -16,6 +16,24 @@ const E = preload("res://src/sim/enemy.gd")
 const RINGS := 7
 ## Semi dell'anello in cui i nemici sono sparsi davvero (fuori = sul bordo).
 const INNER_RING := 0.35
+## **Il nemico piu' vicino non nasce addosso al centro.** La disposizione iniziale
+## tiene un buco nel mezzo largo come il `MIN_SPAWN_GAP` che lo spawn degli
+## uccisi gia' rispetta: il primo frame smette di essere un caso speciale con
+## regole diverse dal resto della partita.
+##
+## ## MISURATO (milestone 4, `tests/test_orda.gd`, 2026-10-12)
+##
+## Con `rr = radius * sqrt(1 - t)` e `t = i / (count - 1)`, l'indice `count - 1`
+## cade a `rr = 0`: **un nemico nasce esattamente sul giocatore**, al centro
+## dell'arena. Il tempo di primo contatto misurato era **t = 0.02 s**, cioe' il
+## primo frame. Non e' una densita' troppo alta: e' un nemico a distanza zero.
+##
+## Con il buco di `LAYOUT_INNER` il contatto non puo' avvenire prima di
+## `(LAYOUT_INNER - ARRIVE_RADIUS) / speed_max = (12 - 3) / 6.6 = 1.36 s`, che e'
+## lo stesso ordine di grandezza del contatto misurato su un campo da 25
+## nemici (1.68 s): la partenza piccola di m4 e il buco qui sono la stessa
+## leva, applicata ai due tempi diversi (quanti e da dove).
+const LAYOUT_INNER := 12.0
 ## Tentativi di trovare uno spawn lontano dal giocatore prima di accettare
 ## quello che e' venuto.
 const PLACEMENT_TRIES := 8
@@ -31,14 +49,21 @@ static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0])
 ## Punto per l'indice `i` di un riempimento di `count` nemici dentro un disco
 ## di raggio `radius`.
 ##
-## Il raggio e' `radius * sqrt(1 - t)` con `t = i/(count-1)`: l'indice 0 sta sul
-## bordo e l'ultimo al centro, quindi l'orda **arriva** dal bordo invece di
-## materializzarsi addosso al giocatore. Il `sqrt` serve a coprire il disco in
-## modo approssimativamente uniforme, e il jitter rompe l'anello perfetto.
+## Il raggio e' `LAYOUT_INNER + (radius - LAYOUT_INNER) * sqrt(1 - t)` con
+## `t = i/(count-1)`: l'indice 0 sta sul bordo e l'ultimo sul bordo **interno**,
+## quindi l'orda **arriva** dal bordo invece di materializzarsi addosso al
+## giocatore. Il `sqrt` serve a coprire l'anello in modo approssimativamente
+## uniforme, e il jitter rompe l'anello perfetto.
+##
+## Il buco interno e' `LAYOUT_INNER`: vedi la sua dichiarazione, che ha la
+## misura del difetto che corregge. Il buco non e' il centro esatto ma un
+## anello: sotto `LAYOUT_INNER` non nasce **nessuno**, quindi nessuno nasce sul
+## giocatore quando il giocatore parte al centro, che e' dove parte.
 static func layout_point(radius: float, i: int, count: int, rng: RandomNumberGenerator) -> Vector3:
 	var t := 0.0 if count <= 1 else float(i) / float(count - 1)
-	var rr := radius * sqrt(1.0 - clampf(t, 0.0, 1.0))
-	rr = clampf(rr + rng.randf_range(-1.0, 1.0) * radius * 0.05, 0.0, radius)
+	var inner := minf(LAYOUT_INNER, radius * 0.45)
+	var rr := inner + (radius - inner) * sqrt(1.0 - clampf(t, 0.0, 1.0))
+	rr = clampf(rr + rng.randf_range(-1.0, 1.0) * radius * 0.05, inner, radius)
 	var a := rng.randf() * TAU
 	return Vector3(cos(a) * rr, 0.0, sin(a) * rr)
 

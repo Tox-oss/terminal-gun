@@ -123,6 +123,95 @@ significato. Sono due semantiche diverse e il vertice non le sceglie al posto su
 è di -orda, il commento che la dichiara è obbligatorio**, e il criterio n. 3 di m3 vale con
 qualsiasi delle due purché il test sappia quale sta usando.
 
+### 1.4 Milestone 4 — `BUCKET_SLOTS`: la costante e la sua giustificazione
+
+m3 ha chiuso il buco di API della disposizione e ha **misurato** la densità sulla scena vera. Il
+debito che resta è l'altro lato della stessa costante: **quanto costa**, e se il valore è giustificato.
+
+Il debito, con le parole di §8: «`BUCKET_SLOTS = 32` è tarato su un picco di **19** misurato
+sull'orda **isolata**, mentre sulla scena vera il picco è **7**. La costante è quindi **4,7 volte**
+più larga di quanto serva oggi.»
+
+**Nessun numero è scritto qui prima della misura.** È la lezione di §1.2 ripetuta: lì il piano
+scrisse l'ipotesi, la misura la smentì, e il piano dovette emendarsi. Qui il protocollo viene
+prima e il risultato no.
+
+Fuori m4, dichiarato come prima: colonna sonora, menu, salvataggi, boss con fasi, multiplayer, mobile.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | La porta è verde | `GATE: 8/8` (il gate conta i file su disco, §6) e `PERM: 15/15` rieseguite **dal vertice** |
+| 2 | **La perdita è contabile** | `horde.grid_dropped()` (superficie congelata in `contracts.gd`, cinque punti di semantica) restituisce un **numero**. `dropped > 0` implica `grid_overflowed()` e **i due non possono discordare**: un test che li mette in contraddizione deve dire `FAIL` |
+| 3 | **Il costo è misurato, non ripetuto** | numero reale di celle riscaldate e byte effettivi del riscaldamento, stampati. Il commento di `spatial_grid.gd` viene **sostituito** da quelli, non affiancato |
+| 4 | **Le query danno gli stessi indici** | a qualunque valore di `BUCKET_SLOTS`, con traboccamento forzato: `nearest_index` / `collect_into` / `fill_radius` restituiscono **lo stesso insieme** della scansione lineare. Il fallback è corretto per costruzione, ma va **provato** al valore nuovo |
+| 5 | **Il tetto di m3 non diventa una tautologia** | `GRID_CEILING = 11` (m3, criterio n. 3) resta **non tautologico**: `GRID_CEILING < BUCKET_SLOTS`, con margine maggiore dell'escursione dell'intero campione. Se il valore scelto non lo permette, **m4 dichiara che il tetto va ricalcolato e non lo ricalcola**: è una decisione di m3, e il vertice la prende per iscritto, non per silenzio |
+| 6 | **I denti, provati e rimossi** | forzato il rifiuto di un nemico, il contatore deve dire il numero giusto e **non zero**; poi rimosso. Protocollo di m2-w3 e di m3, stessa regola: un'asserzione che non sa fallire non è un'asserzione |
+
+### 1.4b Il protocollo, e perché l'esperimento può concludere «32 era giusto»
+
+**La domanda non è «abbasso `BUCKET_SLOTS`».** È: *esiste un valore più stretto che non perda
+nessun nemico, e quanto si risparmia davvero?* La risposta può essere **«no, e il valore corrente
+era giusto»**. Quello è un esito valido, e va **riferito**, non corretto.
+
+Tre le mosse, in quest'ordine:
+
+1. **Il costo, prima del valore.** Il riscaldamento alloca un `PackedInt32Array` di `BUCKET_SIZE`
+   interi per cella, una volta sola in `setup()`. Il numero reale di celle **non si deduce da un
+   commento**: viene da `ceil(extent / CELL) + margin_cells`, con l'estensione che passa
+   `_sync_grid()`, cioè `arena_radius * 1.5`. Va misurato e stampato.
+2. **La densità, sul caso che obbliga la costante.** I due numeri che il piano mette uno contro
+   l'altro (**19** isolata, **7** scena vera) **misurano due cose diverse**, e nessuno dei due è
+   dichiarato come quello che limita. m4 dice **quale dei due è il caso che obbliga**, con numeri,
+   e la costante segue da lì. Se il caso che obbliga è l'orda isolata, allora **32 resta giusto** e
+   il risparmio è la memoria di una differenza che nessuno deve pagare.
+3. **Il valore, se c'è.** Solo dopo i due numeri, con il margine **oltre** l'escursione dell'intero
+   campione, e **mai** `BUCKET_SLOTS - 1`: è la tautologia che m3 ha già registrato (§1.3, criterio n. 3).
+
+**Perché il contatore viene prima del valore, e non è pignoleria.** Il traboccamento è un
+**fallback**, e il fallback è *corretto ma lento*: le query cadono a scansione lineare e
+restituiscono gli stessi indici. Quindi abbassare `BUCKET_SLOTS` **non può rompere la correttezza**,
+può solo costare tempo e, se il traboccamento è sistematico, **nascondere nemici alle query**.
+`grid_overflowed()` è un booleano e distingue «un nemico perso» da «tutti persi»: non basta a
+scegliere un valore. Per questo `horde.grid_dropped()` è congelato **prima** dell'onda.
+
+**Il costo dichiarato oggi è un numero che nessuno ha misurato, e a leggerlo non torna.**
+`spatial_grid.gd` scrive «841 celle da 25 slot sono ~84 KB», ma a `BUCKET_SLOTS = 32` ogni
+secchiello è di `BUCKET_SIZE = 33` interi, quindi le stesse 841 celle sono ~108 KiB. La frase è un
+resto di una configurazione precedente (25 slot = `BUCKET_SLOTS` 24), rimasta nel commento dopo che
+la costante era passata da 12 a 32. **Non è un difetto del codice**: è un difetto della
+**giustificazione**, che è la cosa che m4 esamina. Il numero va sostituito con quello misurato,
+non affiancato da un secondo.
+
+### 3.6 Scope della milestone 4: due foglie, un oggetto condiviso, nessuna riga di permesso nuova
+
+Come m3, e per la stessa ragione: `horde.gd` e `spatial_grid.gd` sono di `-orda`,
+`tests/test_arena.gd` è di `-arena`. **Le scope sono già nelle allowlist**: `src/sim/**` per
+`-orda`, `tests/test_arena.gd` per `-arena`, `tests/test_orda.gd` per `-orda`. Quindi m4 **non
+richiede alcun atto dell'utente** e `PERM: 15/15` va confermata **prima** di lanciare.
+
+| agente | modello | in m4 scrive | note |
+|---|---|---|---|
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/spatial_grid.gd`, `src/sim/horde.gd`, `tests/test_orda.gd` | `spatial_grid.gd`: il contatore `dropped`, `horde.grid_dropped()`, il **valore** di `BUCKET_SLOTS` con la sua giustificazione **misurata**, il commento di costo **sostituito**. `horde.gd`: solo il metodo che espone il contatore |
+| `terminal-gun-arena` | `space-bunny-free#max` | `tests/test_arena.gd` | la sezione m4: il caso che obbliga la costante e la non tautologia del tetto. Nessun altro file |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | la superficie congelata di m4 |
+
+**L'interfaccia è congelata in `src/core/contracts.gd`, sezione «Supersficie di milestone 4»**:
+`horde.grid_dropped()`, cinque punti di semantica. Il punto 4 dichiara che `dropped`, `overflowed`
+e `worst_bucket` descrivono lo **stesso** intervallo **solo perché `begin_frame()` ha un solo
+chiamante in produzione** (`_rebuild_grid()`): è un incidente del call graph, non un invariante.
+
+**m4-w1 ha un parallelismo vero con una dipendenza dichiarata**, come m3-w1. I file sono
+disgiunti, ma il test di `-arena` chiama un metodo che il codice non ha ancora: è il caso in cui
+il gate diventa rosso **per il motivo giusto**.
+
+### 4.4 Onde della milestone 4
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m4-w0** | vertice | — | superficie congelata in `contracts.gd`, specifica §1.4/§1.4b/§3.6 scritta, `PERM: 15/15` confermata **prima** di lanciare |
+| **m4-w1** | orda ∥ arena | 2 agenti, una stessa risposta | `GATE: 8/8` exit 0 e `--quit-after 300` pulito, rieseguiti **dal vertice** |
+| **m4-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
 ## 2. Toolchain
 
 Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nessuno deve cercare i binari per conto proprio: legge `tools/env.sh`.

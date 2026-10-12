@@ -185,6 +185,60 @@ func verify_m2_surface() -> Array[String]:
 ## misura la griglia della disposizione **precedente** e il numero che ne ricava
 ## e' vero ma non risponde alla domanda che ha fatto.
 
+# --- Superficie di milestone 4 ---------------------------------------------------
+#
+# m4 non aggiunge una API e non cambia il contratto fra le foglie: e' un
+# esperimento su **una costante** di `src/sim/spatial_grid.gd`. La superficie
+# qui sotto e' pero' dichiarata per la stessa ragione che l'ha dichiarata m3:
+# `horde.gd` e' di -orda e `tests/test_arena.gd` e' di -arena, e m4 mette di
+# nuovo due foglie sullo stesso oggetto di simulazione.
+#
+# Il nome che m4 aggiunge e' questo, ed e' l'unico:
+#
+#     horde.grid_dropped()          # -orda la scrive, -arena la chiama
+#
+# ## Perche' serve: `grid_overflowed()` non puo' misurare la m4
+#
+# `grid_overflowed()` e' un **booleano**. Risponde a "qualcuno ha superato
+# `BUCKET_SLOTS`", e per m4 questa non e' la domanda. La domanda di m4 e' "quanto
+# e' largo `BUCKET_SLOTS` senza che nessuno venga perso", e fra "un nemico
+# rifiutato" e "199 rifiutati" non c'e' una differenza di rumore: c'e' la
+# differenza fra una griglia che funziona e una griglia che **non vede piu'
+# niente**. Un flag non distingue i due casi, quindi la risposta che dà e' vera
+# e incompleta nello stesso momento: abbastanza per dire "c'e' un problema",
+# non abbastanza per dire quanto e' largo il margine che manca.
+#
+# Il contatore e' lo **strumento di misura**, e lo strumento si dichiara prima
+# dell'esperimento: se arriva dopo, il primo valore misurato e' gia' stato preso
+# con la riga vecchia e nessuno lo sa.
+#
+# Semantica congelata, in cinque punti:
+#
+#   1. `horde.grid_dropped()` restituisce **quanti** nemici `insert()` ha
+#      rifiutato, sommati su tutte le celle: non un flag, un numero.
+#      `dropped == 1` e `dropped == 199` sono risposte diverse.
+#   2. `dropped > 0` **implica** `grid_overflowed() == true`. Il flag resta
+#      il predetto debole del contatore e nessuno lo sostituisce: se i due
+#      discordano, il contatore e' sbagliato.
+#   3. Si azzera in `begin_frame()`, **non** in `insert()` e non in
+#      `_rebuild_grid()`: `insert()` non conosce l'inizio di un frame, e
+#      azzerarlo li' farebbe valere `0` per sempre.
+#   4. **Portata dei tre numeri.** `dropped`, `overflowed` e `worst_bucket`
+#      descrivono lo **stesso** intervallo, e cioe' l'ultima ricostruzione, ma
+#      **non per costruzione**: `begin_frame()` azzera `dropped` e `overflowed`,
+#      mentre `worst_bucket` lo azzera `-orda` a mano in `_rebuild_grid()`
+#      (`horde.gd:550`). I tre coincidono solo perche' in produzione
+#      `begin_frame()` ha **un solo chiamante**, `_rebuild_grid()`. Oggi e' vero
+#      (gli altri due sono in `tests/test_orda.gd`, che pilota la griglia in
+#      isolamento) ma e' un **incidente del call graph, non un invariante**: chi
+#      aggiungesse un `begin_frame()` nel ciclo di gioco farebbe dire a `dropped`
+#      e `overflowed` "questo frame" e a `worst_bucket` "l'ultima
+#      ricostruzione", e le tre misure comincerebbero a parlare di cose diverse
+#      **senza che nessuna fallisca rumorosamente**.
+#   5. **Non e' una API registrata**: e' un metodo pubblico di
+#      `src/sim/horde.gd`, come `reseed`, `worst_bucket` e `grid_overflowed`, e
+#      come quelli non passa da `register_impl`.
+
 # --- Registrazione -------------------------------------------------------------
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non

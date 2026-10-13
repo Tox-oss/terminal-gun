@@ -198,6 +198,12 @@ static func touch_period_of(kind: int) -> float:
 ## senso accenderla. E' anche il motivo per cui nessun test che mette l'orda da
 ## sola si trova un morso senza avergli dato un giocatore.
 ##
+## `flow` e' il **campo di percorrenza** di `src/sim/flow_field.gd` e puo' essere
+## `null`. E' `null` quando gli ostacoli non sono registrati sul contratto, e in
+## quel caso questo passo e' **identico** a quello di prima della milestone 10:
+## l'evitamento non e' un interruttore della fisica, e' una direzione in piu'
+## quando c'e' qualcosa da evitare.
+##
 ## `bite_timers` e `bites` sono due array paralleli in scrittura: il primo
 ## tiene da quanto tempo questa specie e' in contatto, il secondo dice "questo
 ## passo morde" (1) o no (0). **La decisione del morso e' qui dentro**, dove
@@ -211,7 +217,7 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		positions: PackedVector3Array, velocities: PackedVector3Array,
 		timers: PackedFloat32Array, kinds: PackedInt32Array,
 		arena_radius: float, bite_timers: PackedFloat32Array,
-		bites: PackedInt32Array, has_target: bool) -> void:
+		bites: PackedInt32Array, has_target: bool, flow = null) -> void:
 	var kind := clamp_kind(kinds[i])
 	var pos := positions[i]
 	var to_target := target - pos
@@ -220,6 +226,17 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 	var dir := Vector3.ZERO
 	if dist > 0.001:
 		dir = to_target / dist
+	# ## Il campo di percorrenza, e perche' sta qui e non dentro l'orda
+	#
+	# La **direzione** e' l'unica cosa che il campo cambia: se la linea diretta
+	# non e' interrotta, `steer` restituisce la stessa direzione di due righe
+	# sopra, quindi un nemico che non ha ostacoli addosso si muove esattamente
+	# come prima di m10 e i numeri di m7/m8/m9 restano quelli che erano. Se la
+	# linea e' interrotta, restituisce il verso del campo mescolato con la
+	# trazione diretta sul bersaglio, e il campo da solo farebbe girare il
+	# nemico attorno all'ostacolo per sempre.
+	if flow != null:
+		dir = flow.steer(pos, target)
 
 	# Arrivo: rallenta vicino al bersaglio, altrimenti gli si infila addosso e
 	# i 200 nemici diventano un solo punto.
@@ -260,4 +277,24 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 	else:
 		bite_timers[i] = 0.0
 	velocities[i] = vel
-	positions[i] = pos + vel * delta
+	if flow == null:
+		positions[i] = pos + vel * delta
+		return
+	# ## Il vincolo esatto, e perche' e' qui e non nella griglia
+	#
+	# `push_out` e' un test di distanza disco-corpo, non una griglia: e' lui che
+	# rende vero il criterio n. 2 al centesimo di millimetro. La spinta sposta
+	# la posizione sul bordo e **cancella la componente di velocita' che entra
+	# nell'ostacolo**: e' quello che fa scivolare il nemico lungo il disco
+	# invece di piantarlo sul bordo, ed e' la differenza fra aggirare e
+	# incastrarsi (criterio n. 4).
+	var dopo := pos + vel * delta
+	var spinta: Vector3 = flow.push_out(dopo, RADIUS[kind])
+	if spinta.length_squared() > 0.000001:
+		dopo += spinta
+		var fuori: Vector3 = spinta.normalized()
+		var dentro := vel.dot(fuori)
+		if dentro < 0.0:
+			vel -= fuori * dentro
+			velocities[i] = vel
+	positions[i] = dopo

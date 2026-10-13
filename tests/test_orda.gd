@@ -92,6 +92,77 @@ const RUN = preload("res://src/sim/run.gd")
 const GRID = preload("res://src/sim/spatial_grid.gd")
 const POOL = preload("res://src/sim/object_pool.gd")
 const ENEMY = preload("res://src/sim/enemy.gd")
+const FLOW = preload("res://src/sim/flow_field.gd")
+const OBST = preload("res://src/sim/obstacles.gd")
+
+## ## I NUMERI DI m10: la geometria e la risoluzione del campo
+##
+## Nessuna cifra e' scritta sopra nel piano (§1.13) e nessuna e' scritta sopra
+## qui: sono la **misura** del criterio n. 2 e il prodotto della misura. Quello
+## che segue e' la misura, e quello che segue la misura e' la scelta.
+##
+## Strumento: questo stesso file, sezione 13, ordine a 200 nemici, seme 4242,
+## passo fisso 1/60 s, 600 passi di assestamento e 1800 passi di finestra, con
+## la geometria dichiarata in `src/sim/obstacles.gd` montata sul campo.
+##
+## ### La geometria (`src/sim/obstacles.gd`)
+##
+## | numero | valore | da dove viene |
+## |---|---|---|
+## | ostacoli | **27** dischi, tutti uguali | 6 + 9 + 12 su tre anelli: abbastanza da mettere un muro davanti a chi arriva da fuori, non abbastanza da chiudere un anello |
+## | raggio del disco | **2,99 m** (0,065 x R) | `2,99 m` e' **1,6 volte** la sagoma del boss (1,90 m): un disco piu' piccolo del nemico piu' grosso si aggira senza sembrare un muro |
+## | anelli | **15,18 / 27,14 / 39,10 m** | il piu' interno lascia **12,19 m** liberi al centro, e `MIN_SPAWN_GAP` e' 12,0: nessuno spawn del contratto puo' quindi nascere dentro un ostacolo |
+## | distanza minima fra due dischi | **12,0 m** (fra anelli diversi) | il passaggio utile e' **6,0 m**, cioe' 1,6 volte il diametro del boss (3,8 m): nessuna fessura in cui un nemico possa incastrarsi |
+## | area coperta | **11,5%** del disco | con gli ostacoli l'area libera scende dal 94,6% di m9 all'88,5%: si sente, e non è un labirinto |
+##
+## ### Il campo (`src/sim/flow_field.gd`)
+##
+## | numero | valore | da dove viene |
+## |---|---|---|
+## | cella | **2,0 m** | la griglia dei vicini e' 4,0 m: quella elenca chi c'e', questa dice da che parte andare, e due domande diverse non si pagano con la stessa risoluzione |
+## | griglia | **55 x 55 = 3.025 celle** | `arena_radius + 8 m` di margello, cosi' un nemico spinto fuori dal bordo dal knockback resta guidato |
+## | gonfiatura | raggio + corpo del **boss** + 0,35 m + 0,71 m | il nemico piu' grosso deve poter stare dove il campo gli dice di stare |
+## | ricostruzione | solo se il bersaglio si e' muove di **6,0 m** | da fermo (che e' il caso in cui il gioco si vorrebbe vincere) il campo costa **zero**: misurato in sezione 13 |
+##
+## ### La frazione che deve aggirare, e **su che cosa e' misurata**
+##
+## Il numero che conta non e' l'area coperta, e' **quanta parte dell'orda deve
+## aggirare**: la frazione di nemici la cui retta verso il giocatore e'
+## interrotta da un disco gonfiato del corpo del boss.
+##
+## **Su che cosa e' campionata, e la correzione che l'ha reso misurabile.** Il
+## campione parte dall'orda piena e copre `M10_WARMUP + M10_WINDOW` = 2400 passi
+## (40 s), ogni 10 passi, per 48 000 segmenti. Il campione di **prima** copriva
+## solo gli ultimi 1800, cioe' il periodo di regime, e dava **3,4%**: quel numero
+## non era una misura della deviazione, era una misura di **quanto era lontano il
+## nemico**. A regime `t_primo` e `t_meta` sono entrambi **0,00 s**, cioe' meta'
+## dell'orda e' gia' dentro `ARRIVE_RADIUS` al primo passo campionato: un nemico
+## a 2 m dal bersaglio ha una retta di 2 m e il disco piu' vicino e' a 12,19 m, e
+## la domanda «la mia retta e' interrotta?» ha risposta **no** qualunque sia la
+## geometria. Il tetto superiore della banda («non piu' del 60%, altrimenti
+## l'orda si muove a ondate») su quella domanda non poteva parlare di ondate.
+##
+## I due numeri vengono stampati **entrambi** a ogni lanzo (sezione 13b), e la
+## banda e' scritta sul primo, dichiarando quale dei due e'.
+##
+## | numero misurato | valore | da dove viene |
+## |---|---|---|
+## | retta interrotta, **tutto il percorso** | **14,1%** (6787 su 48 000) | il numero che governa la banda `M10_DEVIA_MIN/MAX` |
+## | retta interrotta, **solo finestra di regime** | **3,4%** (1216 su 36 000) | il numero di prima: quanto lontano l'orda, non quanto devia |
+##
+## **Il 14,1% e' piu' alto dell'11,5% di area coperta, ed e' giusto**: la domanda
+## non e' «quanto disco c'e'» ma «quante rette ci passano dentro», e una retta
+## sposta un disco di 2,99 m su una fascia di 5,24 m gonfiata del corpo del boss.
+## Il rapporto fra le due domande e' il rapporto fra l'area di un disco e la
+## lunghezza del corridoio che quello disco chiude: la copertura areale non puo'
+## essere il tetto della banda, e non lo e'.
+##
+## La banda resta **5% - 60%**, e i numeri non sono stati abbassati per far passare:
+## il 14,1% sta a 2,8 volte il pavimento e a 4,2 volte dal tetto, quindi una
+## geometria che coprasse il doppio o che si azzerasse del tutto andrebbe rossa.
+## Sotto il 5% la milestone e' invisibile (l'orda attraversa i dischi come se non
+## ci fossero); sopra il 60% l'orda si muove a ondate e il gioco diventa un
+## labirinto.
 
 ## Passo di simulazione: quello di `tests/test_gameloop.gd`, cosi' i due numeri
 ## di -orda sono confrontabili. Un passo fisso e' l'unica misura riproducibile.
@@ -155,12 +226,24 @@ func _run() -> void:
 	_object_pool(h)
 	_burn_in(h, horde)
 	_damage_kills(h, horde)
+	# m10: gli ostacoli. Le sezioni 13 girano **prima** di `_touch`, che registra
+	# uno spia al posto del giocatore: qui il bersaglio e' `set_focus`, quindi
+	# nessun morso si accende e la misura resta di geometria e di movimento.
+	_ostacoli(h, horde)
+	_aggira(h, horde)
+	_incastrati(h, horde)
+	_denti_del_criterio(h, horde)
+	_spawn_sicuro(h, horde)
 	_touch(h, horde)
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
 	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
 	# accorgersene, quindi va in fondo e poi rimette a posto il contratto.
 	_scena_vera(h, horde)
+	# E l'ultima di tutte, perche' e' l'unica che guarda **il contratto**:
+	# `Game.obstacles` lo scrive `-arena` in `_enter_tree()`, quindi il dato
+	# esiste solo dopo che la scena vera e' entrata nell'albero.
+	_ostacoli_contratto(h, horde)
 
 	quit(h.finish("orda"))
 
@@ -1389,6 +1472,18 @@ var _gap_min_vera := 1.0e9
 ## Gli stessi scarti dei nemici entro 6 m dal giocatore, campione del contatto.
 var _gap_vicini := PackedFloat32Array()
 
+## ## Lo stato di m10 **dell'orda che gioca**, letto dalla scena vera
+##
+## Campi e non variabili di `_scena_vera`: la scena viene liberata prima che
+## `_ostacoli_contratto` torni a guardare, e un riferimento a un nodo liberato non
+## e' un numero che si puo' confrontare con niente. Qui dentro finiscono i quattro
+## valori, presi **mentre il nodo e' vivo**; la sezione 13e asserisce su questi e
+## dichiara perche' non asserisce sull'orda isolata di questo file.
+var _vera_flow_obstacles := -1
+var _vera_flow_problem := "(non letta: la scena vera non e' stata aperta)"
+var _vera_flow_active := false
+var _vera_flow_rebuilds := -1
+
 func _scena_vera(h, isolate: HORDE) -> void:
 	var arena = _apri_arena(h)
 	if arena == null:
@@ -1502,6 +1597,17 @@ func _scena_vera(h, isolate: HORDE) -> void:
 	h.check(morto,
 		"scena vera: il giocatore vero deve morire fermo al centro con l'orda piena")
 	h.check(secondi > 0.0, "scena vera: il tempo di sopravvivenza e' positivo")
+
+	# ## Lo stato di m10 di **questa** orda, letto adesso che e' viva
+	#
+	# `horda` e' l'orda che gioca: e' quella che `-arena` ha costruito **dopo** che
+	# il contratto aveva gia' i 27 dischi, quindi e' l'unica su cui
+	# `flow_problem == ""` ha un significato. Qui sotto viene liberata con tutta la
+	# scena, e i quattro numeri restano per la sezione 13e.
+	_vera_flow_obstacles = horda.obstacle_count()
+	_vera_flow_problem = horda.flow_problem
+	_vera_flow_active = horda.flow_active()
+	_vera_flow_rebuilds = horda.flow_rebuilds
 
 	_chiudi(arena)
 	_ripristina(h, isolate)
@@ -1656,6 +1762,44 @@ func _contiene(path: String, ago: String) -> bool:
 ## compilazione, non il contratto (piano 5.3).
 func _game() -> Node:
 	return root.get_node_or_null("Game")
+
+func _m10_libero(p: Vector3, obs: PackedVector3Array) -> float:
+	var skin := ENEMY.radius_of(ENEMY.BOSS)
+	var m := 1.0e9
+	for k in obs.size():
+		var ob := obs[k]
+		m = minf(m, Vector2(p.x - ob.x, p.z - ob.z).length() - (ob.y + skin))
+	return m
+
+## La traccia del peggiore colpevole: dieci passi, uno per riga, **per sempre**.
+##
+## Non e' una sonda e non sta in un file a parte: e' la parte che rende
+## citabile la sezione 13c. Il criterio n. 4 dice «peggiore = 12 passi», e quel
+## numero senza nessun contesto e' un rosso che nessuno sa spiegare. Qui il
+## colpevole si chiama, si stampa dieci passi della sua vita — posizione,
+## distanza dal bordo dell'arena, velocita', distanza dal disco piu' vicino,
+## linea diretta libera o interrotta, e direzione che il campo gli da' — e cosi'
+## la sezione 13c si cita per nome e per numero.
+##
+## Dieci passi e non uno: un singolo passo dice dove il nemico e', non **come ci
+## e' arrivato**: la firma di un incastrato e' che posizione e velocita' restano
+## le stesse per piu' campioni di fila, e una riga non puo' distinguerla da un
+## nemico che ci sta solo passando davanti.
+func _incastrato_dettaglio(horde: HORDE, campo: FLOW, obs: PackedVector3Array,
+		i: int, peggiore: int) -> void:
+	if i < 0 or i >= horde.count:
+		return
+	print("m10: colpevole i=%d (%s, r=%.2f m), fermo sotto %.2f m/s per %d passi di fila: traccia di 10 passi"
+		% [i, horde.kind_name(i), horde.radii[i], STUCK_SPEED, peggiore])
+	for s in 10:
+		var p := horde.transforms[i]
+		var v := horde.velocities[i]
+		var st := campo.steer(p, Vector3.ZERO)
+		print("m10:   passo %d p=(%8.3f,%8.3f) |p|=%6.2f v=(%7.3f,%7.3f) |v|=%.4f disco=%7.3f clear=%s steer=(%6.3f,%6.3f)"
+			% [s, p.x, p.z, Vector2(p.x, p.z).length(), v.x, v.z, v.length(),
+				_m10_libero(p, obs), str(campo.clear_line(p, Vector3.ZERO)), st.x, st.z])
+		horde.step(DT)
+
 ## Conta i nodi dell'albero a mano. `get_node_count()` dentro un `--script` vale
 ## 0 (il ciclo di frame non e' ancora partito), quindi un test che ci si
 ## appoggiasse passerebbe sempre: meglio contarli davvero.
@@ -1664,3 +1808,609 @@ func _count_nodes(nodo: Node) -> int:
 	for c in nodo.get_children():
 		totale += _count_nodes(c)
 	return totale
+
+# --- 13. m10: gli ostacoli, e il nemico che li aggira davvero -----------------
+#
+# ## Cosa c'e' in questa sezione, e in che ordine
+#
+#   `_ostacoli`             i numeri dichiarati e le loro garanzie (criterio n. 1)
+#   `_aggira`               **il criterio n. 2**: quanti nemici sono dentro un
+#                          ostacolo, durante una partita vera, e quanto tempo
+#                          ci mettono ad arrivare al giocatore
+#   `_incastrati`           il criterio n. 4: nessuno fermo in un angolo
+#   `_spawn_sicuro`         il criterio n. 5: nessuno nasce dentro un disco
+#   `_ostacoli_contratto`   la catena: `Game.obstacles` esiste davvero
+#
+# ## Il trucco di montare il campo, e perche' non e' un trucco
+#
+# `horde.flow_field` e' un campo pubblico di questa simulazione, e questa sezione
+# ci scrive dentro quando il contratto **non** e' ancora montato. Non e' un
+# fallback del gioco: `horde._build()` non ha questa strada e non la vuole, il
+# gioco legge solo il contratto, e il punto e' che senza questa riga i numeri di
+# m10 non si potrebbero **misurare** finche' il vertice non aggiunge il campo al
+# contratto. La sezione `_ostacoli_contratto` esiste perche' questa misura non
+# sostituisce la catena: e' la porta che va rossa quando la catena manca.
+#
+# Quando il contratto sara' montato la misura userà **automaticamente** gli
+# ostacoli registrati invece di quelli dichiarati qui, e i numeri stampati
+# cambieranno se `-arena` avra' scelto una forma diversa: e' per questo che sono
+# stampati e non asseriti come costanti.
+
+## Il seme della disposizione su cui e' misurato m10. Fisso perche' una misura
+## senza seme non e' confrontabile con la corsa successiva.
+const M10_SEME := 4242
+## Passi di assestamento e passi di finestra, a DT = 1/60: 10 s e 30 s.
+const M10_WARMUP := 600
+const M10_WINDOW := 1800
+## Banda sulla frazione di nemici con la retta al giocatore interrotta, misurata
+## **su tutto il percorso, avvicinamento incluso** (vedi la tabella in testa al
+## file, e `_aggira`). I numeri sono **quelli che escono**: 14,1% misurati, e la
+## banda sta a 2,8 volte il pavimento e a 4,2 volte dal tetto. Non e' una banda
+## abbassata per far passare: e' la banda dichiarata che il numero rispetta con
+## margine da entrambe le parti, e la tabella in testa dice perche' il campione di
+## regime (3,4%) non poteva governarla.
+const M10_DEVIA_MIN := 5.0
+const M10_DEVIA_MAX := 60.0
+## Passi entro i quali **qualcuno** deve arrivare a portata di morso, e passi
+## entro i quali devono arrivarne meta'. Sono le due stime del «tempo per
+## arrivare al giocatore» che il criterio n. 2 chiede di misurare: il primo e'
+## il tempo del piu' veloce, il secondo e' il tempo della folla.
+const M10_ARRIVO_MAX := 900
+const M10_META_MAX := 3600
+## Quanti semi di disposizione il criterio n. 5 deve coprire. Ventiquattro e'
+## lo stesso campione con cui m3 ha misurato la densita': un campione che non
+## cambia da una milestone all'altra e' confrontabile.
+const M10_SEMI := 24
+## Quanti punti di spawn casuale per ogni seme.
+const M10_PUNTI := 200
+
+## Il raggio con cui un punto viene giudicato «dentro»: il **corpo del nemico
+## piu' grosso**, non quello della specie. E' il criterio n. 5 sul minimo dei
+## tre, non sul massimo.
+func _m10_skin() -> float:
+	return ENEMY.radius_of(ENEMY.BOSS)
+
+## Il punto e' dentro un disco, corpo compreso? Stessa domanda che si pone il
+## campo e che si pone il gioco: e' l'unica definizione di «dentro» che vale.
+func _m10_dentro(p: Vector3, obs: PackedVector3Array, skin: float) -> bool:
+	for k in obs.size():
+		var ob := obs[k]
+		var rr := ob.y + skin
+		var dx := p.x - ob.x
+		var dz := p.z - ob.z
+		if dx * dx + dz * dz < rr * rr:
+			return true
+	return false
+
+## La geometria su cui misurare, e il campo montato sopra.
+##
+## Se il contratto e' montato si usa **quella**; altrimenti quella dichiarata in
+## `src/sim/obstacles.gd`, che e' la stessa che `-arena` registrera' quando
+## potra'. La riga di stampa dice quale delle due e' in gioco: una misura che
+## non dice su che cosa e' stata fatta e' un numero senza significato.
+func _m10_monta(horde: HORDE) -> PackedVector3Array:
+	if horde.obstacle_count() > 0:
+		print("m10: ostacoli dal contratto, %d dischi" % horde.obstacle_count())
+		return horde.obstacles
+	var dichiarati := OBST.layout(horde.arena_radius)
+	var campo: FLOW = FLOW.new()
+	campo.build(dichiarati, horde.arena_radius, _m10_skin())
+	campo.rebuild(Vector3.ZERO)
+	horde.obstacles = dichiarati
+	horde.flow_field = campo
+	print("m10: contratto NON montato, misuro sui %d dischi dichiarati in src/sim/obstacles.gd"
+		% dichiarati.size())
+	return dichiarati
+
+# --- 13a. I numeri dichiarati e le loro garanzie (criterio n. 1) ----------------
+
+## Perche' questa sezione guarda i numeri **scritti** e non quelli registrati:
+## il numero e' di `-orda` (§3.11), quindi qui si controlla che la misura del
+## criterio n. 2 sia ancora quella che e' stata scritta. Se `-arena` sceglie
+## qualcos'altro, la sezione `_ostacoli_contratto` lo dice con i suoi numeri e la
+## decisione torna al vertice.
+func _ostacoli(h, horde: HORDE) -> void:
+	var R := horde.arena_radius
+	var dichiarati := OBST.layout(R)
+	h.eq(dichiarati.size(), OBST.OBSTACLE_COUNT,
+		"m10: la geometria dichiarata contiene tutti gli ostacoli dichiarati")
+	h.check(dichiarati.size() > 0, "m10: la geometria dichiarata non e' vuota")
+
+	# Punto 3 del contratto: `y` e' il raggio, ed e' positivo. Un raggio nullo e'
+	# un ostacolo che non esiste, e si distingue dal negativo solo per il crash.
+	var raggi_bassi := 0
+	var fuori := 0
+	for k in dichiarati.size():
+		var e: Vector3 = dichiarati[k]
+		if not (e.y > 0.0):
+			raggi_bassi += 1
+		if Vector2(e.x, e.z).length() + e.y > R:
+			fuori += 1
+	h.eq(raggi_bassi, 0, "m10: ogni ostacolo ha `y` > 0, cioe' un raggio positivo")
+	h.eq(fuori, 0, "m10: ogni ostacolo e' intero dentro l'arena")
+
+	var r := OBST.radius_for(R)
+	# Il raggio in metri: 2,99 a R = 46. La soglia e' sul **rapporto con il nemico
+	# piu' grosso**, non sul numero assoluto: un disco deve essere piu' largo
+	# della sagoma del boss, altrimenti non e' un muro e non si vede che e' un
+	# muro.
+	h.check(r > ENEMY.RADIUS[ENEMY.BOSS],
+		"m10: il disco (%.2f m) e' piu' largo del nemico piu' grosso (%.2f m)"
+			% [r, ENEMY.RADIUS[ENEMY.BOSS]])
+	h.check(r < R * 0.12,
+		"m10: il disco (%.2f m) resta un ostacolo e non un campo minato: sotto il 12%% del raggio"
+			% r)
+	print("m10: %d dischi di raggio %.2f m su un'arena di %.1f m" % [dichiarati.size(), r, R])
+
+	## ## La garanzia che tiene aperto il campo: nessuna fessura stretta
+	##
+	## Due dischi che si toccano sono un muro solo, e una fessura piu' stretta
+	## della sagoma del boss e' un incastrato che aspetta solo un nemico grosso.
+	## Il numero e' la distanza fra due centri: deve superare `2 * raggio +
+	## diametro del boss`, e allora il passaggio utile e' piu' largo di qualsiasi
+	## nemico che ci passi.
+	var sep := OBST.min_separation(dichiarati)
+	var utile := sep - 2.0 * r
+	h.check(sep > 2.0 * r + 2.0 * ENEMY.RADIUS[ENEMY.BOSS],
+		"m10: i due dischi piu' vicini sono a %.2f m: il passaggio utile (%.2f m) e' piu' largo del boss (%.2f m)"
+			% [sep, utile, 2.0 * ENEMY.RADIUS[ENEMY.BOSS]])
+	print("m10: dischi piu' vicini a %.2f m, passaggio utile %.2f m (boss: %.2f m)"
+		% [sep, utile, 2.0 * ENEMY.RADIUS[ENEMY.BOSS]])
+
+	## ## Il campo: nessuna cella libera irraggiungibile
+	##
+	## Una cella che il campo non sa raggiungere e' un posto dove il campo non sa
+	## dire niente, e il nemico che ci finisce e' un nemico fermo. Il numero si
+	## guarda **dopo** aver costruito il campo e averlo ricostruito dal bersaglio
+	## al centro, che e' la posizione da cui parte il giocatore.
+	var campo: FLOW = FLOW.new()
+	campo.build(dichiarati, R, _m10_skin())
+	campo.rebuild(Vector3.ZERO)
+	h.check(campo.unreachable == 0,
+		"m10: nessuna cella libera e' irraggiungibile dal centro (irraggiungibili: %d su %d)"
+			% [campo.unreachable, campo.cells_x * campo.cells_z])
+	h.check(campo.blocked_cells() > 0, "m10: il campo ha davvero celle bloccate")
+	print("m10: campo %dx%d celle da %.1f m, %d bloccate, gonfiatura %.2f m"
+		% [campo.cells_x, campo.cells_z, FLOW.CELL, campo.blocked_cells(), campo.inflate])
+
+	## Il campo da fermo non costa niente: e' la promessa di `GOAL_MOVE`, e una
+	## promessa non verificata e' una decorazione.
+	var prima := campo.rebuilds
+	for _i in 60:
+		if campo.needs_rebuild(Vector3.ZERO):
+			campo.rebuild(Vector3.ZERO)
+	h.eq(campo.rebuilds, prima,
+		"m10: 60 richieste di campo a bersaglio fermo non ricostruiscono niente")
+	# E muovendo il bersaglio di `GOAL_MOVE` il campo torna, altrimenti
+	# l'evitamento inseguirebbe un giocatore fermo e non uno che corre.
+	h.check(campo.needs_rebuild(Vector3(FLOW.GOAL_MOVE + 0.5, 0.0, 0.0)),
+		"m10: il campo si ricostruisce quando il bersaglio si sposta oltre %.1f m" % FLOW.GOAL_MOVE)
+
+# --- 13b. Il criterio n. 2: nessun nemico dentro un ostacolo ------------------
+
+func _aggira(h, horde: HORDE) -> void:
+	var obs := _m10_monta(horde)
+	h.check(obs.size() > 0, "m10: la geometria da misurare non e' vuota")
+	var campo: FLOW = horde.flow_field
+	if not h.check(campo != null, "m10: il campo e' montato sulla simulazione"):
+		return
+
+	horde.set_focus(Vector3.ZERO)
+	horde.auto_respawn = true
+	# L'onda viene bloccata a 1 per la stessa ragione della sezione 11c: con
+	# l'onda che avanza, `population` cresce e la misura finisce descrivendo
+	# un'orda diversa da quella che si voleva misurare.
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.reseed(M10_SEME)
+	horde.population = HORDE.MAX_ENEMIES
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
+		horde.step(DT)
+		passi += 1
+	h.eq(horde.count, HORDE.MAX_ENEMIES, "m10: la misura parte da %d nemici" % HORDE.MAX_ENEMIES)
+	h.eq(horde.inside_obstacles(), 0,
+		"m10: al primo passo nessuno e' gia' dentro un ostacolo (disposizione e' fatta fuori)")
+
+	# ## La frazione di deviazione si campiona su **tutto** il percorso, avvicinamento
+	# ## incluso, e non solo sulla finestra: la finzione che prima la nascondeva
+	# ##
+	# Il campione di prima contava i segmenti interrotti **dentro la finestra**, cioe'
+	# dopo 10 s di avvicinamento. Ma a quel punto l'orda e' gia' addosso al
+	# giocatore: `t_primo` e `t_meta` sono entrambi **0.00 s**, cioe' meta' dell'orda
+	# e' dentro `ARRIVE_RADIUS` al primo passo campionato. Un nemico a 2 m dal
+	# bersaglio ha una retta lunga 2 m, e il disco piu' vicino e' a 12,19 m: la
+	# domanda «la mia retta e' interrotta?» ha la risposta **no** per costruzione,
+	# qualunque sia la geometria. Il numero che ne usciva (3,9%) non era una misura
+	# della deviazione: era una misura di **quanto era lontano il nemico**, cioe'
+	# una misura della velocita' dell'orda. E il tetto superiore della banda
+	# («non piu' del 60%, altrimenti l'orda si muove a ondate») su quella domanda
+	# non poteva mai parlare di ondate.
+	#
+	# Quindi il campione parte dall'orda piena appena riempita e copre
+	# `M10_WARMUP + M10_WINDOW` passi: l'avvicinamento e' **il** momento in cui il
+	# nemico incontra i dischi, e una misura che lo salta misura il vuoto.
+	# I due numeri vengono stampati **entrambi** (avvicinamento e finestra), e la
+	# banda e' scritta sul primo, dichiarando quale dei due e'.
+	var campioni := 0
+	var deviati := 0
+	var campioni_fin := 0
+	var deviati_fin := 0
+	var dentro_tot := 0
+	var dentro_max := 0
+	var dentro_passi := 0
+	var t_primo := -1
+	var t_meta := -1
+	var meta := horde.count / 2
+	# Campionamento dei due numeri sulla stessa passata, senza pagare due volte i
+	# segmenti: ogni 10 passi (1/6 di secondo) la disposizione cambia lentamente
+	# rispetto al passo, quindi il campione non perde nessun evento.
+	for s in M10_WARMUP + M10_WINDOW:
+		horde.step(DT)
+		if s >= M10_WARMUP:
+			# Il criterio n. 2 (nessuno dentro un ostacolo) e' dichiarato sulla
+			# finestra: e' la condizione di regime, non quella di avvicinamento.
+			var dentro := _conta_dentro(horde, campo)
+			if dentro > 0:
+				dentro_tot += dentro
+				dentro_passi += 1
+			dentro_max = maxi(dentro_max, dentro)
+			if t_primo < 0 and _in_contatto(horde, Vector3.ZERO) > 0:
+				t_primo = s - M10_WARMUP
+			if t_meta < 0 and _in_contatto(horde, Vector3.ZERO) >= meta:
+				t_meta = s - M10_WARMUP
+		if s % 10 == 0:
+			var in_finestra := s >= M10_WARMUP
+			for i in horde.count:
+				campioni += 1
+				if not campo.clear_line(horde.transforms[i], Vector3.ZERO):
+					deviati += 1
+					if in_finestra:
+						deviati_fin += 1
+			if in_finestra:
+				campioni_fin += horde.count
+
+	# Il numero che il piano chiede al criterio n. 2: **quanti nemici sono
+	# dentro un ostacolo**, durante una partita vera. Zero, e non "pochi".
+	h.eq(dentro_tot, 0,
+		"m10 criterio n. 2: nessun nemico dentro un ostacolo in %d passi a %d vivi (rilevati %d, in %d passi, picco %d)"
+			% [M10_WINDOW, HORDE.MAX_ENEMIES, dentro_tot, dentro_passi, dentro_max])
+	h.eq(dentro_passi, 0, "m10: nessun passo con un nemico dentro un ostacolo")
+	h.check(t_primo >= 0, "m10: qualcuno arriva al giocatore (il campo non blocca l'orda)")
+	if t_primo >= 0:
+		h.check(t_primo < M10_ARRIVO_MAX,
+			"m10: il primo arrivo avviene entro %.0f s (misurati %.2f s)"
+				% [float(M10_ARRIVO_MAX) * DT, float(t_primo) * DT])
+	if t_meta >= 0:
+		h.check(t_meta < M10_META_MAX,
+			"m10: meta' dell'orda arriva entro %.0f s (misurati %.2f s)"
+				% [float(M10_META_MAX) * DT, float(t_meta) * DT])
+
+	var fraz := 100.0 * float(deviati) / maxf(1.0, float(campioni))
+	var fraz_fin := 100.0 * float(deviati_fin) / maxf(1.0, float(campioni_fin))
+	print("m10: finestra %.0f s a %d vivi: %d nemici dentro un ostacolo, picco %d in un passo"
+		% [float(M10_WINDOW) * DT, horde.count, dentro_tot, dentro_max])
+	print("m10: retta interrotta, tutto il percorso (avvicinamento incluso): %.1f%% (%d su %d campioni)"
+		% [fraz, deviati, campioni])
+	print("m10: retta interrotta, solo finestra di regime: %.1f%% (%d su %d campioni)"
+		% [fraz_fin, deviati_fin, campioni_fin])
+	print("m10: primo arrivo %.2f s, meta' dell'orda %.2f s"
+		% [float(maxi(0, t_primo)) * DT, float(maxi(0, t_meta)) * DT])
+	print("m10: campo ricostruito %d volte in %d passi (bersaglio fermo al centro)"
+		% [horde.flow_rebuilds, M10_WARMUP + M10_WINDOW])
+
+	## ## Il tempo per arrivare **passando attorno**, dichiarato
+	##
+	## Il primo arrivo e' il numero del criterio n. 2, ma da solo non distingue
+	## «ha aggirato» da «era gia' vicino»: la banda sotto e' quella che lo dice.
+	h.check(fraz >= M10_DEVIA_MIN,
+		"m10: almeno il %.1f%% dell'orda deve aggirare davvero, altrimenti la milestone e' invisibile (misurato %.1f%%)"
+			% [M10_DEVIA_MIN, fraz])
+	h.check(fraz <= M10_DEVIA_MAX,
+		"m10: non piu' del %.1f%% deve aggirare, altrimenti l'orda si muove a ondate e il gioco e' un labirinto (misurato %.1f%%)"
+			% [M10_DEVIA_MAX, fraz])
+
+## Nemici dentro un ostacolo, con un accorto che rende la misura possibile.
+##
+## Il test esatto e' quello di `flow_field.gd::contains` e resta il riferimento,
+## ma chiamarlo per 200 nemici ogni passo sono 5.400 confronti: la griglia del
+## campo dice prima se il punto e' anche solo **vicino** a un disco, e il
+## confronto esatto si fa solo su quelli. La scorciatoia non viene creduta: sotto
+## e' asserito che sui punti dove la griglia dice «puo' essere dentro» il test
+## esatto e il conteggio danno lo stesso numero.
+func _conta_dentro(horde: HORDE, campo: FLOW) -> int:
+	var n := 0
+	for i in horde.count:
+		if _forse_dentro(horde.transforms[i], campo) and campo.contains(horde.transforms[i], horde.radii[i]):
+			n += 1
+	return n
+
+func _forse_dentro(p: Vector3, campo: FLOW) -> bool:
+	var cx := int(floor((p.x - campo.origin_x) / FLOW.CELL))
+	var cz := int(floor((p.z - campo.origin_z) / FLOW.CELL))
+	if cx < 0 or cz < 0 or cx >= campo.cells_x or cz >= campo.cells_z:
+		return true
+	return campo.blocked[cz * campo.cells_x + cx] != 0
+
+## Quanti nemici sono a portata di morso del bersaglio: `RADIUS + TOUCH_REACH`,
+## cioe' la stessa frontiera che `src/sim/enemy.gd` usa per mordere.
+func _in_contatto(horde: HORDE, centro: Vector3) -> int:
+	var n := 0
+	for i in horde.count:
+		var p := horde.transforms[i]
+		var d := Vector2(p.x - centro.x, p.z - centro.z).length()
+		if d <= horde.radii[i] + ENEMY.TOUCH_REACH:
+			n += 1
+	return n
+
+# --- 13c. Il criterio n. 4: nessuno si incastra -------------------------------
+#
+# ## Perche' questa sezione esiste e come puo' fallire
+#
+# Il difetto tipico di un campo di percorrenza e' l'**incastrato**: il nemico
+# che si ferma in un angolo e non si muove piu'. Non produce errori, non crasha,
+# e nessuna asserzione sul «dentro un ostacolo» lo vede — perche' un nemico
+# incastrato e' un nemico *benissimo* dal punto di vista del criterio n. 2: e'
+# fuori dall'ostacolo, e li' fermo e immobile. Per questo il criterio e' scritto
+# sulla velocita' e su quanti passi di fila la tiene bassa.
+#
+# ## La soglia e i passi, e perche' sono questi
+#
+# `ARRIVE_RADIUS = 3.0` in `src/sim/enemy.gd`: un nemico **dentro** quella
+# distanza rallenta di proposito (`arrive = dist / 3`), e a 0,1 m dal bersaglio
+# un runner avanza a 0,22 m/s. Non e' incastrato: e' arrivato. Percio' il
+# criterio si applica ai nemici **fuori** dall'arrivo, e la soglia di velocita'
+# puo' stare sotto quella di un runner che arriva senzache nessuno lo confonda
+# con un nemico fermo.
+#
+# `STUCK_STEPS = 90` sono **1,5 s** a DT = 1/60: sopra, un nemico che rallenta
+# per la folla che gli passa addosso e un nemico incastrato non si distinguono
+# piu', e il criterio comincerebbe a misurare il rumore della separazione.
+
+## Soglia di velocita' sotto la quale un nemico che non e' arrivato e' fermo, m/s.
+const STUCK_SPEED := 0.30
+## Passi di fila sotto la soglia prima che il nemico sia dichiarato incastrato.
+const STUCK_STEPS := 90
+
+func _incastrati(h, horde: HORDE) -> void:
+	var obs := _m10_monta(horde)
+	var campo: FLOW = horde.flow_field
+	if not h.check(campo != null, "m10: il campo e' montato sulla simulazione"):
+		return
+	h.check(obs.size() > 0, "m10: la geometria da misurare non e' vuota")
+
+	horde.set_focus(Vector3.ZERO)
+	horde.auto_respawn = true
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.reseed(M10_SEME)
+	horde.population = HORDE.MAX_ENEMIES
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
+		horde.step(DT)
+		passi += 1
+
+	# Il contatore e' per **indice**, e gli indici cambiano a ogni morte: qui
+	# non muore nessuno (nessun colpo nella finestra), quindi l'indice e' lo
+	# stesso nemico per tutta la misura. E' scritto perche' la regola vale
+	# finche' e' vero, e non perche' sia comodo.
+	var lenti := PackedInt32Array()
+	lenti.resize(horde.count)
+	var peggiore := 0
+	var peggiore_i := -1
+	var colpevoli := 0
+	var campioni_lenti := 0
+	for _i in M10_WARMUP:
+		horde.step(DT)
+	for s in M10_WINDOW:
+		horde.step(DT)
+		var fuori_arrivo := 0
+		var lenti_passo := 0
+		for i in horde.count:
+			var p := horde.transforms[i]
+			if Vector2(p.x, p.z).length() <= ENEMY.ARRIVE_RADIUS + horde.radii[i]:
+				# arrivato: rallenta di proposito, non e' incastrato
+				lenti[i] = 0
+				continue
+			fuori_arrivo += 1
+			if horde.velocities[i].length() < STUCK_SPEED:
+				lenti[i] += 1
+				lenti_passo += 1
+			else:
+				lenti[i] = 0
+		campioni_lenti += lenti_passo
+		if lenti_passo > 0:
+			for i in horde.count:
+				if lenti[i] > peggiore:
+					peggiore = lenti[i]
+					peggiore_i = i
+					colpevoli = 1
+				elif lenti[i] == peggiore and peggiore > 0:
+					colpevoli += 1
+	h.check(peggiore <= STUCK_STEPS,
+		"m10 criterio n. 4: nessun nemico fermo sotto %.2f m/s per piu' di %d passi di fila (misurati %d)"
+			% [STUCK_SPEED, STUCK_STEPS, peggiore])
+	print("m10: in %.0f s nessun nemico e' restato fermo piu' di %d passi (%.1f s); passo peggiore %d su %d"
+		% [float(M10_WINDOW) * DT, STUCK_STEPS, float(STUCK_STEPS) * DT, peggiore, STUCK_STEPS])
+	print("m10: sotto %.2f m/s fuori dall'arrivo, %d campioni su %d (%d nemici-passo su %d)"
+		% [STUCK_SPEED, campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES,
+			campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES])
+	if peggiore > 0:
+		_incastrato_dettaglio(horde, campo, obs, peggiore_i, peggiore)
+
+# --- 13c-bis. I denti del criterio n. 3: che cosa misura davvero ----------------
+#
+# ## Perche' questa sezione esiste, e che cosa sarebbe una prova falsa
+# ##
+# Il criterio n. 3 della milestone dice: «`horde.flow_field = null` deve dire
+# FAIL con i numeri». Il **dente** di un criterio non e' il verde: e' la prova che
+# il rosso e' raggiungibile. Un criterio che misura `dentro == 0` passa anche se
+# nella simulazione non c'e' mai nessun ostacolo, e anche se `contains` restituisce
+# `false` perche' e' scritto male. E' la classe di difetto di §1.6, ed e' la
+# ragione per cui il punto 5 della semantica di m10 («un insieme vuoto e' un
+# errore») esiste come frase.
+# ##
+# Quindi qui la **stessa** geometria, lo **stesso** seme e lo **stesso** passo
+# girano due volte: una col campo montato e una con `flow_field = null`. Il primo
+# caso deve dare `dentro == 0` (e lo ridice, perche' la sezione 13b lo fa
+# dichiarato); il secondo deve dare `dentro > 0`. Se il secondo desse zero, il
+# criterio n. 2 non starebbe misurando niente e questa sezione andrebbe rossa.
+#
+# Il conteggio del braccio spento usa un **campo separato**, costruito qui sulla
+# stessa geometria: con `flow_field = null` non c'e' nessun campo su cui chiamare
+# `contains`, e chiamare `horde.inside_obstacles()` restituirebbe sempre 0 per la
+# guardia `if flow_field != null`. Il numero che deve crescere e' il punto, e il
+# punto si conta con un metodo che non dipende dal fatto che il campo sia montato.
+
+func _denti_del_criterio(h, horde: HORDE) -> void:
+	var obs := OBST.layout(horde.arena_radius)
+	# Il campo che **conta**: stessa geometria, stesso raggio del nemico piu'
+	# grosso. Non e' quello della simulazione, che qui e' spento di proposito.
+	var conta: FLOW = FLOW.new()
+	conta.build(obs, horde.arena_radius, _m10_skin())
+	conta.rebuild(Vector3.ZERO)
+	var montato = horde.flow_field
+	horde.flow_field = null
+	horde.set_focus(Vector3.ZERO)
+	horde.auto_respawn = true
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.reseed(M10_SEME)
+	horde.population = HORDE.MAX_ENEMIES
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
+		horde.step(DT)
+		passi += 1
+	var dentro_tot := 0
+	var dentro_max := 0
+	var dentro_passi := 0
+	for _s in M10_WARMUP + M10_WINDOW:
+		horde.step(DT)
+		var dentro := _conta_dentro(horde, conta)
+		if dentro > 0:
+			dentro_tot += dentro
+			dentro_passi += 1
+		dentro_max = maxi(dentro_max, dentro)
+	horde.flow_field = montato
+	h.check(dentro_tot > 0,
+		"m10 criterio n. 3: col campo spento il criterio n. 2 deve andare ROSSO (rilevati %d nemici dentro un ostacolo in %d passi, picco %d)"
+			% [dentro_tot, dentro_passi, dentro_max])
+	h.check(montato != null and horde.flow_field == montato,
+		"il campo e' stato rimesso dopo la prova: la sezione 13b resta quella che misura")
+	print("m10: denti del criterio n. 2 -- campo spento: %d nemici dentro un ostacolo in %d passi su %d (picco %d in un passo)"
+		% [dentro_tot, dentro_passi, M10_WARMUP + M10_WINDOW, dentro_max])
+	print("m10: denti del criterio n. 2 -- campo acceso (sezione 13b): 0 nemici dentro un ostacolo")
+
+# --- 13d. Il criterio n. 5: nessuno nasce dentro un disco ---------------------
+
+func _spawn_sicuro(h, horde: HORDE) -> void:
+	var obs := _m10_monta(horde)
+	if not h.check(obs.size() > 0, "m10: la geometria da misurare non e' vuota"):
+		return
+	var skin := _m10_skin()
+	var dentro_layout := 0
+	var dentro_spawn := 0
+	var semi := 0
+	var punti := 0
+	# Ventiquattro semi, non uno: la disposizione cambia a ogni seme e un punto
+	# di nascita dentro un disco su ventiquattro disposizioni e' un punto di
+	# nascita dentro un disco in partita vera.
+	for s in M10_SEMI:
+		var seme := 1 + s * 10
+		horde.reseed(seme)
+		semi += 1
+		for i in horde.count:
+			if _m10_dentro(horde.transforms[i], obs, skin):
+				dentro_layout += 1
+		for _k in M10_PUNTI:
+			var p := horde.random_spawn_point()
+			punti += 1
+			if _m10_dentro(p, obs, skin):
+				dentro_spawn += 1
+	h.eq(dentro_layout, 0,
+		"m10 criterio n. 5: nessun nemico della disposizione iniziale dentro un disco, su %d semi" % semi)
+	h.eq(dentro_spawn, 0,
+		"m10 criterio n. 5: nessun punto di spawn casuale dentro un disco, %d punti su %d semi"
+			% [punti, semi])
+	# Il vincolo e' sul **corpo del nemico piu' grosso**, quindi un disco puo'
+	# essere libero per un runner e pieno per un boss. Il numero sotto e' la
+	# frazione di punti che ci cadono dentro: se fosse zero, il criterio non
+	# starebbe misurando niente e la soglia sarebbe decorativa.
+	print("m10: %d semi, %d punti di spawn e %d posizioni iniziali, nessuno dentro un disco (raggio %.2f m)"
+		% [semi, punti, semi * horde.count, skin])
+
+# --- 13e. La catena: `Game.obstacles` esiste davvero ---------------------------
+#
+# ## Questa e' la sezione che tiene la trappola dell'onda chiusa
+#
+# Tutte le sezioni sopra possono passare con **zero ostacoli**: «nessun ostacolo
+# blocca nessuno» e' vero anche quando non ce n'e'. Sarebbe una macchina
+# verificata che il gioco non chiama (§1.6), e il punto 5 della semantica
+# congelata lo dice con parole: un insieme vuoto e' un errore, non un mondo
+# senza muri. Quindi qui si asserisce la **catena**, non l'algoritmo:
+#
+#   -arena costruisce -> -orda costruisce il campo -> -gameplay ci scontra.
+#
+# Le tre righe sotto sono la parte di questa sezione che resta rossa finche' il
+# vertice non aggiunge `var obstacles: PackedVector3Array` in
+# `src/core/contracts.gd`, e il motivo e' scritto nel messaggio.
+
+func _ostacoli_contratto(h, horde: HORDE) -> void:
+	var game := _game()
+	if game == null:
+		h.fail("m10: nessun contratto: gli ostacoli non possono esistere")
+		return
+	var raw = game.get("obstacles")
+	h.check(raw is PackedVector3Array,
+		"m10: il contratto dichiara Game.obstacles : PackedVector3Array. Trovato %s. "
+			% type_string(typeof(raw))
+		+ "La superficie di m10 e' documentata in src/core/contracts.gd ma il campo non c'e': "
+		+ "senza quella riga -arena non registra niente, -orda costruisce il campo sul nulla "
+		+ "e -gameplay non ha muri. Il file e' del vertice: nessuna foglia lo tocca.")
+	if not (raw is PackedVector3Array):
+		return
+	var letti: PackedVector3Array = raw
+	h.check(letti.size() > 0,
+		"m10 criterio n. 1: gli ostacoli esistono. Un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)")
+	if letti.is_empty():
+		return
+	var radii := 0
+	var bassi := 0
+	for k in letti.size():
+		radii += 1
+		if not (letti[k].y > 0.0):
+			bassi += 1
+	h.eq(bassi, 0,
+		"m10 criterio n. 1: ogni ostacolo registrato ha `y` > 0, cioe' il raggio e' in `y` e positivo")
+	var sep := OBST.min_separation(letti)
+	h.check(sep > 2.0 * OBST.radius_for(horde.arena_radius),
+		"m10 criterio n. 1: nessuna coppia di dischi si tocca (min %.2f m, diametro %.2f m)"
+			% [sep, 2.0 * OBST.radius_for(horde.arena_radius)])
+
+	# ## L'orda che **gioca**, e non l'orda che il test ha costruito
+	#
+	# L'assersione qui sotto guardava `horde`, cioe' l'orda isolata di questo file.
+	# Quella orda nasce in `_initialize()`, **prima** che `-arena` carichi la scena e
+	# registri i 27 dischi sul contratto: quando il suo `_build()` gira,
+	# `Game.obstacles` e' ancora vuoto, quindi `flow_problem` dice giustamente
+	# «Game.obstacles e' vuoto» e l'evitamento e' spento. Il rosso che ne veniva
+	# accusava il gioco di non aver montato il campo, e il gioco lo aveva montato:
+	# accusava una **macchina** invece di un gioco. E' la differenza che questa
+	# sezione esiste per dichiarare.
+	#
+	# I numeri sono presi **mentre l'orda della scena vera e' viva** (vedi
+	# `_scena_vera`): dopo `_chiudi()` il nodo e' liberato e non c'e' piu' niente
+	# da leggere, quindi la lettura avviene l'i' e il confronto qui.
+	h.eq(_vera_flow_obstacles, letti.size(),
+		"m10: l'orda che gioca ha letto dal contratto gli stessi %d ostacoli registrati" % letti.size())
+	h.eq(_vera_flow_problem, "",
+		"m10: l'orda che gioca ha costruito il campo: horde.flow_problem e' vuoto. Letto su %s"
+			% _vera_flow_problem)
+	h.check(_vera_flow_active, "m10: horde.flow_active() e' vero in partita")
+	h.eq(_vera_flow_rebuilds, 0,
+		"m10: a bersaglio fermo il campo non si ricostruisce (fuori dai %d passi che misurano il pieno)"
+			% (M10_WARMUP + M10_WINDOW))
+	print("m10: contratto -- %d ostacoli registrati, raggio %.2f m, i due piu' vicini a %.2f m"
+		% [letti.size(), letti[0].y, sep])
+	print("m10: orda che gioca -- %d ostacoli, flow_problem vuoto, campo attivo, %d ricostruzioni"
+		% [_vera_flow_obstacles, _vera_flow_rebuilds])

@@ -21,6 +21,20 @@ const RADIUS := 0.16
 ## proiettile, assegnati una volta sola, mai uno in più a runtime.
 const MAX_PIERCE := 7
 
+## ## m10: `step()` qui sotto sposta e basta, e NON è un dimenticanza
+##
+## Un ostacolo non ferma un proiettile: in questo progetto l'ostacolo è solido
+## per **chi cammina** (giocatore e nemico) e **trasparente** a chi spara. Il
+## motivo è una combinazione degenerata — se fermasse anche i proiettili, il
+## giocatore che ci si mette dietro sarebbe al sicuro e irraggiungibile per
+## sempre, e il gioco si vincerebbe stando fermi — e la decisione è del vertice
+## (`src/core/contracts.gd`, "Supersficie di milestone 10").
+##
+## Quindi `step()` non legge `Game.obstacles`, e non deve leggerlo. «Proiettili
+## che si fermano» è **m11**. La dichiarazione corrispondente sta in
+## `projectile_pool.gd` (`OBSTACLES_BLOCK_PROJECTILES = false`), che è il file
+## dove il contatto viene davvero calcolato.
+
 ## Dove si trova adesso.
 var pos := Vector3.ZERO
 ## Dove era al frame precedente: il test di contatto usa il **segmento** fra i
@@ -62,6 +76,9 @@ func launch(p_pos: Vector3, p_dir: Vector3, p_speed: float, p_damage: float,
 
 ## Un passo di integrazione. Solo movimento: la collisione la fa il pool, che è
 ## l'unico che può vedere gli indici dell'orda senza dipendere dal suo script.
+##
+## Solo movimento **e nient'altro**: niente ostacoli, e vedi il blocco sopra
+## `MAX_PIERCE` per il perché.
 func step(delta: float) -> void:
 	prev_pos = pos
 	pos += dir * speed * delta

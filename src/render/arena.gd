@@ -1,15 +1,16 @@
 extends Node3D
-## La radice dell'arena: `scenes/arena_main.tscn`. Terreno, orda, nemici,
-## giocatore, camera, HUD, e una sola registrazione sul contratto.
+## La radice dell'arena: `scenes/arena_main.tscn`. Terreno, ostacoli, orda,
+## nemici, giocatore, camera, HUD, e due registrazioni sul contratto.
 ##
-## ## L'unica cosa che arena registra
+## ## Le due cose che arena registra
 ##
-##     Game.arena_radius = 46.0
+##     Game.arena_radius = 46.0        # m9, e' la fonte unica del raggio
+##     Game.obstacles     = [...]      # m10, i dischi su cui si scontra
 ##
-## E' un **dato**, quindi assegnazione diretta, una volta sola all'avvio (piano
-## 5.1). Lo registro in `_enter_tree()` e non in `_ready()`: i figli di questa
-## scena costruiscono il terreno e l'orda nel loro `_ready()`, che gira prima
-## del mio. Il commento di `_enter_tree()` spiega perche'.
+## Sono due **dati**, quindi assegnazione diretta, una volta sola all'avvio (piano
+## 5.1). Li registro in `_enter_tree()` e non in `_ready()`: i figli di questa
+## scena costruiscono il terreno, gli ostacoli e l'orda nel loro `_ready()`, che
+## gira prima del mio. Il commento di `_enter_tree()` spiega perche'.
 ##
 ## Non registro metodi: `nearest_enemy`, `damage_enemy` e `random_spawn_point`
 ## sono di -orda, `spawn_projectile` e `player_position` di -gameplay.
@@ -67,10 +68,67 @@ extends Node3D
 ## correzione di mappa.
 const ARENA_RADIUS := 46.0
 
+## ## LA GEOMETRIA DEGLI OSTACOLI: i numeri sono di `-orda`, e qui vengono LETTI
+##
+## Il piano 3.11 fissa l'ordine di consegna di m10: «la geometria la sceglie
+## `-orda` e la costruisce `-arena`», perche' il criterio n. 2 e' suo e «un numero
+## che una foglia non ha misurato non lo deve scrivere». Il canale dei dati e'
+## dichiarato in `src/core/contracts.gd` ed e' **una riga**:
+##
+##     -orda possiede i NUMERI:  src/sim/obstacles.gd -> layout(arena_radius)
+##     -arena possiede la FORMA e LEGGE quei numeri, non li ricopia
+##
+## Quindi qui sotto **non c'e' un numero scritto**: c'e' il posto dove il numero va
+## a essere letto, e `OBSTACLE_LAYOUT` ne e' il risultato — 27 dischi di raggio
+## 2,99 m su tre anelli a 15,18 / 27,14 / 39,10 m, con quei numeri che sono di
+## `-orda` e cambiano senza che questo file lo sappia. Scriverli qui sarebbe la
+## sesta copia di un numero che m9 ha gia' chiuso una volta (sei copie di `28.0`,
+## nessuna porta rossa): due copie di un raggio che divergono sono il difetto, e
+## la copia mente alla prima riga cambiata.
+##
+## ## LA CONVENZIONE, detta quattro volte perche' e' l'unica cosa che si sbaglia
+##
+##     elemento = Vector3(centro_x, RAGGIO, centro_z)
+##
+## **Il raggio sta in `y`.** `y` non e' un'altezza e `z` non e' una profondita':
+## sono la seconda e la terza coordinata del centro del disco sul piano XZ.
+## `elemento.y > 0.0` e' un **invariante**, non una convenzione (punto 3 della
+## semantica congelata), e `obstacles_payload()` lo rifiuta invece di registrarlo.
+##
+## Il **numero** di ostacoli e il **raggio** sono di `-orda`; la **forma** disegnata
+## (cilindro) e il **colore** sono di -arena e stanno in
+## `src/render/arena_obstacles.gd`.
+##
+## ## Perche' un `preload` del file di un'altra foglia, qui, e non altrove
+##
+## La regola di 5 vieta prendere con `get_node("../..")` un dato che l'API non
+## espone, perche' quello e' copiare una conoscenza. Qui la differenza e' tre,
+## e tutte dichiarate: il **proprietario** del dato (`src/sim/obstacles.gd` e' di
+## `-orda`), il fatto che ne esista **un solo produttore**, e il fatto che quello
+## che ci metto dentro — il cilindro, l'altezza, i 12 segmenti, il colore — e'
+## mio. Il file di `-orda` non viene toccato: e' una dipendenza dichiarata, che
+## e' il contrario di una copia.
+const OBST := preload("res://src/sim/obstacles.gd")
+
+## I dischi che l'arena mette in scena: **derivati**, non scritti.
+##
+## Non e' una `const` perche' `layout()` e' una funzione, e questa e' una
+## dipendenza che si risolve **una volta sola**, all'avvio del nodo, prima di
+## `_enter_tree()`. Da li' in poi la lista non cambia (punto 1 della semantica
+## congelata: gli ostacoli sono statici), quindi nel ciclo di gioco non si
+## rilegge niente e non si ricostruisce niente.
+var OBSTACLE_LAYOUT: PackedVector3Array = OBST.layout(ARENA_RADIUS)
+
 var _hud: Node = null
 var _registered: bool = false
 var _warned_no_hud: bool = false
 var _warned_no_contract: bool = false
+## Due avvisi di m10, emessi una volta sola. Sono `push_warning` e non
+## `push_error` perche' dicano il difetto **senza** sporcare il log di un errore di
+## GDScript: la porta che deve andare rossa su questo e' `tests/test_arena.gd`, che
+## nomina il difetto e il suo rimedio, e non un avviso che nessuno legge.
+var _warned_no_obstacles_field: bool = false
+var _warned_empty_layout: bool = false
 
 func _enter_tree() -> void:
 	# `_enter_tree()`, non `_ready()`, e la ragione sta nell'ordine.
@@ -108,6 +166,63 @@ func _register() -> void:
 			push_warning("arena: autoload Game non trovato, l'arena resta senza raggio")
 		return
 	game.arena_radius = ARENA_RADIUS
+	_register_obstacles(game)
+
+## ## L'OSTACOLO: la registrazione di `Game.obstacles` (m10)
+##
+## Va in `_enter_tree()` come il raggio, e per la **stessa** ragione: il nodo
+## `Obstacles` costruisce il suo buffer nel proprio `_ready()`, e i figli leggono
+## prima del padre. Quindi se l'ordinasse qui dentro, l'orda troverebbe un array
+## vuoto e costruirebbe il campo di percorrenza **sopra una mappa senza muri**, che
+## e' il difetto che il punto 5 della semantica congelata nomina con parole.
+##
+## E' **idempote** per costruzione: `_register()` non fa niente una seconda volta.
+func _register_obstacles(game: Node) -> void:
+	if not _contract_has_obstacles(game):
+		if not _warned_no_obstacles_field:
+			_warned_no_obstacles_field = true
+			push_warning("arena: il contratto NON dichiara il campo `obstacles`. La superficie di m10 e' documentata in src/core/contracts.gd ma il campo non e' dichiarato: senza la riga `var obstacles: PackedVector3Array` l'assegnazione qui sotto e' un SCRIPT ERROR e gli ostacoli non si registrano. Il file e' del vertice: -arena non lo tocca.")
+		return
+	game.set("obstacles", obstacles_payload())
+
+## Il contratto dichiara `obstacles`?
+##
+## La risposta si prende dal **valore**, non dalla lista delle proprieta': un campo
+## dichiarato e non inizializzato restituisce una `PackedVector3Array` **vuota**, e
+## una `PackedVector3Array` vuota e' diversa da `null`. Quindi `get()` distingue i
+## due casi senza bisogno di una seconda fonte, e la registrazione comincia a
+## funzionare da sola il giorno che il vertice aggiunge la riga — senza che
+## nessun file di -arena debba essere cambiato.
+func _contract_has_obstacles(game: Node) -> bool:
+	return game.get("obstacles") is PackedVector3Array
+
+## ## I DISCHI CHE -ARENA REGISTRA: la lista che esce dal produttore unico
+##
+## Non si ricopia niente: `OBSTACLE_LAYOUT` e' gia' il risultato di
+## `OBST.layout(ARENA_RADIUS)`. Qui si fa solo la **validazione** e la conversione
+## al tipo del contratto, che e' un'altra operazione (validare non e' copiare:
+## copiare sarebbe riscrivere i numeri a mano, e il punto 5 della semantica
+## congelata chiede che un insieme vuoto sia un **errore**, non un mondo senza
+## muri).
+##
+## Non si scarta l'elemento cattivo e si registra il resto: un ostacolo non
+## registrato e' un muro **invisibile**, cioe' il difetto esatto che il criterio n.
+## 6 mette per meta' di -arena («l'ostacolo deve essere **visibile** dove e'
+## solido»). Quindi una lista con un raggio nullo o negativo **non viene registrata
+## tutta**: e' un difetto di scrittura, e si dice con un `push_error` che nomina
+## l'indice invece di produrre una mappa che sembra chiusa e non lo e'.
+func obstacles_payload() -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for i in OBSTACLE_LAYOUT.size():
+		var e: Vector3 = OBSTACLE_LAYOUT[i]
+		if not (e.y > 0.0):
+			push_error("arena: OBSTACLE_LAYOUT[%d] ha raggio %.3f: il raggio sta in `y` e deve essere > 0. L'elenco non viene registrato per intero." % [i, e.y])
+			return PackedVector3Array()
+		out.append(e)
+	if out.is_empty() and not _warned_empty_layout:
+		_warned_empty_layout = true
+		push_error("arena: OBST.layout(%.1f) ha restituito **zero** dischi, quindi nessun ostacolo viene registrato ne' disegnato. Un insieme vuoto non e' un mondo senza muri: e' la piramide non montata. Il produttore e' src/sim/obstacles.gd (-orda), il canale e' dichiarato in src/core/contracts.gd." % ARENA_RADIUS)
+	return out
 
 # --- Il ciclo di gioco --------------------------------------------------------
 

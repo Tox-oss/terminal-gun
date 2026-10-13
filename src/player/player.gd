@@ -51,6 +51,31 @@ const DASH_COOLDOWN := 1.1
 ## deve poter vedere il bordo, non restare appiccicato.
 const ARENA_MARGIN := 0.8
 
+# --- m10: gli ostacoli, e il giocatore che ci si arresta ------------------------
+#
+# Il contratto dichiara `Game.obstacles : PackedVector3Array`, un elemento per
+# ostacolo, con la convenzione **il raggio sta in `y`**:
+#
+#     elemento = Vector3(centro_x, RAGGIO, centro_z)
+#
+# `y` NON e' un'altezza e `z` NON e' una profondita': sono il raggio e la seconda
+# coordinata del centro. Lo dice `src/core/contracts.gd` tre volte perche' e' la
+# cosa che si sbaglia per prima.
+
+## Metri di margine dal **bordo di un ostacolo**, come `ARENA_MARGIN` e' un
+## margine e non un raggio: il giocatore si ferma un filo PRIMA del disco, cosi'
+## il modello non ci entra dentro. E' l'unico numero di -gameplay che serve al
+## criterio n. 6 di m10, e `tests/test_gameplay.gd` lo **legge da qui** invece
+## di copiarlo: una copia nel test sarebbe un numero che mente il giorno in cui
+## lo si ritocca.
+const OBSTACLE_MARGIN := 0.6
+## Quante volte il clamp puo' correggere la posizione dentro un frame. Serve a
+## un solo caso, due ostacoli sovrapposti: dopo una passata il giocatore puo'
+## essere stato spinto dentro il secondo, e il secondo lo rimette fuori. Quattro
+## passate sono un **tetto**, non un ciclo: nessun `while` che possa non
+## finire dentro il passo di simulazione.
+const OBSTACLE_PASSES := 4
+
 ## Un nemico e' morto. Chiamata dall'arma, che lo ha saputo da
 ## `Game.damage_enemy` che ha risposto `true` (piano §5.2): l'uccisione la dice
 ## il contratto, non si indovina dal calo di `horde.count`. Prima che
@@ -80,6 +105,12 @@ var velocity := Vector3.ZERO
 var invuln := 0.0
 var dash_timer := 0.0
 var dash_cd := 0.0
+## Gli ostacoli **in uso**, copiati dal contratto (m10). Sono un dato e non un
+## nodo: nessun ostacolo aggiunge un nodo a questo sottoalbero, quindi il tetto
+## di nodi di -gameplay non cambia perche' esistono. Il campo e' pubblico perche'
+## e' un dato di gioco come `hp` e `velocity`, e perche' `reload_obstacles()`
+## ne fa la copia dal contratto una volta sola.
+var obstacles: PackedVector3Array = PackedVector3Array()
 ## L'arma. Senza tipo di classe: `player.gd` conosce `weapon_base.gd` solo per
 ## crearla, e nessuno dei due deve il tipo dell'altro.
 var weapon
@@ -96,6 +127,10 @@ var _cam_basis := Basis.IDENTITY
 ## altrove: e' il flag che distingue «e' appena morto» da «e' gia' morto», che
 ## e' la differenza fra emettere la morte una volta e una volta per colpo.
 var _dead_signalled := false
+## Un solo avviso per la lettura degli ostacoli, e uno per l'invariante del
+## raggio. Vedi `reload_obstacles()`: sono due difetti diversi e non si confondono.
+var _warned_no_obstacles := false
+var _warned_obstacle_radius := false
 
 func _ready() -> void:
 	# Piano §5.1: i dati con l'assegnazione diretta, i metodi con
@@ -146,6 +181,14 @@ func _ready() -> void:
 	## il difetto peggiore di una porta. Sono dodici e non dieci dalla m6, che ne ha
 	## dichiarate due in piu' (`offer_label`, `offer_effect`).
 	Game.progression = progression
+
+	# m10: gli ostacoli si leggono **una volta sola** (semantica punto 1 del
+	# contratto: sono statici) e si copiano qui. `-arena` li registra nel proprio
+	# `_enter_tree()`, che scende prima del mio `_ready()`, quindi quando questa
+	# riga gira il dato e' gia' dentro. Se non lo fosse, il giocatore si
+	# muoverebbe senza muri e nessuno se ne accorgerebbe: per quello
+	# `reload_obstacles()` **non** e' silenzioso quando non trova niente.
+	reload_obstacles()
 
 	weapon = get_node_or_null("Weapon")
 	if weapon == null:
@@ -203,6 +246,9 @@ func reset_run() -> void:
 	invuln = 0.0
 	dash_timer = 0.0
 	dash_cd = 0.0
+	# Gli ostacoli **non** si rileggono: sono statici e il giocatore e' sempre
+	# lo stesso. Rileggerli qui cambierebbe la geometria di mezzo a una partita
+	# se qualcuno registrasse l'arena un istante dopo il restart.
 	# La vita e' tornata: la morte di questa partita e' finita, e il prossimo
 	# colpo che porta a zero deve poter emettere `died` di nuovo. Senza questa
 	# riga il restart riporterebbe in piedi un giocatore che non si puo' piu'
@@ -438,6 +484,7 @@ func _move(delta: float, wish: Vector3) -> void:
 		velocity += dv.normalized() * step_len
 	position += velocity * delta
 	_clamp_to_arena()
+	_clamp_to_obstacles()
 
 ## Il muro. Non si annulla la velocita' uscente: si toglie la componente che
 ## esce e si lascia scivolare quella parallela, altrimenti il giocatore si
@@ -454,6 +501,120 @@ func _clamp_to_arena() -> void:
 	var outward := velocity.dot(normal)
 	if outward > 0.0:
 		velocity -= normal * outward
+
+# --- m10: l'ostacolo, che e' solido solo per chi cammina -------------------------
+#
+# ## Il criterio n. 6 ha due meta' e sono una decisione, non una conseguenza
+#
+# Il giocatore e' **solido**: ci si arresta prima del bordo. I proiettili
+# **passano**: in `src/weapons/` non c'e' nessun test di ostacolo, e non e' un
+# dimenticanza. La combinazione «ostacolo che blocca anche i proiettili» lascia
+# il giocatore che ci si mette dietro **al sicuro e irraggiungibile** per sempre,
+# cioe' un gioco che si vince stando fermi. Fa l'ostacolo solido a chi cammina
+# e resta un ostacolo vero; «proiettili che si fermano» e' **m11**.
+#
+# ## Perche' un trattamento solo e non uno stile diverso dal muro
+#
+# Il muro dell'arena toglie la componente di velocita' **uscente** e lascia
+# scivolare quella parallela, altrimenti il giocatore si incastra nell'angolo e
+# si ferma di botto. Lo stesso vale qui: un disco contro cui si sbatte di
+# fianco deve **farlo scivolare intorno**, non tenerlo. E' la differenza fra un
+# ostacolo e un muro in cui ti incatti, ed e' la stessa identica formula del
+# muro: il criterio e' che il giocatore non resti fermo li'.
+
+## Il muro dell'ostacolo: il giocatore si ferma a `raggio + OBSTACLE_MARGIN` dal
+## centro e non entra mai nel disco. Un elemento con `y <= 0` e' **saltato**:
+## l'invariante del contratto dice `y > 0`, e un raggio nullo non e' un ostacolo
+## piccolo, e' un ostacolo che non esiste.
+func _clamp_to_obstacles() -> void:
+	if obstacles.is_empty():
+		return
+	var passate := 0
+	while passate < OBSTACLE_PASSES:
+		var mosso := false
+		for o in obstacles:
+			var raggio := o.y
+			if raggio <= 0.0:
+				continue
+			var centro := Vector3(o.x, 0.0, o.z)
+			var d := Vector3(position.x - centro.x, 0.0, position.z - centro.z)
+			var distanza := d.length()
+			var limite := raggio + OBSTACLE_MARGIN
+			if distanza >= limite:
+				continue
+			# Sul centro esatto la normale non c'e'. Il ripiego e' dichiarato e
+			# non e' un caso: senza di esso la divisione per zero fa NaN e NaN
+			# nella posizione e' l'unico risultato che non si vede.
+			var normale := d / distanza if distanza > 0.0001 else Vector3(1.0, 0.0, 0.0)
+			position.x = centro.x + normale.x * limite
+			position.z = centro.z + normale.z * limite
+			var verso := velocity.dot(normale)
+			if verso > 0.0:
+				velocity -= normale * verso
+			mosso = true
+		if not mosso:
+			return
+		passate += 1
+
+## Quanti ostacoli il giocatore sta usando adesso. E' la domanda che il test
+## m10 fa sul contratto: un giocatore che ha letto zero ostacoli su una scena
+## che ne ha, non e' un giocatore che si trova un mondo senza muri, e' un
+## giocatore che non ha letto la geometria.
+func obstacle_count() -> int:
+	return obstacles.size()
+
+## Rilegge gli ostacoli dal contratto e restituisce quanti ne ha trovati. Gli
+## ostacoli sono **statici** (semantica punto 1): si leggono una volta sola e da
+## qui in avanti il giocatore lavora sulla copia, quindi il ciclo di gioco non
+## copia un `PackedVector3Array` a ogni frame.
+##
+## ## Perche' `Game.get("obstacles")` e non `Game.obstacles`
+##
+## Il contratto dichiara il campo (`src/core/contracts.gd`, "Superficie di
+## milestone 10"), ma quel file **non e' mio** e quel campo puo' non essere
+## ancora dichiarato come membro. Su un autoload GDScript un membro inesistente
+## non e' un errore a runtime: e' un errore **di compilazione**, e si porta via
+## tutto l'albero invece di un numero. `Object.get()` su un nome assente
+## restituisce `null` e basta, quindi qui sotto la difesa e' il **controllo del
+## tipo**, non il nome. Se il campo verra' dichiarato, questa riga continua a
+## funzionare identica.
+##
+## ## Perche' zero non vuol dire «nessun ostacolo» (punto 5 della semantica)
+##
+## «Nessun ostacolo blocca nessuno» e' vero **anche quando non ce n'è**: un
+## giocatore che non scontra niente passerebbe tutti i criteri di m10 senza aver
+## mai incontrato un muro. Quindi qui non c'e' fallback silenzioso: quando il
+## contratto non ha il dato, il giocatore lo dice una volta, ad alta voce, con il
+## nome di chi lo registra. E il numero torna lo stesso, cosi' un test lo vede.
+func reload_obstacles() -> int:
+	var letto: Variant = Game.get("obstacles")
+	if not (letto is PackedVector3Array):
+		obstacles = PackedVector3Array()
+		if not _warned_no_obstacles:
+			_warned_no_obstacles = true
+			push_warning("player: Game.obstacles non e' un PackedVector3Array (letto %s), quindi nessun ostacolo blocca nessuno. "
+				% type_string(typeof(letto))
+				+ "Li registra terminal-gun-arena in _enter_tree(); il campo e' dichiarato in src/core/contracts.gd.")
+		return 0
+	obstacles = letto
+	_controlla_raggi()
+	return obstacles.size()
+
+## L'invariante `elemento.y > 0.0` (semantica punto 3): un raggio nullo non e'
+## un ostacolo piccolo, e' un ostacolo che non esiste, e si distingue dal raggio
+## negativo solo per il crash. Il clamp sopra lo salta; qui si dice una volta che
+## il dato e' sbagliato, perche' saltarlo in silenzio e' il difetto che un
+## ostacolo invisible porta in un test.
+func _controlla_raggi() -> void:
+	if _warned_obstacle_radius:
+		return
+	for o in obstacles:
+		if o.y > 0.0:
+			continue
+		_warned_obstacle_radius = true
+		push_warning("player: un ostacolo ha raggio %f in y (elemento %s). Il contratto dice che y e' il raggio e che y > 0.0 e' un invariante."
+			% [o.y, str(o)])
+		return
 
 func _start_dash(input_dir: Vector3) -> void:
 	dash_timer = DASH_TIME

@@ -55,6 +55,26 @@ const ARENA_SCRIPT := "res://src/render/arena.gd"
 const CAMERA_SCRIPT := "res://src/render/arena_camera.gd"
 const GROUND_SCRIPT := "res://src/render/arena_ground.gd"
 const CONTRACT_SCRIPT := "res://src/core/contracts.gd"
+## -arena, m10: costruisce i dischi che `Game.obstacles` dichiara e li registra.
+const OBSTACLES_SCRIPT := "res://src/render/arena_obstacles.gd"
+## Il **produttore unico** dei numeri della mappa: di -orda, non di questo file.
+## Il test lo preloada per una ragione sola, e la ragione e' scritta accanto a
+## `_numeri_di_orda`: per rilegge i numeri dal produttore e verificare che
+## `src/render/arena.gd` non ne abbia scritto una copia. Non e' una copia: e' una
+## lettura, e il file di -orda non viene toccato.
+const OBST := preload("res://src/sim/obstacles.gd")
+## Tolleranza dei confronti fra il disco che **blocca** (`Game.obstacles[i].y`) e
+## quello che e' **disegnato**: il centro passa per una `Basis` scalata e il
+## raggio per una `float` a 32 bit, quindi il confronto non e' mai esatto. 1e-4 m
+## e' un centesimo di millimetro, quattro ordini di grandezza sopra quel rumore e
+## quattro ordini sotto il difetto che il criterio cerca (un disco disegnato
+## diverso da quello che blocca).
+const OBSTACLE_TOLERANCE := 0.0001
+## Quanto puo' valere `directional_shadow_max_distance` **oltre** il minimo che la
+## camera vera richiede. Il minimo e' derivato (vedi `_ombre`), non scritto qui;
+## questo e' il margine dichiarato che lo distingue da una scelta e da un
+## ometto: 1,25 vuol dire «il peggiore caso piu' un quarto», non «quanto basta».
+const SHADOW_MARGIN := 1.25
 
 ## Il numero del criterio n. 3. Non e' il numero di nemici con cui la partita
 ## parte: e' il numero di nemici **vivi contemporaneamente** di cui si vuole
@@ -153,6 +173,7 @@ func _run() -> void:
 	_wiring(h, arena, game)
 	_criterion_3(h, arena, game)
 	_terrain(h, arena)
+	_milestone_10(h, arena, game)
 	_camera(h, arena)
 	_hud(h, arena, game)
 	# Per ultima: e' l'unica sezione che cambia lo stato dell'orda e della
@@ -335,9 +356,14 @@ func _load_arena(h, game: Node):
 ## nella prima stesura non si poteva fare: fino a ieri la scena non esisteva.
 func _wiring(h, arena: Node3D, game: Node) -> void:
 	for node_name in ["WorldEnvironment", "Sun", "Ground", "Horde", "Enemies",
-			"Player", "Camera", "Hud"]:
+			"Obstacles", "Player", "Camera", "Hud"]:
 		h.check(arena.get_node_or_null(node_name) != null,
 			"arena_main.tscn deve avere il nodo \"%s\"" % node_name)
+
+	var obstacles = arena.get_node_or_null("Obstacles")
+	if obstacles != null:
+		h.eq(_script_path(obstacles), "res://src/render/arena_obstacles.gd",
+			"il nodo Obstacles deve avere incollato src/render/arena_obstacles.gd: e' il file che costruisce i dischi registrati in Game.obstacles")
 
 	var horde = arena.get_node_or_null("Horde")
 	var player = arena.get_node_or_null("Player")
@@ -710,7 +736,297 @@ func _terrain(h, arena: Node3D) -> void:
 		% [raggio, ground.floor_instances(), ground.floor_covered_side(),
 			ground.wall_instances(), ground.wall_coverage(), TAU * raggio])
 
-# --- 5. La camera --------------------------------------------------------------
+# --- 4b. Milestone 10: gli ostacoli esistono, sono dichiarati, e si vedono ------
+#
+# ## LA SEZIONE CHE METTE SU UN TAVOLO LA PIRAMIDE NON MONTATA
+#
+# La semantica congelata di m10 in `src/core/contracts.gd` (punto 5) dice che «un
+# insieme vuoto e' un errore, non un mondo senza muri», e spiega perche': un array
+# vuoto passerebbe **tutti** i test di m10, perche' «nessun ostacolo blocca
+# nessuno» e' vero anche quando non c'e' niente. Quindi questa sezione comincia
+# dall'alto, dal campo stesso, e non dai dischi: se il contratto non dichiara
+# `obstacles` non c'e' niente da confrontare e il resto sarebbe un test sul nulla
+# che passa.
+#
+# ## LA PARTE CHE RIGUARDO IO (criterio n. 6): SI VEDE DOVE E' SOLIDO
+#
+# Il criterio n. 6 e' «il giocatore si ferma **prima** del bordo del disco, e un
+# proiettile **attraversa** un ostacolo». La prima meta' e' di -gameplay e la
+# seconda e' di -gameplay: il giocatore e l'arma sono suoi. Ma il criterio vale
+# solo se l'ostacolo che blocca e' **quello che si vede**: un disco che blocca e
+# non si disegna e' un muro invisibile, e un test che guarda la geometria
+# registrata senza guardare l'ostacolo disegnato e' un test sulla carta. Quindi
+# qui si confronta il raggio **bloccante** (il contratto) con il raggio
+# **disegnato** (quello che il renderer ha scritto nel buffer) e i due devono
+# essere lo stesso numero.
+#
+# Il confronto e' su `written_transform()`, non su `obstacle_transform()`:
+# il primo e' **quello che e' stato scritto**, il secondo e' la funzione che
+# l'ha prodotto. In headless il `MultiMesh` non si rilegge (cfr. la nota in
+# `horde_renderer.gd`), quindi rileggere la funzione sarebbe un test sulla
+# formula, non sul risultato.
+func _milestone_10(h, arena: Node3D, game: Node) -> void:
+	# I dischi che la scena **dichiara**, letti dalla radice viva. Non dalla mappa
+	# delle costanti: `OBSTACLE_LAYOUT` non e' una `const` (il numero e' di -orda
+	# e arriva da una funzione del suo produttore), quindi la sorgente si legge
+	# dove la scena la tiene. La riga che verifica che quei numeri siano proprio
+	# quelli di `-orda` e' `_numeri_di_orda`, qui sotto.
+	var layout = arena.get("OBSTACLE_LAYOUT")
+	var layout_n: int = layout.size() if layout is PackedVector3Array else -1
+	var registered = game.get("obstacles")
+	var registered_n: int = registered.size() if registered is PackedVector3Array else -1
+
+	# Lo stato, **misurato**, anche quando la sezione fallisce: un FAIL senza i
+	# numeri accanto dice che qualcosa non torna, non dove.
+	var drawn := arena.get_node_or_null("Obstacles")
+	print("test_arena: m10 ostacoli: layout dichiarato %d, registrati in Game.obstacles %d, disegnati %d"
+		% [layout_n, registered_n, drawn.drawn_count() if drawn != null else -1])
+
+	# ## PRIMA le tre cose che NON dipendono dal contratto
+	#
+	# Il tetto dei nodi, le ombre tagliate di m9 e la funzione che disegna il
+	# disco si verificano senza che un solo disco sia registrato. Vanno quindi
+	# **prima** del ritorno anticipato: un campo che manca dal contratto non deve
+	# coprire un difetto che ha a che fare con l'albero o con il sole, e una
+	# sezione che si accende e si spegne tutta insieme e' una sezione che resta
+	# spenta finche' non e' troppo tardi.
+	_ostacoli_su_nodo(h, arena)
+	_ombre(h, arena)
+	_forma_del_disegno(h)
+
+	# Punto 5 della semantica congelata: se il campo non c'e', il contratto non
+	# restituisce un array vuoto in silenzio — dice che la piramide non e' montata.
+	# E qui la dice, con il rimedio: il campo e' documentato in `contracts.gd` ma
+	# non dichiarato, e quel file non e' di -arena.
+	if not h.check(registered is PackedVector3Array,
+			"il contratto deve dichiarare `var obstacles: PackedVector3Array`: la superficie di m10 e' DOCUMENTATA in src/core/contracts.gd ma il campo non e' dichiarato, quindi Game.obstacles non esiste e nessun ostacolo blocca nessuno. Il file e' del vertice"):
+		return
+
+	var ostacoli: PackedVector3Array = registered
+
+	# Criterio n. 1: gli ostacoli esistono e sono dichiarati.
+	h.check(not ostacoli.is_empty(),
+		"criterio n. 1 di m10: Game.obstacles non puo' essere vuoto sulla scena vera. Un insieme vuoto non e' un mondo senza muri, e' la piramide non montata. I numeri sono di -orda (criterio n. 2) e li legge src/sim/obstacles.gd")
+
+	# ## DOVE VENGONO I NUMERI: il produttore unico, riletto da qui
+	_numeri_di_orda(h, layout)
+
+	# Punto 3 della semantica: `elemento.y > 0.0` e' un **invariante**, non una
+	# convenzione. Un raggio nullo e' un ostacolo che non esiste.
+	for i in ostacoli.size():
+		var e: Vector3 = ostacoli[i]
+		h.check(e.y > 0.0,
+			"criterio n. 1 di m10: Game.obstacles[%d] ha raggio %.4f in `y` e il raggio deve essere > 0. La convenzione e' Vector3(centro_x, RAGGIO, centro_z): `y` non e' un'altezza e `z` non e' una profondita'"
+				% [i, e.y])
+		h.finite(e.x, "Game.obstacles[%d].x non e' finito" % i)
+		h.finite(e.z, "Game.obstacles[%d].z non e' finito" % i)
+
+	# La registrazione e' **completa**: quello che la scena dichiara e quello che
+	# il contratto espone. Un disco costruito e non registrato e' un muro che
+	# l'orda non evita; il difetto e' invisibile perche' a occhio c'e'.
+	h.eq(registered_n, layout_n,
+		"gli ostacoli registrati devono essere tutti quelli che la scena dichiara in OBSTACLE_LAYOUT (src/render/arena.gd): %d registrati su %d dichiarati"
+			% [registered_n, layout_n])
+
+	# Il nodo che li disegna c'e', ed e' quello giusto: `tests/test_arena.gd`
+	# guarda l'albero, e un `MultiMeshInstance3D` con lo script giusto e' la prova
+	# che i dischi sono **costruiti** e non solo dichiarati.
+	if not h.check(drawn != null, "manca il nodo Obstacles nella scena vera"):
+		return
+	h.eq(drawn.drawn_count(), registered_n,
+		"gli ostacoli disegnati devono essere tutti quelli registrati: %d disegnati su %d registrati"
+			% [drawn.drawn_count(), registered_n])
+	h.eq(drawn.get_child_count(), 0,
+		"il renderer degli ostacoli non deve avere figli: un nodo per ostacolo e' la stessa classe di difetto del nodo per nemico")
+	h.check(drawn.multimesh != null and drawn.multimesh.mesh != null,
+		"il renderer degli ostacoli deve avere una mesh: un disco che non si vede non blocca nessuno")
+	h.eq(drawn.multimesh.visible_instance_count if drawn.multimesh != null else -1, registered_n,
+		"tutte le istanze degli ostacoli devono essere visibili: quelle nascoste sono muri che il giocatore non vede")
+
+	# ## QUI: quello che vedi e' quello che blocca
+	for i in ostacoli.size():
+		var e: Vector3 = ostacoli[i]
+		var t: Transform3D = drawn.written_transform(i)
+		var origine := t.origin
+		# Il disco e' sul piano XZ: l'asse del cilindro cade sul **centro** del
+		# disco, e in `y` non c'e' niente da confrontare (l'altezza e' la forma,
+		# non il raggio).
+		h.near(origine.x, e.x, OBSTACLE_TOLERANCE,
+			"ostacolo %d: il cilindro disegnato e' centrato in x=%.4f ma il disco che blocca e' centrato in x=%.4f" % [i, origine.x, e.x])
+		h.near(origine.z, e.z, OBSTACLE_TOLERANCE,
+			"ostacolo %d: il cilindro disegnato e' centrato in z=%.4f ma il disco che blocca e' centrato in z=%.4f" % [i, origine.z, e.z])
+		# Il raggio disegnato **deve essere** quello che blocca: non maggiore
+		# (l'ostacolo blocca piu' di quanto sembra) e non minore (l'ostacolo e'
+		# piu' piccolo di quanto sembra, e il giocatore ci entra dentro).
+		h.near(drawn.drawn_radius(i), e.y, OBSTACLE_TOLERANCE,
+			"ostacolo %d: il raggio **disegnato** e' %.4f m e il raggio che **blocca** e' %.4f m: quello che si vede deve essere quello che blocca"
+				% [i, drawn.drawn_radius(i), e.y])
+		# E sta in piedi sul pavimento: sotto il pavimento e sopra. Un disco a
+		# meta' dentro il terreno non si distingue da nessuno.
+		h.check(t.basis.get_scale().y > 0.0,
+			"ostacolo %d: il cilindro ha altezza %.4f m: un disco piatto non si vede dalla camera" % [i, t.basis.get_scale().y])
+		h.check(origine.y - 0.5 * t.basis.get_scale().y <= 0.0,
+			"ostacolo %d: il fondo del cilindro e' a %.4f m e deve essere sotto il pavimento (y=0), non appoggiato sopra" % [i, origine.y - 0.5 * t.basis.get_scale().y])
+		h.check(origine.y + 0.5 * t.basis.get_scale().y > 0.0,
+			"ostacolo %d: il cilindro deve salire sopra il pavimento, non affondarci dentro" % i)
+
+	_ostacoli_su_mappati(h, arena, ostacoli)
+
+## ## I NUMERI SONO DI `-orda`: il controllo che nessuno li abbia ricopiati
+##
+## Il piano 3.11 fissa chi sceglie i numeri e chi costruisce: «la geometria la
+## sceglie `-orda` e la costruisce `-arena`». Il canale e' dichiarato in
+## `src/core/contracts.gd` ed e' una riga: il produttore unico e'
+## `src/sim/obstacles.gd` -> `layout(arena_radius)`, e `-arena` lo chiama invece di
+## scrivere i numeri.
+##
+## Qui il test **non ci crede**: rilegge il produttore e pretende che quello che la
+## scena mette in scena sia lo stesso identico insieme, disco per disco. Il raggio
+## passato al produttore e' la **fonte** letta da questo test (`_source_radius()`),
+## non un numero scritto qui: se `-arena` costruisse la mappa con un raggio
+## diverso, i due elenchi si separerebbero e questa sezione andrebbe rossa.
+##
+## Il confronto e' elemento per elemento e non per somma: due insiemi diversi
+## possono avere la stessa somma, e una somma uguale non dimostra che siano gli
+## stessi dischi — che e' il difetto che m9 ha gia' chiuso una volta.
+func _numeri_di_orda(h, layout: Variant) -> void:
+	if not (layout is PackedVector3Array):
+		h.check(false,
+			"criterio n. 1 di m10: OBSTACLE_LAYOUT (src/render/arena.gd) deve essere la lista di dischi letta da src/sim/obstacles.gd, e leggerla vale %s" % type_string(typeof(layout)))
+		return
+	var dichiarati: PackedVector3Array = layout
+	var prodotti: PackedVector3Array = OBST.layout(_source_radius())
+	h.eq(dichiarati.size(), prodotti.size(),
+		"i dischi in scena devono essere tutti quelli che produce -orda: %d in scena su %d prodotti da src/sim/obstacles.gd"
+			% [dichiarati.size(), prodotti.size()])
+	var confrontati: int = mini(dichiarati.size(), prodotti.size())
+	var peggiore: int = -1
+	var scarto: float = 0.0
+	for i in confrontati:
+		h.vec_near(dichiarati[i], prodotti[i], RADIUS_TOLERANCE,
+			"disco %d in scena diverso da quello prodotto da -orda: in scena (%.4f, %.4f, %.4f), prodotto (%.4f, %.4f, %.4f)"
+				% [i, dichiarati[i].x, dichiarati[i].y, dichiarati[i].z, prodotti[i].x, prodotti[i].y, prodotti[i].z])
+		var d: float = (dichiarati[i] - prodotti[i]).length()
+		if d > scarto:
+			scarto = d
+			peggiore = i
+	if confrontati > 0:
+		var r: float = prodotti[0].y
+		print("test_arena: m10 numeri: %d dischi di raggio %.4f m letti da src/sim/obstacles.gd, nessuna copia in src/render/ (scarto massimo %.9f m sul disco %d)"
+			% [prodotti.size(), r, scarto, peggiore])
+
+## Ogni disco deve stare **dentro** l'arena e **fuori** dal muro: un disco che
+## esce dal muro e' un muro dentro un muro, e uno che sta fuori dal raggio utile
+## e' geometria che il giocatore non incontra mai ma che l'orda continua a
+## evitare per sempre.
+func _ostacoli_su_mappati(h, arena: Node3D, ostacoli: PackedVector3Array) -> void:
+	if ostacoli.is_empty():
+		return
+	var raggio: float = _source_radius()
+	var peggiore := 0.0
+	for i in ostacoli.size():
+		var e: Vector3 = ostacoli[i]
+		var distanza := Vector2(e.x, e.z).length()
+		peggiore = maxf(peggiore, distanza + e.y)
+		h.check(distanza + e.y <= raggio,
+			"ostacolo %d: il disco (centro a %.1f m dal centro, raggio %.1f m) esce dal muro di %.1f m: il muro e' li' per chiudere l'arena, e un disco che lo scavalca si vede da fuori"
+				% [i, distanza, e.y, raggio])
+	print("test_arena: m10 mappa: il disco piu' esterno arriva a %.1f m dal centro, dentro il muro di %.1f m"
+		% [peggiore, raggio])
+
+## ## Il criterio n. 7: `node_count` resta sotto 120 **con** gli ostacoli.
+##
+## Il tetto e' un numero assoluto e gli ostacoli ci stanno dentro **senza costo**:
+## sono istanze di una `MultiMesh`, quindi il numero di nodi dipende dal numero di
+## dischi solo per **uno**, il nodo `Obstacles`. Quello e' il numero da dichiarare,
+## ed e' quello che questa sezione misura confrontando la scena vera con la scena
+## di una `MultiMeshInstance3D` sola.
+func _ostacoli_su_nodo(h, arena: Node3D) -> void:
+	var nodes := _count_nodes(arena)
+	var ostacoli = arena.get_node_or_null("Obstacles")
+	h.check(nodes < NODE_BUDGET,
+		"node_count deve restare sotto %d anche con gli ostacoli: e' %d" % [NODE_BUDGET, nodes])
+	h.eq(ostacoli.get_child_count(), 0,
+		"un disco in piu' non deve costare un nodo in piu': il renderer ne ha esattamente uno")
+	print("test_arena: m10 nodi: node_count=%d (tetto %d), gli ostacoli costano 1 nodo qualunque sia il loro numero"
+		% [nodes, NODE_BUDGET])
+
+## ## Il debito lasciato aperto da m9: le ombre tagliate a meta' arena.
+##
+## `directional_shadow_max_distance` e' la distanza **dalla camera** oltre la
+## quale le ombre non sono piu' disegnate. Il numero non e' confrontato con una
+## copia scritta qui: e' **derivato dalla camera vera**, che e' il posto donde
+## viene. La catena e' chiusa e ogni passaggio e' un `grep`:
+##   `arena.gd:ARENA_RADIUS` -> `arena_camera.gd:EDGE_MARGIN` = quanto il
+##   bersaglio puo' spostarsi dal centro, `HEIGHT`/`BACK` = dove sta la camera.
+## Il peggiore e' il punto del muro diametralmente opposto all'ancora:
+##     orizzontale  (R - EDGE_MARGIN) + BACK + R,  verticale  HEIGHT
+func _ombre(h, arena: Node3D) -> void:
+	var sun = arena.get_node_or_null("Sun")
+	if not h.check(sun != null, "manca il nodo Sun"):
+		return
+	var raggio := _source_radius()
+	var margine := _const_of(CAMERA_SCRIPT, "EDGE_MARGIN")
+	var altezza := _const_of(CAMERA_SCRIPT, "HEIGHT")
+	var dietro := _const_of(CAMERA_SCRIPT, "BACK")
+	if not h.check(raggio > 0.0 and margine > 0.0 and altezza > 0.0 and dietro > 0.0,
+			"per derivare la distanza delle ombre servono ARENA_RADIUS, EDGE_MARGIN, HEIGHT e BACK: letti %.1f, %.1f, %.1f, %.1f"
+				% [raggio, margine, altezza, dietro]):
+		return
+	var peggiore := sqrt(pow(dietro + raggio - margine + raggio, 2.0) + pow(altezza, 2.0))
+	var impostato: float = sun.directional_shadow_max_distance
+	h.check(impostato >= peggiore,
+		"le ombre devono arrivare al punto del muro piu' lontano dalla camera, a %.1f m: directional_shadow_max_distance e' %.1f m, quindi meta' arena e' senza ombra" % [peggiore, impostato])
+	# Il limite sopra e' quello che rende il numero una **decisione**: un tetto
+	# che regge anche 10 km non dice niente, e su un progetto low-poly 10 km di
+	# ombre sono un costo che nessuno ha misurato.
+	h.check(impostato <= peggiore * SHADOW_MARGIN,
+		"directional_shadow_max_distance non deve essere sproporzionato: %.1f m contro il minimo necessario di %.1f m" % [impostato, peggiore])
+	print("test_arena: m9 ombre: directional_shadow_max_distance=%.1f m, il punto piu' lontano dalla camera e' a %.1f m (era 90.0 m: meta' arena senza ombra)"
+		% [impostato, peggiore])
+
+## ## I DENTI DI -arena: la funzione che disegna il disco, chiamata con un input
+## che qui non e' la geometria dell'arena.
+##
+## I numeri sotto sono un **ingresso di unita'**, non la mappa: servono perche' un
+## test che usa solo i dischi veri non puo' coprire il caso del raggio nullo (che
+## il contratto vieta e che quindi non arriverebbe mai) ne' quello del disco
+## decentrato. Il raggio che blocca nell'arena e' un altro numero ed e' di -orda.
+##
+## E la prova che l'asserzione **sa cadere**: `obstacle_transform()` e' pubblica e
+## pura, quindi questa sezione la chiama e ne confronta il risultato con la
+## geometria che un disco dovrebbe avere. Se la funzione cambiasse forma — se
+## introducesse un fattore di scala, o spostasse l'origine — le due righe qui
+## sotto cadrebbero, e con loro tutta la sezione «quello che vedi e' quello che
+## blocca» di sopra, che usa la stessa funzione.
+func _forma_del_disegno(h) -> void:
+	var solo = MultiMeshInstance3D.new()
+	solo.name = "ObstaclesAlone"
+	solo.set_script(load(OBSTACLES_SCRIPT))
+	# Un disco finto: centro lontano dall'origine e raggio non ovvio, cosi' uno
+	# scambio fra `x`/`z` o fra centro e raggio non puo' passare.
+	var finto := Vector3(7.0, 2.5, -3.0)
+	solo.build(PackedVector3Array([finto]))
+
+	h.eq(solo.drawn_count(), 1, "un disco in ingresso deve produrre una sola istanza disegnata")
+	h.near(solo.drawn_radius(0), finto.y, OBSTACLE_TOLERANCE,
+		"il raggio disegnato deve essere il raggio in `y` del disco, non la sua x ne' la sua z: %.4f invece di %.4f" % [solo.drawn_radius(0), finto.y])
+	var t: Transform3D = solo.written_transform(0)
+	h.near(t.origin.x, finto.x, OBSTACLE_TOLERANCE, "il centro in x va disegnato dove sta, non spostato")
+	h.near(t.origin.z, finto.z, OBSTACLE_TOLERANCE, "il centro in z va disegnato dove sta, non spostato")
+	h.check(absf(t.basis.get_scale().x - t.basis.get_scale().z) < 0.0001,
+		"il disco deve essere rotondo: scala x %.4f e scala z %.4f" % [t.basis.get_scale().x, t.basis.get_scale().z])
+
+	# Il caso che il contratto vieta, chiamato comunque: `obstacle_transform()`
+	# non deve tirare fuori una figura dal nulla da un raggio che non c'e'.
+	var nullo := Vector3(1.0, 0.0, 1.0)
+	solo.build(PackedVector3Array([nullo]))
+	h.near(solo.drawn_radius(0), 0.0, OBSTACLE_TOLERANCE,
+		"un disco di raggio nullo non deve essere disegnato con un ragchio qualunque: il contratto vieta `y <= 0` e la registrazione lo rifiuta")
+
+	solo.free()
+
+## # --- 5. La camera --------------------------------------------------------------
 
 func _camera(h, arena: Node3D) -> void:
 	var cam = arena.get_node("Camera")
@@ -1143,6 +1459,38 @@ func _criterion_4(h, arena: Node3D, game: Node) -> void:
 	h.positive(knockback, "l'arma deve avere un knockback non nullo")
 	h.positive(damage, "l'arma deve avere un danno non nullo")
 
+	# ## DA m10 L'EVITAMENTO E' SPENTO **PER LA MISURA**, e si dichiara perche'
+	#
+	# Il criterio n. 4 qui dentro e' di m1 e misura **l'impulso e la sua
+	# attenuazione**: `v += (wanted - v) * min(1, dt * ACCEL)`. Quel modello
+	# presuppone che `wanted` — l'inseguimento — sia **una direzione costante**,
+	# e fino a m10 lo era. Da m10 l'orda insegue lungo il campo di percorrenza:
+	# quando un disco e' di mezzo, la direzione **ruota** dentro la finestra dei
+	# 30 frame, e cio' che si misurerebbe non e' piu' l'attenuazione dell'impulso
+	# ma la somma di attenuazione e sterzata. Non e' un difetto di -orda: e' il
+	# criterio che e' nato in un mondo senza muri e che misurerebbe la cosa
+	# sbagliata in un mondo con i muri.
+	#
+	# Quindi l'ambiente di misura viene **controllato**, come gli altri tre che
+	# questa sezione gia' controlla (un nemico solo, una specie sola, il player
+	# spostato a mano). `horde.flow_field` e' un campo **pubblico e dichiarato** di
+	# -orda (la sua superficie di m10: `obstacles`, `flow_field`, `flow_problem`,
+	# `flow_rebuilds`) e il suo `null` e' uno stato previsto, non un errore:
+	# `src/sim/enemy.gd` scrive che con `flow = null` «questo passo e' identico a
+	# quello di prima della milestone 10». Quindi qui non si tocca nessun file di
+	# -orda e non si scrive nessun record a mano: si mette un campo suo a `null`,
+	# lo si asserisce spento **durante** la misura, e lo si rimette.
+	#
+	# Cosa NON e': non e' allargare un tetto per farlo passare. I tre numeri di
+	# sotto — `>= 0.9 * chase`, il tetto di 0,3 unita' e la combaciare con
+	# `_predicted_moved()` — restano gli stessi di prima, con gli stessi denti.
+	var campo = horde.get("flow_field")
+	var campo_attivo: bool = bool(horde.call("flow_active"))
+	horde.set("flow_field", null)
+	var campo_spento: bool = not bool(horde.call("flow_active"))
+	h.check(campo_spento,
+		"la misura del knockback deve girare con l'evitamento spento: `flow_active()` dice che il campo di percorrenza e' ancora attivo, quindi la previsione a direzione costante non vale")
+
 	var rows: Array[String] = []
 	var charges: Array[String] = []
 	for kind in KINDS_MUST_KNOCK + KINDS_MEASURED:
@@ -1174,7 +1522,14 @@ func _criterion_4(h, arena: Node3D, game: Node) -> void:
 				+ "fisica di src/sim/enemy.gd e' diversa, e' qui che si vede")
 
 	# Riporta e lascia l'orda com'era: i campi toccati tornano ai valori veri e
-	# un passo lascia all'orda il tempo di riprendere.
+	# un passo lascia all'orda il tempo di riprendere. **Anche il campo di
+	# percorrenza**, che la sezione aveva spento: una sezione che lascia il mondo
+	# senza muri dopo aver misurato su di esso costruirebbe, per tutto il resto
+	# del test, una scena che non e' quella vera.
+	horde.set("flow_field", campo)
+	h.check(bool(horde.call("flow_active")) == campo_attivo,
+		"la sezione knockback deve rimettere a posto il campo di percorrenza: era attivo %s e ora %s"
+			% [campo_attivo, bool(horde.call("flow_active"))])
 	horde.population = population_before
 	horde.auto_respawn = respawn_before
 	weapon.fire_interval = fire_before

@@ -1709,6 +1709,195 @@ raddoppia, e il **centro** diventa più pericoloso. Sono tre fatti, non uno, e v
    3/4/4. Il vecchio «min 4, mediana 5, max 7» **non si riproduce più** con il codice di oggi, e
    va detto perché è il genere di numero che qualcuno citerà fra sei mesi come se fosse ancora vero.
 
+### 1.13 Milestone 10 — gli ostacoli, e il nemico che li aggira davvero
+
+L'ultima delle tre onde che l'utente ha chiesto il 2026-10-13. È **la prima volta che questo
+progetto introduce geometria statica del mondo**, e la prima volta che una foglia deve
+costruire qualcosa che l'altra deve evitare.
+
+**La decisione che rende questa onda possibile o inutile.** Il nemico insegue in linea retta.
+Un ostacolo che blocca ma non si aggira è un **muro**, e dietro un muro il gioco si vince stando
+ferm: l'utente ha risposto «il nemico li **aggira davvero**», e quindi m10 è proprio la
+risposta a quella domanda. Serve un **campo di percorrenza**, e la scelta della sua forma è
+**di `-orda`**: il vertice dichiara la superficie, non l'algoritmo (§4.3, la scelta è di `-orda`).
+
+**Nessuna cifra scritta sopra**: quanti ostacoli, di che raggio, dove, e con che risoluzione il
+campo, sono numeri che escono dalla misura. Il criterio che li produce è il n. 2, ed è
+l'unico che può produrli.
+
+**Le due decisioni che il vertice prende, dichiarate perché l'utente possa vietarle.**
+
+| decisione | cosa | perché |
+|---|---|---|
+| **solidi per chi cammina, trasparenti ai proiettili** | ostacolo blocca giocatore e nemico; i proiettili passano | se blocca anche i proiettili, il giocatore dietro è **al sicuro e irraggiungibile** per sempre: combinazione degenerata, il gioco si vince stando fermi. «Proiettili che si fermano» è **m11** |
+| **dischi sul piano XZ**, con il raggio in `y` | un elemento = `Vector3(cx, raggio, cz)` | la geometria che il campo di percorrenza deve risolvere è un **test di distanza**; una forma qualsiasi costerebbe una classe di bug in più per un vantaggio estetico che non è un criterio |
+
+La superficie è **`Game.obstacles : PackedVector3Array`**, congelata in `src/core/contracts.gd`
+con cinque punti di semantica. Il quinto è quello che salva l'onda: **un insieme vuoto è un
+errore, non un mondo senza muri** — altrimenti «nessun ostacolo blocca nessuno» è vero anche
+quando non ce n'è, e tutti i test di m10 passerebbero con la piramide non montata.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | **gli ostacoli esistono e sono dichiarati** | sulla scena vera, `Game.obstacles` non è vuoto e ogni elemento ha `y > 0`. Il numero di ostacoli e il raggio sono **quelli che la misura del n. 2 produce**, e stanno in `src/render/arena.gd` accanto alla scelta |
+| 2 | **il nemico aggira, e non attraversa** | nessun nemico è **dentro** un ostacolo in nessun frame di una misura lunga, e il tempo per arrivare al giocatore passando attorno è **misurato** e dichiarato. Il numero non è scritto qui |
+| 3 | **i denti del n. 2** | **disattivato il campo di percorrenza** (inseguimento in linea retta) il criterio deve dire `FAIL`, con nemici dentro gli ostacoli e il numero accanto. Poi rimossa la prova. Un criterio n. 2 che non è mai stato fatto fallire non è un criterio |
+| 4 | **nessuno si incastra** | a fine misura, **zero** nemici dentro un ostacolo e **zero** nemici con velocità sotto una soglia dichiarata da un passo all'altro per più di N passi: l'incastrato è il difetto tipico di un campo di percorrenza male fatto, ed è **invisibile** senza questa asserzione |
+| 5 | **lo spawn non genera dentro un ostacolo** | nessun nemico nasce dentro un disco, su tutti i semi della disposizione |
+| 6 | **il giocatore è solido e i proiettili passano** | il giocatore si ferma **prima** del bordo del disco, e un proiettile **attraversa** un ostacolo e colpisce un nemico dietro. Le due metà sono un solo criterio perché il progetto non deve avere un muro che blocca chi lo usa e non chi lo combatte |
+| 7 | **niente regrediti** | `node_count` sotto **120** (44 oggi, e gli ostacoli aggiungono nodi: **il budget va dichiarato**), knockback runner **≥ 0.3**, proporzionalità specie **3.4000**, `TOUCH_REACH` **0.45**, densità di m3 (`GRID_CEILING = 8`, campione 3/4/4) |
+| 8 | **la porta è verde** | `GATE: 8/8` meno il leak dichiarato, `PERM: 15/15` |
+
+**Il rischio di questa onda è lo stesso che l'ha fatta fallire sette volte**: che la cosa sia
+verificata ma **non usata**. Un campo di percorrenza costruito, testato sulle sue funzioni, e
+mai chiamato dal ciclo di gioco passerebbe tutto. Per questo il criterio n. 2 è sul **numero
+di nemici dentro un ostacolo durante una partita vera**, e non sul fatto che la funzione
+ritorni un valore.
+
+### 3.11 Scope della milestone 10: tre foglie, e la catena di consegna
+
+Come m3 e m6: file disgiunti, **nessuna riga di permesso nuova**, `PERM: 15/15** prima di
+lanciare**.
+
+| agente | modello | in m10 scrive | la sua metà |
+|---|---|---|---|
+| `terminal-gun-arena` | `space-bunny-free#max` | `scenes/arena_main.tscn`, `src/render/`, `tests/test_arena.gd` | **costruisce** gli ostacoli e li registra in `Game.obstacles` in `_enter_tree()`. Il numero e il raggio sono **di -orda** (criterio n. 2): li dichiara, non se li inventa |
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/`, `tests/test_orda.gd` | **il campo di percorrenza** e l'inseguimento che lo usa. È la sua scelta di algoritmo (§4.3) |
+| `terminal-gun-gameplay` | `space-bunny-free#max` | `src/player/player.gd`, `tests/test_gameplay.gd` | il giocatore è **solido**, i proiettili **passano** |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | la superficie `Game.obstacles` congelata **prima** del lancio |
+
+**La catena di consegna, dichiarata perché non è una race.** `-arena` costruisce → `-orda`
+costruisce il campo che lo evita → `-gameplay` ci scontra. Ognuno può lavorare contro la
+**forma dichiarata** in `contracts.gd` senza aspettare gli altri, e ognuno deve **fermarsi e
+dircelo** se la catena non c'è: il punto 5 della semantica esiste perché «nessun ostacolo
+blocca nessuno» è un mondo che passa tutti i test.
+
+**Un ordine di consegna che il vertice fissa per non lasciarlo al caso:** la geometria la
+sceglie **`-orda`** e la costruisce **`-arena`**. Il motivo è che il criterio n. 2 è suo — deve
+misurare che il nemico aggira — e un numero che una foglia non ha misurato non lo deve
+scrivere. Se `-arena` sceglie i numeri e `-orda` deve adattarci, il criterio n. 2 diventa una
+misura di un'altra decisione.
+
+### 4.10 Onde della milestone 10
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m10-w0** | vertice | — | superficie `Game.obstacles` **congelata** in `contracts.gd`, specifica scritta, `PERM: 15/15` prima di lanciare |
+| **m10-w1** | orda ∥ arena ∥ gameplay | 3 agenti, una stessa risposta | `GATE: 8/8` meno il leak, denti fatti e rimossi, nessun incastrato, nessuna regressione, rieseguiti **dal vertice** |
+| **m10-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+### Le onde della milestone 10, e quattro lanci perché due dei quattro erano miei
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m10-w0** | vertice | decisione dell'utente registrata (aggirare davvero), superficie `Game.obstacles` congelata, **ma scritta solo come commento** | `PERM: 15/15` | **verde con un difetto mio** |
+| **m10-w1** | orda ∥ arena ∥ gameplay | primo giro: **`GATE: 4/8`**. Nessuna delle tre foglie poteva lavorare, per un motivo che non era loro | `GATE: 4/8` | **rossa, e la causa era il vertice** |
+| **m10-w1, rilancia** | le stesse tre | il campo dichiarato è stato aggiunto e il **canale dei dati** dichiarato. `-arena` monta la catena, `-gameplay` compila, `-orda` chiude il `_versante()`: `GATE: 6/8` | `GATE: 6/8` | **rossa per un difetto del vertice** |
+| **m10-w1, ultima rilancia** | orda | maschera `fuori` chiusa, incastrato riparato, denti eseguiti. **`GATE: 7/8`** | `GATE: 7/8`, unico rosso il **leak dichiarato** | **verde** |
+| **m10-w2** | vertice | porte rieseguite, piano aggiornato, commit | `PERM: 15/15`, `--quit-after 300` **pulito** | **verde** |
+
+**I due difetti miei, che hanno fermato un'onda intera, e perché li ha trovati chi li ha toccati.**
+
+1. **Ho scritto la superficie di m10 in `contracts.gd` come commento e non come campo.** Il file
+   aveva 62 righe di semantica e **zero dichiarazioni**. `Game.obstacles` non esisteva, e le tre
+   foglie lo hanno **scoperto da sole, indipendentemente, negli stessi minuti**: `-orda`
+   (*«la superficie c'è a parole (riga 311), il campo no»*), `-arena` (*«senza quella riga
+   l'assegnazione è un SCRIPT ERROR»*) e `-gameplay` (*«`var obstacles` non esiste»*).
+   **Tre foglie, lo stesso muro, nessuna che aggira.** Il punto 5 della semantica — «un insieme
+   vuoto è un errore, non un mondo senza muri» — si è realizzato **da solo e contro di me**:
+   era scritto per proteggere le foglie e ha protetto il vertice dal suo stesso campo mancante.
+2. **Ho dichiarato chi possiede i numeri e chi possiede la costruzione, senza dichiarare il
+   canale.** `-arena` aspettava un valore che nessuno gli passava, con `OBSTACLE_LAYOUT` vuota, e
+   tutti i criteri di m10 erano rossi per «insieme vuoto». Il canale è una riga ed è ora scritto:
+   `-orda` possiede `src/sim/obstacles.gd`, `-arena` lo legge e registra il risultato.
+
+**È la terza volta nella stessa forma** (`wave` letto per nome dall'HUD, `radii` di m8, e questa):
+**la superficie senza il canale non è una superficie, è un muro travestito da contratto.**
+
+### I due difetti di codice che m10 ha trovato, e il secondo è la parte che vale
+
+1. **`_versante()` contava come irraggiungibili le celle bloccate.** La BFS non ci entra mai,
+   quindi `unreachable` era **letteralmente** `blocked_cells()`: un rosso costruito sul codice,
+   non sulla misura. Corretto: ora saltano le bloccate e il numero è **0**.
+
+2. **L'incastrato vero, e la causa era che le due metà del campo non erano d'accordo.** Un boss
+   fermo a `|v| = 0.0003` per **1800 passi**, in posizione `(−35,483, −25,599)`, a `|p| = 43,75`
+   su un'arena di 46. La lettura delle sonde lo diceva da sola: `steer` era **diverso** dalla
+   direzione al giocatore (il campo lo stava deviando) ma punteggiò **dentro** il disco
+   (`disco = 0.001`, `clear = false`), e `push_out()` toglieva la componente entrante ogni passo.
+   La causa: **`_sample()` trattava la fascia fuori muro come `INF` mentre la BFS la trattava come
+   intransitabile.** La BFS non la attraversa, il gradiente la leggeva come un oceano. Una sola
+   condizione, e `fuori` ora costa `+BLOCK_PENALTY` come `blocked`. **Da 1800 a 12 passi**, e il
+   ripiego tangenziale che il piano aveva previsto **non è servito**: la diagnosi era completa.
+
+**E un errore di misura, che è la parte più istruttiva dell'onda.** Il criterio diceva «almeno
+il 5% dell'orda deve aggirare» e misurava **3,9%**. `-orda` non ha abbassato la soglia: ha
+guardato **perché** era bassa, e il motivo era che `t_primo` e `t_meta` sono entrambi **0,00 s**
+— a regime metà dell'orda è già dentro `ARRIVE_RADIUS`, quindi una retta di 2 m verso un bersaglio
+il cui disco più vicino è a 12 m risponde «non bloccata» **per qualunque geometria**. La misura
+stava contando **quanto sono lontani** i nemici, non **quanti deviano**. Rimisurata su tutto il
+percorso con l'avvicinamento: **6787 su 48000 = 14,1%**, banda riscritta 5–60%. E nel
+riparametro ha trovato un bug nel **proprio** accumulatore nuovo — il denominatore contava ogni
+passo e il numeratore ogni dieci — che leggeva 1,4%. **La geometria non è il problema**:
+`obstacles.gd` non è stato toccato, e 14,1% che supera l'11,5% di copertura d'area è corretto,
+perché la domanda è «quante rette passano dentro», non «quanto disco c'è».
+
+### Gli otto criteri della milestone 10, uno per uno
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | gli ostacoli esistono e sono dichiarati | **sì** | `layout dichiarato 27, registrati in Game.obstacles 27, disegnati 27`. E **zero copie**: `27 dischi di raggio 2.9900 m letti da src/sim/obstacles.gd, nessuna copia in src/render/ (scarto massimo 0.000000000 m)` |
+| 2 | il nemico aggira e non attraversa | **sì** | `0 nemici dentro un ostacolo` in 1800 passi a 200 vivi, picco **0** |
+| 3 | i denti del n. 2 | **sì, e sono enormi** | campo spento: **17 524 nemici-passi dentro un ostacolo in 1306 passi su 2400**, picco **55** in un passo. Campo acceso: **0**. Un criterio che non può fallire non è un criterio: questo può fallire in modo spaventoso |
+| 4 | nessuno si incastra | **sì** | `nessun nemico fermo più di 90 passi; passo peggiore 12`, e la traccia a dieci passi del peggiore colpevole è **permanente**, non una sonda |
+| 5 | lo spawn non genera dentro un ostacolo | **sì** | 24 semi, **4800 punti di spawn e 4800 posizioni iniziali**, nessuno dentro un disco. E l'epsilon di bordo è **una sola costante** (`SKIN_EPS`), letta da tre posti: è la lezione di §1.12-bis applicata al nuovo file |
+| 6 | il giocatore è solido e i proiettili passano | **sì, con denti per conto separato** | metà 1: fermo a **2,600 m** dal centro su raggio 2,00 più margine 0,60, minimo 2,600 m su 300 frame. Metà 2: il proiettile è passato **fino a 0,133 m dal centro** e ha colpito il nemico dietro. Denti: senza clamp **6 FAIL**, minimo 0,0000 m; con un proiettile che si ferma **5 FAIL** a giocatore solido (fermata a 2,300 m, **0** colpi invece di 1) |
+| 7 | niente regrediti | **sì** | knockback runner **0.3119**, `node_count` **45** con **1 solo nodo per 27 ostacoli**, proporzionalità **3.4000**, `TOUCH_REACH` **0.45** |
+| 8 | la porta è verde | **sì, come il criterio è scritto** | `GATE: 7/8` con l'unico rosso `test_ui` per il **leak dichiarato**; `PERM: 15/15`; `--quit-after 300` **pulito** |
+
+### Il difetto del vertice che m10 ha scopero, e che nessuna foglia poteva correggere
+
+`test_ui` riapre l'arena **tre volte**, e alla seconda il giocatore precedente è stato liberato:
+`_impl` teneva la sua `Callable`, `has_impl` diceva **vero**, e la chiamata **crashava** con
+`Attempt to call function 'null::_player_position (Callable)' on a null instance`. Lo hanno
+segnalato `-arena` e `-gameplay` indipendentemente, e ciascuno ha detto che la guardia non era
+nel suo file.
+
+**È nel mio**, e la regola è una sola: un contratto che dichiara presente un membro che non esiste
+è un contratto rotto. `_live(api)` è ora **l'unica strada** con cui si legge `_impl`: se la
+`Callable` non è valida la voce viene **cancellata** e la si tratta come assente. Tutte e sei le
+API e `has_impl` passano di lì, quindi la regola è scritta **una volta sola**. `-orda` ne ha
+approfittato per una cosa giusta: il suo `flow_problem` asseriva sull'**orda isolata** del test,
+costruita prima che `-arena` registrasse gli ostacoli, e stava accusando una macchina di fallire
+mentre il gioco era sano. Ora asserisce **sull'orda che gioca**.
+
+### La forma del mondo, che è un numero e non un parere
+
+**27 dischi di raggio 2,99 m** su tre anelli a 15,18 / 27,14 / 39,10 m, il più esterno a
+**42,1 m** dal centro dentro il muro a 46. Passaggio utile fra i due dischi più vicini: **5,99 m**
+(per il boss, che è largo 1,90 m, restano **3,80 m**). Copertura d'area **11,5%**, e **14,1%**
+delle rette al giocatore passano dentro. Il campo è 55×55 celle da 2 m con **584 bloccate**, e
+ricostruito **0 volte** in 2400 passi con il bersaglio fermo: costa una volta sola.
+
+### I debiti che m10 lascia dichiarati
+
+1. **`src/render/_probe_obstacles.gd` è rimasto sul disco** e **nessun agente di questa piramide
+   può cancellare un file**: `rm` è negato a tutti, per scelta (§11.3). È innocuo — una `SceneTree`
+   che la scena non istanzia — ed è **lasciato fuori dal commit** apposta. Va cancellato a mano,
+   e la riga è negata per un motivo che è giusto: con `>` una allowlist non può distinguere
+   «stampo una riga» da «sovrascrivo il file di un'altra foglia».
+2. **Il leak di `bonk.wav` resta aperto**, e resta il dado dichiarato. In questa sessione è uscito
+   rosso in 2 gate su 4 e pulito negli altri 2.
+3. **`tests/test_gameloop.gd:811` stampa ancora un messaggio che descrive un debito chiuso**, e la
+   correzione non è in `tests/test_arena.gd` — che ho sbagliato due volte in due onde dicendolo —
+   ma in `tests/test_gameloop.gd`, di `-orda`, che in tre ondate non ha avuto i passi per
+   allinearlo. È una **stampa obsoleta**, non un'asserzione rotta.
+4. **Le copie di `28.0` nei file di agente** (`.opencode/agents/` e `docs/piramide/agents_ready/`,
+   riga 378 di `-scheletro`) sono ancora lì: è il **muro di §11.5**, e sono un atto tuo.
+5. **`NODI_SCENA_VERA` è passato da 19 a 20** e l'incremento è **di `-arena`**, dichiarato nel
+   file. Il tetto vero resta 120. È la prima volta che una foglia consuma il budget di un'altra:
+   il numero era giusto e nessuno lo aveva previsto.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

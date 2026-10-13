@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 ; -arena. La scena principale: `res://scenes/arena_main.tscn`, il path che
 ; project.godot dichiara come `run/main_scene`.
@@ -8,12 +8,25 @@
 ;
 ; Cosa e' di chi, in questa scena:
 ;   src/render/arena.gd           -arena   la radice, registra Game.arena_radius
+;                                             e Game.obstacles (m10)
 ;   src/render/arena_ground.gd    -arena   pavimento, muro, casse (3 MultiMesh)
+;   src/render/arena_obstacles.gd -arena   i dischi su cui si scontra (1 MultiMesh)
 ;   src/render/horde_renderer.gd  -arena   i 200 nemici in UNA MultiMeshInstance3D
 ;   src/render/arena_camera.gd    -arena   la camera che segue il giocatore
 ;   scenes/hud.tscn + src/ui/     -arena   vite, punteggio, arma
 ;   src/sim/horde.gd              -orda    i nemici e le sue tre API
+;   src/sim/obstacles.gd          -orda    i NUMERI dei dischi (layout)
 ;   scenes/player.tscn            -gameplay il giocatore e l'arma che spara da sola
+;
+; ## I numeri degli ostacoli non sono in questa scena, e non sono in nessun file di
+; ## -arena: sono di -orda e vengono **letti**
+;
+; `src/render/arena.gd` chiama `src/sim/obstacles.gd` -> `layout(ARENA_RADIUS)`
+; e registra il risultato in `Game.obstacles` nel proprio `_enter_tree()`. Il
+; canale e' dichiarato in `src/core/contracts.gd`; il criterio n. 2 e' di -orda e
+; il criterio n. 1 dice che i numeri sono «quelli che la misura produce». Qui si
+; sceglie la **forma** (cilindro basso, 2,4 m, 12 segmenti, tinta calda), che e'
+; l'unica cosa che -arena sceglie.
 ;
 ; I riferimenti alle righe delle altre due foglie sono stringhe in questa
 ; scena: scriverle non e' toccare i loro file, e le foglie restano libere di
@@ -22,7 +35,8 @@
 ; Perche' il terreno e i nemici sono MultiMesh e non nodi: il criterio n. 3
 ; della milestone e' `node_count < 120` con `horde.count == 200`. Un nodo per
 ; nemico, o 961 piastrelle di pavimento, lo renderebbero impossibile da soli.
-; Questa scena, per intero, sta in 18 nodi.
+; Vale anche per gli ostacoli di m10: sono dischi, quindi sono **istanze** di una
+; MultiMesh e il loro numero non aggiunge nodi.
 
 [ext_resource type="Script" path="res://src/render/arena.gd" id="1_arena"]
 [ext_resource type="Script" path="res://src/render/arena_ground.gd" id="2_ground"]
@@ -31,6 +45,7 @@
 [ext_resource type="Script" path="res://src/sim/horde.gd" id="5_horde"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="6_player"]
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="7_hud"]
+[ext_resource type="Script" path="res://src/render/arena_obstacles.gd" id="8_obstacles"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_arena"]
 sky_top_color = Color(0.08, 0.09, 0.16, 1)
@@ -61,10 +76,35 @@ transform = Transform3D(0.825336, -0.363849, -0.431815, 0, 0.764842, -0.644218, 
 light_color = Color(1, 0.964706, 0.890196, 1)
 light_energy = 1.05
 shadow_enabled = true
-directional_shadow_max_distance = 90.0
+; ## LE OMBRE: 90 -> 120, il debito lasciato aperto da m9 (chiuso qui da -arena)
+;
+; `directional_shadow_max_distance` e' la distanza **dalla camera** oltre la quale
+; le ombre non sono piu' disegnate. Il valore di prima era **90** e l'arena ha
+; **92 m di diametro**, quindi la meta' piu' lontana del campo di gioco era
+; letteralmente senza ombra: il difetto non si vedeva perche' la scena si
+; guardava al centro.
+;
+; Il numero non e' scelto, e' **derivato dalla camera vera**
+; (`src/render/arena_camera.gd`): la camera sta a `anchor + (0, 34, 24)` e
+; l'ancora e' tagliata a `ARENA_RADIUS - EDGE_MARGIN = 40 m` dal centro. Il punto
+; piu' lontano e' quello del bordo diametralmente opposto all'ancora:
+;
+;     orizzontale  64 m (ancora a 40 m dalla parte della camera)
+;                 + 46 m (dal centro al bordo opposto)  = 110 m
+;     verticale   34 m
+;     distanza    sqrt(110^2 + 34^2) = 115,1 m
+;
+; 90 tagliava tutto cio' che sta oltre 90 m dalla camera, cioe' meta' arena.
+; **120** copre il caso peggiore con ~4% di margine dichiarato. Non e' un numero
+; estetico: e' il massimo che la camera vera puo' raggiungere, piu' un margine
+; piccolo e scritto. `tests/test_arena.gd` lo rilegge e lo confronta.
+directional_shadow_max_distance = 120.0
 
 [node name="Ground" type="Node3D" parent="."]
 script = ExtResource("2_ground")
+
+[node name="Obstacles" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("8_obstacles")
 
 [node name="Horde" type="Node3D" parent="."]
 script = ExtResource("5_horde")

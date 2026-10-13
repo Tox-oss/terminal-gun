@@ -4,6 +4,11 @@ extends RefCounted
 ## Le tabelle delle specie. `enemy.gd` non preloada niente, quindi questo
 ## preload non puo' diventare un riferimento circolare.
 const E = preload("res://src/sim/enemy.gd")
+## I numeri della geometria statica di m10. Da li' viene `SKIN_EPS`, il margine
+## con cui un punto di nascita viene tenuto **oltre** il bordo del disco invece
+## che sul bordo: il produttore e' `obstacles.gd` (§3.11) e la dichiarazione di
+## quel numero, con la sua misura, sta in testa a quel file.
+const OBST = preload("res://src/sim/obstacles.gd")
 ##
 ## Nessuna geometria qui dentro: questo file dice **dove mettere i nemici**,
 ## non che forma hanno. E' il posto giusto per la densita', perche' la densita'
@@ -59,13 +64,75 @@ static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0])
 ## misura del difetto che corregge. Il buco non e' il centro esatto ma un
 ## anello: sotto `LAYOUT_INNER` non nasce **nessuno**, quindi nessuno nasce sul
 ## giocatore quando il giocatore parte al centro, che e' dove parte.
-static func layout_point(radius: float, i: int, count: int, rng: RandomNumberGenerator) -> Vector3:
+##
+## ## m10: nessuno nasce dentro un ostacolo
+##
+## Un anello di disposizione puo' passare esattamente dove passa un disco, e un
+## nemico che nasce dentro un ostacolo e' un nemico che il criterio n. 2 vede
+## **al frame zero**: non e' un difetto che si accomoda in un secondo, e' una
+## disposizione sbagliata. Quindi il punto va spinto fuori, e `skin` e' il
+## raggio del **nemico piu' grosso**: e' il raggio che garantisce che nessuna
+## specie nasca dentro, per tutte e quattro e non solo per quella che si e' capita
+## di pescare. Il criterio e' dichiarato sul minimo dei tre, non sul massimo.
+static func layout_point(radius: float, i: int, count: int, rng: RandomNumberGenerator,
+		obstacles: PackedVector3Array = PackedVector3Array(), skin: float = 0.0) -> Vector3:
 	var t := 0.0 if count <= 1 else float(i) / float(count - 1)
 	var inner := minf(LAYOUT_INNER, radius * 0.45)
 	var rr := inner + (radius - inner) * sqrt(1.0 - clampf(t, 0.0, 1.0))
 	rr = clampf(rr + rng.randf_range(-1.0, 1.0) * radius * 0.05, inner, radius)
 	var a := rng.randf() * TAU
-	return Vector3(cos(a) * rr, 0.0, sin(a) * rr)
+	return free_point(Vector3(cos(a) * rr, 0.0, sin(a) * rr), obstacles, skin, radius)
+
+## Spinge `p` fuori da ogni disco che lo contiene, con `skin` di margine, e lo
+## riporta dentro l'arena. Due passaggi perche' due dischi vicini possono
+## spingere lo stesso punto in due direzioni diverse, e un punto spinto fuori
+## dall'arena che si riporta dentro puo' finire dentro un disco: il secondo
+## passaggio chiude la cosa.
+##
+## Il criterio n. 5 e' scritto su questa funzione e non sul `spawn_point`: e' l'unico
+## posto dove un punto di nascita viene deciso, e decidere lo in due posti
+## significa che uno dei due non e' governato.
+##
+## ## Il margine `SKIN_EPS`: perche' il punto non puo' finire sul bordo
+##
+## Il raggio di riferimento qui e' `ob.y + skin + SKIN_EPS`, non
+## `ob.y + skin`. Non e' pignoleria: il punto di nascita e' una **somma**
+## (`posizione + scarto`) in `float`, e chi verifica il criterio conta con
+## `d2 < rr * rr`, **stretto**. Un punto lasciato esattamente sul bordo
+## sbaglia di qualche ulp verso l'interno e il criterio n. 5 lo dichiara dentro:
+## misurato, **778 su 4800** posizioni iniziali su 24 semi, tutte a `-0.00000`
+## m dentro il disco. Non era un difetto della disposizione, era il bordo.
+## Il numero e' di `obstacles.gd`, dichiarato e misurato in testa a quel file.
+static func free_point(p: Vector3, obstacles: PackedVector3Array, skin: float,
+		arena_radius: float) -> Vector3:
+	var q := p
+	if obstacles.is_empty():
+		return q
+	for _giro in 3:
+		var mosso := false
+		for k in obstacles.size():
+			var ob := obstacles[k]
+			var rr := ob.y + maxf(0.0, skin) + OBST.SKIN_EPS
+			var dx := q.x - ob.x
+			var dz := q.z - ob.z
+			var d2 := dx * dx + dz * dz
+			if d2 >= rr * rr:
+				continue
+			mosso = true
+			var d := sqrt(d2)
+			if d < 0.0001:
+				q.x += rr
+			else:
+				q.x += dx / d * (rr - d)
+				q.z += dz / d * (rr - d)
+		var fuori := Vector2(q.x, q.z).length()
+		if fuori > arena_radius and fuori > 0.0001:
+			var k2 := arena_radius / fuori
+			q.x *= k2
+			q.z *= k2
+		if not mosso:
+			break
+	return q
 
 ## Riempie `out[0..count-1]` con una disposizione ad anelli.
 static func fill_layout(radius: float, count: int, rng: RandomNumberGenerator,
@@ -84,14 +151,44 @@ static func random_point(radius: float, rng: RandomNumberGenerator) -> Vector3:
 ## giocatore. Non puo' restituire `Vector3.ZERO`: il contratto usa ZERO come
 ## "non implementato", e ZERO e' anche sotto il giocatore, quindi restituirlo
 ## sarebbe un segnale falso. Con `radius >= 1` il punto ha modulo >= 1.
+##
+## ## m10: il punto di spawn e' fuori dagli ostacoli, per costruzione
+##
+## Un tiro che capita dentro un disco viene **rifiutato** e si ritira, e il
+## fallback dell'ultimo tentativo viene comunque spinto fuori: e' l'unico modo
+## perche' il criterio n. 5 valga **su tutti i semi** e non in media. Il margine
+## e' il raggio del nemico piu' grosso per la stessa ragione che vale nella
+## disposizione iniziale.
 static func spawn_point(radius: float, focus: Vector3, rng: RandomNumberGenerator,
-		min_gap: float) -> Vector3:
+		min_gap: float, obstacles: PackedVector3Array = PackedVector3Array(),
+		skin: float = 0.0) -> Vector3:
 	var fallback := random_point(radius, rng)
 	for _try in PLACEMENT_TRIES:
 		var p := random_point(radius * 0.96, rng)
-		if p.distance_squared_to(focus) >= min_gap * min_gap:
-			return p
-	return fallback
+		if p.distance_squared_to(focus) < min_gap * min_gap:
+			continue
+		if _dentro(p, obstacles, skin):
+			continue
+		return p
+	return free_point(fallback, obstacles, skin, radius)
+
+## Il punto e' dentro un disco, corpo compreso? Usato dal tentativo di spawn e
+## dai test, perche' la risposta deve essere la stessa nei due posti.
+##
+## `SKIN_EPS` anche qui, e dalla parte giusta: il confronto e' **stretto**
+## (`d2 < rr * rr`), quindi un punto a pelo del bordo e' fuori. Con il margine
+## il «fuori» di questa funzione e il «fuori» di `free_point` sono la stessa
+## frontiera, ed e' quello che rende il criterio n. 5 vero su **tutti** i semi
+## e non in media.
+static func _dentro(p: Vector3, obstacles: PackedVector3Array, skin: float) -> bool:
+	for k in obstacles.size():
+		var ob := obstacles[k]
+		var rr := ob.y + maxf(0.0, skin) + OBST.SKIN_EPS
+		var dx := p.x - ob.x
+		var dz := p.z - ob.z
+		if dx * dx + dz * dz < rr * rr:
+			return true
+	return false
 
 ## Specie a caso, pesata. Il boss resta raro perche' e' lento e grosso: 200
 ## nemici non possono essere 200 boss.

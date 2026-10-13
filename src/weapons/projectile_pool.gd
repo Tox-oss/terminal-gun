@@ -40,8 +40,41 @@ extends Node3D
 ##    quale `y` mette l'orda nei `transforms` (piedi del modello? centro?):
 ##    ignorare la `y` rende il proiettile indifferente a quella scelta, invece
 ##    di fallire in silenzio quando l'orda sceglie un'altra convenzione.
+##
+## 5. **Un ostacolo non ferma un proiettile.** Nemmeno per meta', nemmeno
+##    "appena": `OBSTACLES_BLOCK_PROJECTILES = false` in testa a questo file, che
+##    e' la meta' di -gameplay del criterio n. 6 di m10. La decisione e' sua e il
+##    motivo (un muro che blocca anche i proiettili rende al sicuro e
+##    irraggiungibile per sempre il giocatore che ci si mette dietro) sta per
+##    esteso accanto alla costante.
 
 const ProjectileScript := preload("res://src/weapons/projectile.gd")
+
+## ## m10: cosa fa un ostacolo a un proiettile
+##
+## `false`, e **voluto**. Non e' un dettaglio dimenticato e non e' un numero che
+## nessuno usa: e' la dichiarazione che questo file fa a chi ci arriva dopo.
+##
+## Il contratto (`src/core/contracts.gd`, "Superficie di milestone 10") mette
+## nella stessa riga tre fatti: l'ostacolo e' **solido per il giocatore**
+## (`src/player/player.gd`), **solido per il nemico** (`src/sim/`, di -orda) e
+## **trasparente ai proiettili** (qui). La terza meta' e' una **decisione del
+## vertice** e non una conseguenza: se l'ostacolo fermasse anche i proiettili, il
+## giocatore che ci si mette dietro sarebbe al sicuro e irraggiungibile per
+## sempre, cioe' un gioco che si vince stando fermi.
+##
+## Quindi qui sotto, dentro `_collide()`, **non c'e' nessun ostacolo**, e non
+## deve esserci: il contatto e' nemico per nemico e nient'altro. «Proiettili che
+## si fermano» e' **m11**, e quando arrivera la decisione va presa li' e
+## dichiarata come questa.
+##
+## Il perche' questa riga esiste invece di un commento: la foglia dopo che
+## aggiungera' una `CollisionShape3D` a un proiettile, o un test di attraversata
+## su un disco, la vedra **qui in cima** e non la consideri un dettaglio. Un
+## proiettile che per caso non incontra un ostacolo e' un proiettile che passa
+## per fortuna, ed e' cosi' che un muro che blocca chi lo usa e non chi lo
+## combatte entra nel gioco senza che nessuno l'abbia scritto.
+const OBSTACLES_BLOCK_PROJECTILES := false
 
 ## Scene con la mesh del proiettile: i dati visuali stanno nelle scene, non in
 ## codice. Se non ci fosse, si usa un primitivo (vedi `_bullet_mesh`).
@@ -213,6 +246,10 @@ func nearest_enemy(from: Vector3, radius: float) -> int:
 ## incontrato lungo il percorso, e mai due volte lo stesso nemico (il registro
 ## sta nel record). `index` serve per liberare lo slot se il budget di `pierce`
 ## finisce.
+##
+## Qui dentro non c'e' nessun ostacolo, e `OBSTACLES_BLOCK_PROJECTILES` in testa
+## al file e' il perche'. Il contatto e' **nemico per nemico**: quello che si
+## attraversa e' l'orda.
 func _collide(p, index: int) -> void:
 	var tr := _transforms()
 	if tr.is_empty():

@@ -93,6 +93,24 @@ var horde: Node
 ## verifica che tutte le copie **esistenti** dicano lo stesso numero.
 var arena_radius: float = 46.0
 
+## -arena (m10). Gli ostacoli del mondo: **dischi sul piano XZ**.
+##
+##     un elemento = Vector3(centro_x, RAGGIO, centro_z)
+##
+## Il raggio sta in **`y`**, che e' l'unica cosa controintuitiva di questa superficie: `y`
+## **non** e' un'altezza e `z` **non** e' una profondita'. Semantica completa e congelata in
+## «Superficie di milestone 10» piu' in basso; qui la dichiarazione, che mancava ed e' stata
+## aggiunta **dopo** che tre foglie l'hanno segnalata.
+##
+## **Statici**: li registra `src/render/arena.gd` nel proprio `_enter_tree()`, e `-orda` li
+## legge una volta sola quando costruisce il campo di percorrenza. Registrati in `_ready()`
+## sarebbero sempre fuori tempo, per la regola di §5.1.
+##
+## **Non e' un semplice contenitore.** `-arena` lo riempie, `-orda` lo evita e `-gameplay` ci
+## scontra, e nessuno dei tre legge i numeri dagli altri due: il punto per cui questa riga e'
+## dichiarata qui e non concordata fra tre file.
+var obstacles: PackedVector3Array = PackedVector3Array()
+
 # --- Superficie di milestone 2 ----------------------------------------------------
 #
 # In m1 il contratto dichiarava i cinque metodi che le foglie si passavano. In m2
@@ -291,6 +309,92 @@ func verify_m2_surface() -> Array[String]:
 ## che -orda scrive e -arena legge. Cambiarlo durante l'onda significa fermare
 ## l'onda e tornare dal vertice.
 
+# --- Superficie di milestone 10 --------------------------------------------------
+#
+# ## Il difetto, e perché è una superficie
+#
+# L'utente ha deciso il 2026-10-13: «il nemico li **aggira davvero**». E' la prima volta che
+# questo progetto introduce **geometria statica del mondo**, e la prima volta che una foglia
+# deve costruire qualcosa che l'altra deve *evitare*: con un inseguimento in linea retta un
+# ostacolo non è un ostacolo, è un muro, e il gioco si vince stando fermi dietro.
+#
+# `-orda` possiede la simulazione e il campo di percorrenza; `-arena` possiede la scena e
+# costruisce gli ostacoli. `-orda` ha bisogno della loro forma e `-arena` ha bisogno di sapere
+# che il dato è pubblico. Due foglie, due file, e **nessun contratto**: le due inventano il
+# nome diverse e non si vedono mai. È la terza volta della stessa classe (§8, `wave` letto
+# per nome dall'HUD; m8, `radii`).
+#
+# ## Congelato dal vertice il 2026-10-13
+#
+#     Game.obstacles : PackedVector3Array
+#
+# Un elemento per ostacolo, con la convenzione **dichiarata e non negoziabile**:
+#
+#     elemento = Vector3(centro_x, RAGGIO, centro_z)
+#
+# cioè **il raggio sta in `y`**, che è la sola cosa controintuitiva di questa superficie, e
+# quindi l'unica che va detta tre volte. Motivo della scelta di *un solo array*: questo progetto
+# ha già sofferto l'allineamento di array paralleli (`transforms`/`colors`/`kinds`/`radii`), e
+# due array che possono staccarsi sono due array che si staccheranno. Con uno, non c'è nulla da
+# allineare.
+#
+# ## Semantica, in cinque punti
+#
+#   1. **statici**: letti una volta sola da `-orda` quando costruisce il campo di percorrenza.
+#      Non si muovono durante la partita. Se in futuro si muovono, è un'altra milestone e
+#      questo contratto va emendato per primo;
+#   2. **dischi sul piano XZ**: `y` è il raggio e **non** un'altezza. `-orda` non deve mai
+#      leggere `elemento.y` come una quota, e `z` è la seconda coordinata del centro, non la
+#      profondità. Un ostacolo che volasse sarebbe un'altra milestone;
+#   3. **il raggio e' in metri ed e' positivo**: `elemento.y > 0.0` e' un invariante, non una
+#      convenzione, e va asserito: un raggio zero è un ostacolo che non esiste e si distingue
+#      dal raggio negativo solo per il crash;
+#   4. **registrato in `_enter_tree()`, non in `_ready()`** (§5.1): l'orda costruisce il campo
+#      di percorrenza al proprio avvio, quindi il dato dev'essere già dentro quando i figli
+#      leggono. Registrazione in `_enter_tree()` **idempotente**;
+#   5. **un insieme vuoto e' un errore, non un mondo senza muri.** Se `-orda` chiede gli
+#      ostacoli e non sono registrati, il contratto **non** restituisce un array vuoto in
+#      silenzio: dice che la piramide non è montata. Un array vuoto passerebbe **tutti** i
+#      test di m10 perché «nessun ostacolo blocca nessuno» è vero anche quando non ce n'è:
+#      è la classe di difetto di §1.6, cioè una macchina verificata che il gioco non chiama.
+#
+# ## Chi è solido e chi no, e perché è scritto qui perché non torni indietro
+#
+#   - **solido per il giocatore** (`src/player/player.gd`, di `-gameplay`): ci si scontra.
+#   - **solido per il nemico** (`src/sim/`, di `-orda`): ci si scontra e **aggira**.
+#   - **trasparente ai proiettili** (`src/weapons/`, di `-gameplay`): l'arma spara da sola e
+#     i proiettili passano sopra.
+#
+# Il terzo punto è una **decisione del vertice**, non una conseguenza, e il motivo è la
+# combinazione degenerata: se l'ostacolo blocca anche i proiettili, il giocatore che ci si
+# mette dietro è **al sicuro e irraggiungibile** per sempre. Il gioco si vince stando fermi.
+# Facendo l'ostacolo solido solo a chi cammina, l'ostacolo diventa un ostacolo e resta un
+# ostacolo. «Proiettili che si fermano» è m11 e va detto come milestone.
+
+## ## La strada dei dati, dichiarata dal vertice il 2026-10-13 dopo che l'onda l'ha chiesto
+##
+## Il vertice aveva scritto «i numeri sono di `-orda`, la costruzione è di `-arena`» **senza
+## dire come i numeri arrivano**, e la conseguenza fu che `-arena` aspettava un valore che nessuno
+## gli passava, con `OBSTACLE_LAYOUT` vuota e tutti i criteri di m10 rossi per «insieme vuoto».
+## È la terza volta in questo progetto che due foglie hanno bisogno di un dato e il vertice ha
+## dichiarato la superficie **senza il canale**: `wave` letto per nome, `radii`, e questa.
+##
+## Il canale è questo, ed è **una riga**:
+##
+##     -orda possiede i NUMERI:  src/sim/obstacles.gd -> layout(arena_radius)
+##     -arena possiede la FORMA e LEGGE quei numeri, non li ricopia
+##
+## Quindi `-arena` fa `preload("res://src/sim/obstacles.gd")`, chiama `layout(arena_radius)` e
+## registra **quel** risultato in `Game.obstacles` nel proprio `_enter_tree()`.
+##
+## **Perché un `preload` del file di un'altra foglia è lecito qui e non altrove**: la regola di §5
+## vieta di prendere con `get_node("../..")` un dato che l'API non espone, perché copia una
+## conoscenza e la copia mente alla prima riga cambiata. Qui il **proprietario del dato è
+## dichiarato** (`src/sim/obstacles.gd` è di `-orda`), il dato ha **un solo produttore**, e la
+## cosa che `-arena` ci mette dentro — il cilindro, l'altezza, i 12 segmenti, il colore — è sua.
+## Se `-orda` cambia un raggio, l'ostacolo disegnato cambia **senza che `-arena` lo sappia**, ed è
+## esattamente il comportamento voluto: due copie del numero non esistono.
+
 # --- Registrazione -------------------------------------------------------------
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non
@@ -323,8 +427,36 @@ func register_impl(api: String, impl: Variant) -> void:
 	print("Game: %s implementato da %s" % [api, callable.get_object().get_class()])
 
 ## Un'API è registrata? Per i test e per il debug. Le foglie non ne hanno bisogno.
+##
+## **m10, 2026-10-13: `has_impl` non basta più, e la ragione è un difetto vero.**
+## `_impl` tiene una `Callable`, e una `Callable` con l'oggetto **liberato** resta nel
+## dizionario per sempre: `_impl.has(api)` dice vero, e la chiamata **crasha** con
+## `Attempt to call function 'null::_player_position (Callable)' on a null instance`.
+## Lo ha scoperto `tests/test_ui.gd`, che **riapre l'arena tre volte**: alla seconda, il
+## giocatore precedente è stato liberato e la sua registrazione è rimasta. Un contratto che
+## dichiara presente un membro che non esiste è un contratto rotto, ed è la stessa classe
+## di difetto che `verify_m2_surface` era nato per evitare: un chiamante che riceve un
+## errore che non dice quale delle foglie ha rotto il contratto, e lo riceve **a un'onda di
+## distanza** dal momento in cui è successo.
 func has_impl(api: String) -> bool:
-	return _impl.has(api)
+	return _live(api).is_valid()
+
+## L'unica strada con cui si legge `_impl`. Tutti e sei le API e `has_impl` passano di
+## qui, quindi la regola «una registrazione il cui oggetto non esiste **non esiste**» è
+## scritta **una volta sola**.
+##
+## La voce morta viene **cancellata**: lasciarla dentro significa che `has_impl` continuerebbe
+## a dire vero, che `_warned` non riporterebbe il fatto, e che il prossimo registro finirebbe
+## sopra una voce che nessuno guarda. Un contratto che mente in silenzio è peggio di uno che
+## non è montato, perché il secondo è rumoroso e il primo no.
+func _live(api: String) -> Callable:
+	if not _impl.has(api):
+		return Callable()
+	var c: Callable = _impl[api]
+	if c.is_valid():
+		return c
+	_impl.erase(api)
+	return Callable()
 
 # --- API dichiarate ------------------------------------------------------------
 #
@@ -339,8 +471,9 @@ func has_impl(api: String) -> bool:
 ## esiste da restituire. E l'indice e' esattamente quello che `damage_enemy` si
 ## aspetta, cosi si spara a un nemico senza trasformare la referenza in un nodo.
 func nearest_enemy(from: Vector3, radius: float) -> int:
-	if _impl.has("nearest_enemy"):
-		return _impl["nearest_enemy"].call(from, radius) as int
+	var c := _live("nearest_enemy")
+	if c.is_valid():
+		return c.call(from, radius) as int
 	_missing("nearest_enemy", "terminal-gun-orda")
 	return -1
 
@@ -354,8 +487,9 @@ func nearest_enemy(from: Vector3, radius: float) -> int:
 ## dice gli metri spostati. Per verificare il criterio n. 4 ("knockback >= 0.3
 ## unita'") si simula un passo di tempo fisso e si misura la delta di posizione.
 func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
-	if _impl.has("damage_enemy"):
-		return _impl["damage_enemy"].call(index, amount, knockback) as bool
+	var c := _live("damage_enemy")
+	if c.is_valid():
+		return c.call(index, amount, knockback) as bool
 	_missing("damage_enemy", "terminal-gun-orda")
 	return false
 
@@ -377,8 +511,9 @@ func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 ## un `grep` trovi il chiamante **in `src/`** e non solo nei test. E' la
 ## settima volta della stessa classe di difetto, vedi il piano sez. 1.6.
 func damage_player(amount: float) -> bool:
-	if _impl.has("damage_player"):
-		return _impl["damage_player"].call(amount) as bool
+	var c := _live("damage_player")
+	if c.is_valid():
+		return c.call(amount) as bool
 	_missing("damage_player", "terminal-gun-gameplay")
 	return false
 
@@ -387,8 +522,9 @@ func damage_player(amount: float) -> bool:
 ## pieno. Come `nearest_enemy`, non restituisce un nodo: i proiettili non sono
 ## nodi, sono record come i nemici.
 func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool:
-	if _impl.has("spawn_projectile"):
-		return _impl["spawn_projectile"].call(pos, dir, speed) as bool
+	var c := _live("spawn_projectile")
+	if c.is_valid():
+		return c.call(pos, dir, speed) as bool
 	_missing("spawn_projectile", "terminal-gun-gameplay")
 	return false
 
@@ -396,15 +532,17 @@ func spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool:
 ## giocatore. Non va mai restituito come origine: Vector3.ZERO è ambiguo, è
 ## anche sotto il giocatore, quindi è un segnale di "non implementato".
 func random_spawn_point() -> Vector3:
-	if _impl.has("random_spawn_point"):
-		return _impl["random_spawn_point"].call() as Vector3
+	var c := _live("random_spawn_point")
+	if c.is_valid():
+		return c.call() as Vector3
 	_missing("random_spawn_point", "terminal-gun-orda")
 	return Vector3.ZERO
 
 ## -orda/-gameplay. Posizione corrente del giocatore.
 func player_position() -> Vector3:
-	if _impl.has("player_position"):
-		return _impl["player_position"].call() as Vector3
+	var c := _live("player_position")
+	if c.is_valid():
+		return c.call() as Vector3
 	_missing("player_position", "terminal-gun-gameplay")
 	return Vector3.ZERO
 

@@ -121,6 +121,8 @@ const E = preload("res://src/sim/enemy.gd")
 const Grid = preload("res://src/sim/spatial_grid.gd")
 const Spawner = preload("res://src/sim/spawner.gd")
 const Run = preload("res://src/sim/run.gd")
+const Flow = preload("res://src/sim/flow_field.gd")
+const Obst = preload("res://src/sim/obstacles.gd")
 
 ## Capienza massima: decisa qui, una volta sola, e mai piu' cambiata.
 const MAX_ENEMIES := 200
@@ -161,6 +163,42 @@ var colors: PackedColorArray = PackedColorArray()
 ## deve disegnare, e la proporzione `disegnato_i / disegnato_j == radii[i] /
 ## radii[j]` e' l'invariante, non la taglia assoluta.
 var radii: PackedFloat32Array = PackedFloat32Array()
+
+# --- m10: gli ostacoli e il campo di percorrenza ------------------------------
+#
+# ## Cosa c'e' qui e cosa non c'e'
+#
+#     horde.obstacles      # i dischi, gia' nella forma del contratto
+#     horde.flow_field     # il campo di percorrenza, o null
+#     horde.flow_problem   # il motivo per cui il campo non c'e', "" se c'e'
+#
+# Il campo e' **dati**, non nodi: un `RefCounted` che l'orda tiene in un campo e
+# che muore con lei. `node_count` non si muove di una unita' e l'ordine resta in
+# tre nodi (criterio n. 7).
+#
+# ## Perche' `flow_problem` e' un campo e non uno `if` silenzioso
+#
+# Il punto 5 della semantica di m10 e' la trappola dell'onda: «un insieme vuoto
+# e' un errore, non un mondo senza muri». Un campo costruito su un insieme vuoto
+# passerebbe **tutti** i criteri di m10 — «nessun ostacolo blocca nessuno» e'
+# vero anche quando non ce n'e' — e non avrebbe mai aggirato niente: e' la
+# classe di difetto di §1.6, una macchina verificata che il gioco non chiama.
+#
+# Quindi qui non esiste il fallback «se non ci sono ostacoli, agisci come se non
+# ci fossero»: esiste **un campo che dice che mancano**. Chi legge
+# `flow_problem` sa perche' l'evitamento e' spento, e `tests/test_orda.gd` lo
+# asserisce: la piramide non montata porta la porta rossa invece di un verde
+# costruito sul nulla.
+#
+# La simulazione intanto **prosegue senza evitamenti**: e' cio' che le rende
+# indispensabili le altre foglie che chiamano `step()` su un'orda senza ostacoli,
+# e non e' un silenzio: `_load_obstacles()` avvisa una volta sola per processo.
+var obstacles: PackedVector3Array = PackedVector3Array()
+var flow_field = null
+var flow_problem: String = ""
+## Quante volte il campo e' stato ricostruito in questo processo. La telemetria
+## che rende verificabile «da fermo il campo non costa niente».
+var flow_rebuilds: int = 0
 
 # --- Dati per nemico: array paralleli, tutti lunghi `count` --------------------
 
@@ -326,6 +364,11 @@ func _build() -> void:
 		return
 	_built = true
 	arena_radius = _contract_radius()
+	# Gli ostacoli prima di **qualsiasi** spawn: la disposizione iniziale deve
+	# gia' sapere dove sono i muri, altrimenti il primo nemico della partita
+	# nasce dentro uno e il criterio n. 2 ha gia' un nemico da segnalare al
+	# primo frame.
+	_load_obstacles()
 	if seed != 0:
 		_rng.seed = seed
 	else:
@@ -355,6 +398,116 @@ func _build() -> void:
 	# Disposizione iniziale **a `population`**, non a `MAX_ENEMIES`.
 	_populate(population)
 	_rebuild_grid()
+
+# --- m10: gli ostacoli e il campo ---------------------------------------------
+
+## Legge `Game.obstacles` **una volta sola**, all'avvio, e costruisce il campo.
+##
+## ## La forma dichiarata, punto per punto (contratto di m10)
+##
+##   1. **statici**: letti qui, una volta sola. Non tornano piu' a leggersi nel
+##      ciclo di gioco;
+##   2. **dischi sul piano XZ**: `y` e' il raggio e non un'altezza. Qui sotto si
+##      legge `elemento.y` come raggio e non come quota, e non e' un caso: e' la
+##      convenzione che evita due array paralleli da allineare;
+##   3. **raggio positivo**: un raggio zero e' un ostacolo che non esiste e si
+##      distingue dal raggio negativo solo per il crash, quindi e' un invariante
+##      e viene controllato qui, non affidato alla buona fede di chi lo scrive;
+##   4. **registrato in `_enter_tree()`**: percio' quando questa funzione gira il
+##      dato e' gia' dentro, e l'ordine delle due foglie non e' una corsa;
+##   5. **un insieme vuoto e' un errore**: se il campo non c'e', `flow_problem`
+##      dice perche'. Non si costruisce un campo su un insieme vuoto, perche'
+##      passerebbe tutti i criteri di m10 senza aver aggirato niente.
+##
+## La lettura passa da `get("obstacles")` e non da `game.obstacles`: sotto
+## `--script` l'identificatore nudo `Game` non compila (vedi la nota in testa al
+## file) e `Object.get()` su un nome assente restituisce `null` senza schiantare
+## il processo. Quel `null` e' pero' **il caso da urlare**, non un valore di
+## riserva: e la riga sotto.
+func _load_obstacles() -> void:
+	obstacles = PackedVector3Array()
+	flow_field = null
+	flow_problem = ""
+	flow_rebuilds = 0
+	var game := _contract()
+	if game == null:
+		flow_problem = "nessun contratto: gli ostacoli di m10 non possono essere letti"
+		_avvisa_ostacoli(flow_problem)
+		return
+	var raw = game.get("obstacles")
+	if raw == null:
+		flow_problem = "Game.obstacles non e' dichiarato in src/core/contracts.gd: " \
+			+ "la piramide non e' montata, nessun ostacolo blocca nessuno"
+		_avvisa_ostacoli(flow_problem)
+		return
+	if not (raw is PackedVector3Array):
+		flow_problem = "Game.obstacles non e' un PackedVector3Array (e' %s)" \
+			% type_string(typeof(raw))
+		_avvisa_ostacoli(flow_problem)
+		return
+	var letti: PackedVector3Array = raw
+	if letti.is_empty():
+		flow_problem = "Game.obstacles e' vuoto: un insieme vuoto e' un errore, " \
+			+ "non un mondo senza muri (contratto di m10, punto 5)"
+		_avvisa_ostacoli(flow_problem)
+		return
+	for ob in letti:
+		if ob.y <= 0.0:
+			flow_problem = "un ostacolo ha raggio %.3f: il raggio e' in `y` ed e' " \
+				+ "positivo, punto 3 del contratto di m10" % ob.y
+			_avvisa_ostacoli(flow_problem)
+			return
+	# Copia: l'array del contratto e' di un'altra foglia e non e' nostro.
+	obstacles = letti.duplicate()
+	flow_field = Flow.new()
+	# `E.RADIUS[BOSS]` e non un numero scritto qui: il raggio del nemico piu'
+	# grosso sta nella tabella delle specie e non ha una seconda copia (criterio
+	# n. 6 di m7).
+	flow_field.build(obstacles, arena_radius, E.radius_of(E.BOSS))
+	flow_field.rebuild(_player_focus())
+
+## Il margine con cui un punto di nascita viene tenuto fuori dagli ostacoli: il
+## **corpo del nemico piu' grosso**, non quello della specie che capita di
+## nascere. Il criterio n. 5 e' scritto su nessun nemico dentro un disco, e con
+## il margine del runner un boss ci nascerebbe dentro regolarmente.
+func _spawn_skin() -> float:
+	return E.radius_of(E.BOSS)
+
+## Un avviso per processo, non uno per frame: `flow_problem` resta comunque
+## leggibile e il test e' la porta rossa vera.
+func _avvisa_ostacoli(motivo: String) -> void:
+	push_warning("Horde: ostacoli assenti, l'inseguimento resta in linea retta -- %s" % motivo)
+
+## Quanti ostacoli ci sono. `0` quando la piramide non e' montata: e' il numero
+## che rende leggibile `flow_problem` senza doverlo interpretare.
+func obstacle_count() -> int:
+	return obstacles.size()
+
+## L'evitamento e' attivo? Se `false`, `flow_problem` dice perche'.
+func flow_active() -> bool:
+	return flow_field != null and flow_field.built
+
+## Quanti nemici vivi sono **dentro** un ostacolo, corpo compreso. E' il numero
+## del criterio n. 2, e viene contato dal test sul **numero di nemici dentro un
+## ostacolo durante una partita vera**, non sul valore che una funzione ritorna.
+func inside_obstacles() -> int:
+	if obstacles.is_empty():
+		return 0
+	var dentro := 0
+	for i in count:
+		if flow_field != null and flow_field.contains(transforms[i], radii[i]):
+			dentro += 1
+	return dentro
+
+## Ricostruisce il campo se il bersaglio si e' mosso abbastanza. Chiamata una
+## volta per passo, prima di muovere chiunque: da fermo non costa niente, che e'
+## il caso in cui il gioco si vorrebbe vincere stando fermi.
+func _sync_flow(target: Vector3) -> void:
+	if flow_field == null:
+		return
+	if flow_field.needs_rebuild(target):
+		flow_field.rebuild(target)
+		flow_rebuilds = int(flow_field.rebuilds)
 
 func _register() -> void:
 	if _registered:
@@ -395,7 +548,8 @@ func _populate(n: int) -> void:
 	count = target
 	_resize_arrays(count)
 	for i in count:
-		_apply_spawn(i, Spawner.layout_point(arena_radius, i, count, _rng), _pick_kind())
+		_apply_spawn(i, Spawner.layout_point(arena_radius, i, count, _rng,
+			obstacles, _spawn_skin()), _pick_kind())
 	_grid_dirty = true
 
 ## I pesi delle specie dell'onda in corso.
@@ -457,13 +611,18 @@ func step(delta: float) -> void:
 	_rebuild_grid()
 	hit_count = 0
 	var focus := _player_focus()
+	# Il campo prima di muovere chiunque: l'inseguimento di questo passo legge
+	# il campo che e' stato costruito **per questo bersaglio**, non quello del
+	# passo precedente. Costa una passeggiata sulle celle quando e' il caso, e
+	# niente quando il giocatore sta fermo.
+	_sync_flow(focus)
 	# Il giocatore c'e' davvero? E' la domanda che accende il morso: senza un
 	# giocatore non c'e' nessuno da ferire, e nessun nemico deve "mordere" il
 	# centro vuoto dell'arena. Si calcola una volta per passo, non per nemico.
 	var ha_giocatore := _has_player()
 	for i in count:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
-			kinds, arena_radius, bite_timers, bites, ha_giocatore)
+			kinds, arena_radius, bite_timers, bites, ha_giocatore, flow_field)
 	_apply_bites(delta)
 	_sweep_dead()
 	_wave_tick(delta)
@@ -621,7 +780,8 @@ func _spawn_one() -> void:
 	if count >= MAX_ENEMIES:
 		return
 	var kind := Spawner.pick_kind(_rng)
-	var pos := Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP)
+	var pos := Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP,
+		obstacles, _spawn_skin())
 	count += 1
 	_resize_arrays(count)
 	_apply_spawn(count - 1, pos, kind)
@@ -903,7 +1063,8 @@ func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 func random_spawn_point() -> Vector3:
 	if not _built:
 		return Vector3(0.0, 0.0, _contract_radius() * 0.5)
-	return Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP)
+	return Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP,
+		obstacles, _spawn_skin())
 
 # --- Lettura per arena e ui ---------------------------------------------------
 

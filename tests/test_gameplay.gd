@@ -70,6 +70,20 @@ extends SceneTree
 ##      `tests/test_arena.gd`, che è di `-arena`: li' si confrontano le copie e
 ##      non si sa se il numero sia quello giusto. Le due domande non si dicono, e
 ##      per questo stanno in due file.
+##  17. **m10, criterio n. 6**, che è **un criterio solo con due metà**: il
+##      giocatore è **solido** e i proiettili **passano**. Le due metà si
+##      provano per conto separato e sullo **stesso disco**, perché il progetto
+##      non deve avere un muro che blocca chi lo usa e non chi lo combatte: se
+##      una metà cade e l'altra no, il muro esiste a metà e il gioco ha una
+##      regola che nessuno ha scritto. Tre sezioni: il contratto li dichiara
+##      (`_m10_ostacoli_del_contratto`), il giocatore ci si arresta
+##      (`_m10_giocatore_solido`), il proiettile li attraversa e colpisce il
+##      nemico **dietro** (`_m10_proiettili_passano`). I **due denti** sono stati
+##      eseguiti e i loro numeri stanno nella sezione 17: senza il clamp il
+##      giocatore passa dal **centro** del disco (0,0000 m su un raggio di 2,00 m)
+##      e la metà dei proiettili resta verde; con il proiettile che si ferma al
+##      muro il colpo si ferma a **2,300 m** dal centro (0,300 m fuori dal disco),
+##      il nemico dietro prende **0** colpi e la metà del giocatore resta verde.
 ##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
@@ -186,11 +200,62 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## Il tetto di nodi di **-gameplay** sulla scena vera, cioe' tutta la scena meno
 ## la HUD (vedi la nota della sezione 13: la HUD e' di `-ui` ed e' cresciuta di
 ## undici nodi quando `-ui` ha aggiunto il pannello dei potenziamenti, quindi il
-## totale di 33 che m5 fissava non e' piu' un numero di questa sezione). I 19
-## sono i 33 di allora meno i 14 della HUD di allora: nessun nodo e' sparito,
-## e' solo che adesso non e' un numero di -gameplay. Se `top_level` fosse
-## diventato un nodo, questo numero salirebbe.
-const NODI_SCENA_VERA := 19
+## totale di 33 che m5 fissava non e' piu' un numero di questa sezione).
+##
+## ## 19 -> 20: l'incremento e' di `-arena`, e si dichiara qui
+##
+## In m10 `-arena` ha aggiunto **un nodo solo** per **27** ostacoli: una
+## `MultiMeshInstance3D` costruita una volta sola, che disegna i dischi dal
+## contratto. E' il modo giusto di farlo (27 nodi avrebbero spostato la
+## ripartizione di 26 e sono esattamente la cosa che questo numero vieta), e
+## quindi il tetto passa da 19 a 20 **perche' un'altra foglia ha lavorato bene**.
+##
+## ## Perche' questo numero resta, e non diventa un assoluto
+##
+## Non e' un assoluto: e' una **ripartizione** fra le foglie, e una ripartizione
+## si muove quando qualcuno aggiunge un nodo ** dichiarando l'incremento qui**.
+## Quello che non si muove e' il **tetto vero**, il 120 di `node_count` del
+## criterio n. 7, e quello resta il criterio. Questa riga ha un solo difetto
+## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
+## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
+## nessun nodo di -gameplay si giustifica da solo.
+const NODI_SCENA_VERA := 20
+
+# --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
+#
+# ## La convenzione congelata, letta e non riscritta
+#
+# Il contratto dichiara `Game.obstacles : PackedVector3Array` e fissa la forma
+# dell'elemento (`src/core/contracts.gd`, "Superficie di milestone 10"):
+#
+#     elemento = Vector3(centro_x, RAGGIO, centro_z)
+#
+# cioe' **il raggio sta in `y`**. `y` non e' un'altezza e `z` non e' una
+# profondita'. Qui sotto il disco e' costruito con quella convenzione perche' e'
+# quella che -arena registra e che -orda risolve: costruirlo con un'altra (per
+# esempio `Vector3(x, y_altezza, z_raggio)`) farebbe passare questo test con una
+# forma che nessuno usa in gioco, che e' il difetto che un doppio di test
+# introduce.
+const OST_RAGGIO := 2.0
+## `x = 0`, **`y = raggio`**, `z = -14`: il disco e' a 14 m davanti al giocatore
+## (che parte dal centro), largo 2 m di raggio. Sono numeri scritti, non letti:
+## il numero e il raggio degli ostacoli veri sono di `-orda` e di `-arena` e
+## non sono dichiarati da nessuna parte (§1.13: «nessuna cifra scritta sopra»), e
+## questo test non deve indovinarli.
+const OST_CENTRO := Vector3(0.0, OST_RAGGIO, -14.0)
+## Il nemico **dietro** al disco: 8 m oltre il centro, quindi 22 m dal
+## giocatore, entro la gittata di mira dell'arma (`acquire_radius`). Se fosse
+## davanti, il test passerebbe senza che nessun proiettile attraversi niente.
+const NEMICO_DIETRO := Vector3(0.0, 0.9, -22.0)
+## Quanto dentro il disco il proiettile deve essere arrivato, in metri dal bordo.
+## Non e' `> 0`: il proiettile avanza di 0,43 m per frame e il suo raggio e' 0,16,
+## quindi un campionamento a frame puo' arrivare vicino al bordo. 1,5 m dentro e'
+## un numero che nessun campionamento puo' sbagliare per fortuna.
+const OST_ENTRO_DENTRO := 1.5
+## Quanti frame il giocatore corre contro il disco prima che lo si dichiari fermo:
+## al centro e' a 14 m dal disco e l'aria a regime fa 0,117 m per frame, quindi
+## l'arrivo e' intorno al frame 100 e questi 300 sono il triplo.
+const M10_PASSI := 300
 
 ## --- m7: il budget e il raggio, e perche' nessuno dei due e' scritto a mano ---
 ##
@@ -455,6 +520,12 @@ func _process(_delta: float) -> bool:
 		_damage_and_iframes(h)
 		_xp_and_upgrades(h)
 		_no_allocation(h)
+		# m10, criterio n. 6. Vanno qui, **prima** delle sezioni che istanziano
+		# `scenes/arena_main.tscn`: quelle lasciano il contratto puntato su un
+		# giocatore e su un'orda che non sono quelli, e una sezione che spara
+		# misurerebbe la muzzle di un giocatore che non e' il suo.
+		_m10_giocatore_solido(h)
+		_m10_proiettili_passano(h)
 		# Criterio n. 4 di m2, meta' di -gameplay. Instala l'orda **vera** di
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
@@ -469,6 +540,11 @@ func _process(_delta: float) -> bool:
 		# secondo giocatore e una seconda orda sul contratto, e le sezioni di m5
 		# contano i nodi di quella che hanno appena liberato.
 		_m7_salute_sulla_scena_vera(h)
+		# m10, criterio n. 6, terza meta': il **contratto**. Va per ultima
+		# perche' instanzia la scena vera come fanno gia' le due sezioni
+		# precedenti, e dopo questa riga non resta piu' nessuna sezione che
+		# guardi il contratto con la scena sotto.
+		_m10_ostacoli_del_contratto(h)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -2006,6 +2082,400 @@ func _arrivo_radius(h) -> float:
 	var v := float((consts as Dictionary)["ARRIVE_RADIUS"])
 	h.check(v > 0.0, "m7: il raggio d'arrivo letto da -orda e' positivo (%.3f m)" % v)
 	return v
+
+# --- 17. m10, criterio n. 6: il giocatore e' solido, i proiettili passano -------
+#
+# ## Perche' sono tre sezioni e non una
+#
+# Il criterio e' **uno solo** e ha **due meta'**, e il perno e' il perche': se
+# una meta' cade e l'altra no, l'ostacolo esiste a meta' e il gioco ha una regola
+# che nessuno ha scritto. Un progetto con un muro che blocca chi lo usa e non chi
+# lo combatte e' un progetto con un muro che e' a meta'. Quindi le due meta' si
+# provano **per conto separato** e si provano i denti **per conto separato**:
+#
+#   - senza il clamp del giocatore, `_m10_giocatore_solido` deve dire `FAIL`;
+#   - con un proiettile che si ferma all'ostacolo, `_m10_proiettili_passano`
+#     deve dire `FAIL` **anche se il giocatore e' solido**.
+#
+# La terza sezione, `_m10_ostacoli_del_contratto`, e' la catena di consegna
+# dichiarata in piano §3.11: `-arena` costruisce gli ostacoli e li registra,
+# `-orda` costruisce il campo che li aggira, `-gameplay` ci scontra. Il punto 5
+# della semantica del contratto dice che un insieme vuoto e' un errore e non un
+# mondo senza muri: senza quella sezione, due sezioni che girano su un disco
+# installato a mano passerebbero **tutti** i criteri di m10 con la piramide non
+# montata, che e' esattamente il difetto che quel punto 5 esiste per chiudere.
+#
+# ## I DENTI, eseguiti il 2026-10-13, con i numeri
+#
+# Un criterio che non e' mai stato fatto fallire non e' un criterio. I due
+# denti sono stati eseguiti togliendo per qualche minuto la riga che il
+# criterio riguarda e poi rimettendola, e qui sotto c'e' quello che e' uscito.
+# Il numero che conta e' quello **minimo** raggiunto dal centro del disco, perche'
+# e' quello che distingue «ha sfiorato il muro» da «lo ha attraversato».
+#
+# **Dente 1 — senza il clamp del giocatore** (`_clamp_to_obstacles()` non
+# chiamata da `_move`): **6 asserzioni FAIL**, tutte di meta' 1.
+#
+#   - distanza **minima** dal centro del disco in 300 frame: **0,0000 m** contro
+#     un raggio di **2,00 m**, cioe' il giocatore e' passato dal centro esatto
+#     del disco e ne e' uscito dall'altra parte;
+#   - fermata finale a **20,650 m** dal centro invece dei **2,600 m** attesi
+#     (raggio 2,00 + margine 0,60): e' passato oltre il disco di 18 m e si e'
+#     fermato sul muro dell'arena, che a 34,65 m dal centro del disco e' a 46 m
+#     dall'origine;
+#   - spinto dentro il disco, rimesso fuori a **1,0068 m** invece dei 2,600: cioe'
+#     **dentro**, che e' il caso che il ripiego sul centro esatto doveva
+#     risolvere e che senza clamp non risolve nessuno.
+#
+# Meta' 2 in quel run: **PASS** (proiettile a 0,133 m dal centro, 1 colpo). Il
+# che e' la prima cosa che il criterio n. 6 chiede di vedere: le due meta'
+# cadono **per conto separato**.
+#
+# **Dente 2 — con un proiettile che si ferma all'ostacolo** (il comportamento di
+# m11, inserito per qualche minuto in `projectile_pool.step()`): **5 asserzioni
+# FAIL**, tutte di meta' 2, **a giocatore solido**.
+#
+#   - distanza **minima** raggiunta dal centro del disco: **2,300 m** contro un
+#     raggio di **2,00 m**, cioe' il proiettile si e' fermato **0,300 m fuori**
+#     dal disco e non ci e' mai entrato (la versione buona arriva a 0,133 m,
+#     cioe' 1,87 m dentro);
+#   - colpi sul nemico **dietro** il disco: **0** invece di **1**.
+#
+# Meta' 1 in quel run: **PASS** (fermata a 2,600 m, minimo 2,600 m su 300
+# frame). Quindi nessuna delle due meta' regge da sola: senza il clamp il muro
+# non esiste per il giocatore e i proiettili passano; con il muro ai
+# proiettili il muro esiste per il nemico e il gioco si vince stando fermi
+# dietro — la combinazione degenerata che il vertice ha escluso e che questa
+# sezione rende visibile invece che dichiarata.
+
+## Il contratto espone `obstacles`? Lo chiede alla lista delle proprieta' e non
+## a `get()`: `get()` su un nome assente restituisce `null`, che e' la stessa
+## cosa che un campo dichiarato e non registrato, e le due cose sono distinte.
+## Sono distinte perche' la prima e' un buco del contratto (il vertice) e la
+## seconda un buco di `-arena`, e chi legge il FAIL deve sapere quale delle due
+## e'.
+func _il_contratto_ha_obstacoli() -> bool:
+	for p in game.get_property_list():
+		if str((p as Dictionary).get("name", "")) == "obstacles":
+			return true
+	return false
+
+## Installa un insieme di ostacoli **sul contratto** e fa rileggere il giocatore.
+## Restituisce `false` quando il campo non esiste: in quel caso il test lavora
+## sulla copia del giocatore, che e' la stessa che il contratto riempirrebbe, e
+## `_m10_ostacoli_del_contratto` dice a voce alta che il campo manca.
+func _installa_ostacoli(obs: PackedVector3Array) -> bool:
+	if not _il_contratto_ha_obstacoli():
+		player.obstacles = obs
+		return false
+	game.set("obstacles", obs)
+	player.reload_obstacles()
+	return true
+
+## Rimette gli ostacoli com'erano prima della sezione che li aveva installati, sul
+## contratto **e** sulla copia del giocatore. Sono due copie e vanno rimesse
+## entrambe: rimetterne una lascia il mondo con un disco che nessuno ha costruito.
+func _ripristina_ostacoli(originali: Variant, del_giocatore: PackedVector3Array) -> void:
+	if _il_contratto_ha_obstacoli() and (originali is PackedVector3Array):
+		game.set("obstacles", originali)
+	player.obstacles = del_giocatore
+
+## Distanza sul piano fra due punti, `y` ignorata: l'arena e' piatta e il disco
+## e' un disco.
+func _distanza_piano(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+func _m10_giocatore_solido(h) -> void:
+	_riordina_orda_finta()
+	_reset(Vector3.ZERO)
+	# `Variant` esplicito e non `:=`: `_script_const` restituisce `Variant`, e
+	# questo progetto tratta come errore il `:=` su un Variant (project.godot).
+	# Il controllo `!= null` sotto e' quello che dice se la costante c'e'.
+	var margine: Variant = _script_const(player, "OBSTACLE_MARGIN")
+	if not h.check(margine != null,
+		"src/player/player.gd deve dichiarare OBSTACLE_MARGIN: e' il numero che tiene il giocatore fuori dal disco"):
+		return
+	var pelle := float(margine)
+	h.check(pelle > 0.0, "il margine dell'ostacolo e' positivo: %.3f m" % pelle)
+	var atteso := OST_RAGGIO + pelle
+	var disco := PackedVector3Array([OST_CENTRO])
+	# Quello che c'era **prima**: vedi `_ripristina_ostacoli`.
+	var ostacoli_originali: Variant = game.get("obstacles")
+	var ostacoli_del_giocatore: PackedVector3Array = player.obstacles
+	var per_contratto := _installa_ostacoli(disco)
+	# Il numero che chiude il giro: il giocatore ha **letto** quello che gli e'
+	# stato dato. Senza questa riga un giocatore che ignora gli ostacoli passerebbe
+	# tutto quello che segue, perche' un clamp che non si muove e un clamp che
+	# non c'e' fanno la stessa parte.
+	h.eq(int(player.obstacle_count()), 1,
+		"il giocatore ha letto 1 ostacolo %s (raggio %.2f m in y, centro su x=%.1f z=%.1f: la convenzione del contratto)"
+		% ["dal contratto" if per_contratto else "dai campi del giocatore, perche' Game.obstacles non esiste",
+			OST_CENTRO.y, OST_CENTRO.x, OST_CENTRO.z])
+	var nodi_prima := _conta_nodi(player)
+
+	# --- 17a. Dritto contro il disco: si ferma PRIMA del bordo -----------------
+	#
+	# Input `(0, 0, 1)` e non `(0, 0, -1)`: senza camera la base e' l'identita' e
+	# `world_direction` e' una **riflessione** di `z` (sezione 11), quindi il
+	# verso si prende dalla sezione 11 e non da un vettore riscritto qui.
+	player.position = Vector3.ZERO
+	player.velocity = Vector3.ZERO
+	var dentro := false
+	var minima := 1.0e9
+	for i in M10_PASSI:
+		player.step(DT, Vector3(0.0, 0.0, 1.0))
+		var d := _distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z))
+		minima = minf(minima, d)
+		if d < OST_RAGGIO:
+			dentro = true
+	h.check(not dentro,
+		"m10 meta' 1: il giocatore non entra MAI dentro il disco: distanza minima dal centro %.4f m contro un raggio di %.2f m"
+		% [minima, OST_RAGGIO])
+	var fermo := _distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z))
+	h.near(fermo, atteso, 0.05,
+		"m10 meta' 1: e si ferma a un margine esatto dal bordo, %.3f contro %.3f m (raggio %.2f + margine %.2f)"
+		% [fermo, atteso, OST_RAGGIO, pelle])
+	# E non si ferma «prima di tutto»: un clamp che fermasse il giocatore a meta'
+	# strada passerebbe la riga di sopra e renderebbe l'ostacolo una colla.
+	h.check(fermo <= atteso + 0.05 and fermo >= atteso - 0.5,
+		"m10 meta' 1: si ferma sul bordo e non molto prima (%.3f m, finestra %.3f-%.3f)"
+		% [fermo, atteso - 0.5, atteso + 0.05])
+	h.check(minima <= atteso + 0.05,
+		"m10 meta' 1: e durante i %d frame non e' mai andato oltre la fermata (minimo %.3f m)"
+		% [M10_PASSI, minima])
+
+	# --- 17b. Di fianco al disco: scivola, non si incastra ---------------------
+	#
+	# Il trattamento e' quello del muro dell'arena: si toglie la componente
+	# **uscente** e si lascia scivolare quella parallela. Senza questo, il
+	# giocatore che arriva di fianco si ferma di botto e l'ostacolo diventa un
+	# muro — che e' proprio la parola che m10 non vuole.
+	#
+	# Si parte **dentro** il disco di proposito: e' il caso che nessun gioco
+	# dovrebbe produrre e che il clamp deve sapere risolvere lo stesso (spawn,
+	# restart, un disco che compare sotto i piedi). Senza il ripiego sul centro
+	# esatto la divisione per zero fa NaN e la posizione muore in silenzio.
+	#
+	# La spinta e' **tangenziale** (il giocatore e' a est del centro e corre verso
+	# nord), quindi e' il caso che distingue «un ostacolo» da «un muro in cui ti
+	# incatti»: di testa si resta fermi, di fianco si scivola.
+	_reset(Vector3(1.0, 0.0, -14.0))
+	player.velocity = Vector3(0.0, 0.0, -7.0)
+	player.step(DT, Vector3(0.0, 0.0, 1.0))
+	h.near(_distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z)), atteso, 0.0005,
+		"m10 meta' 1: spinto dentro il disco, viene rimesso fuori esattamente sul margine (%.4f contro %.3f m)"
+		% [_distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z)), atteso])
+	h.check(player.velocity.z < -6.5,
+		"m10 meta' 1: e la velocita' tangenziale sopravvive (%.3f m/s su -7.0): si toglie solo la componente uscente, l'ostacolo non e' colla"
+		% player.velocity.z)
+	var dentro_ora := _distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z)) < OST_RAGGIO
+	h.check(not dentro_ora, "m10 meta' 1: e il punto di partenza era dentro il disco, altrimenti questa prova non prova niente")
+
+	var fuori := true
+	for i in 240:
+		player.step(DT, Vector3(0.0, 0.0, 1.0))
+		if _distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z)) < OST_RAGGIO:
+			fuori = false
+	h.check(fuori, "m10 meta' 1: e per tutto il percorso resta fuori dal disco")
+	h.check(player.position.z < -14.0 - atteso,
+		"m10 meta' 1: e ci scivola intorno invece di incastrarsi: arriva a z=%.2f, oltre il disco (%.2f m)"
+		% [player.position.z, -14.0 - atteso])
+
+	# Nessun nodo: un ostacolo e' un **dato**, e questo e' il mio tetto. Gli
+	# ostacoli di `-arena` non possono diventare nodi miei, quindi nessuno dei due
+	# numeri qui sotto si muove perche' esiste un muro.
+	h.eq(_conta_nodi(player), nodi_prima,
+		"m10 meta' 1: nessun nodo aggiunto per gli ostacoli (%d prima, %d dopo): sono dati, e il tetto di -gameplay resta %d"
+		% [nodi_prima, _conta_nodi(player), NODI_SCENA_VERA])
+
+	_ripristina_ostacoli(ostacoli_originali, ostacoli_del_giocatore)
+	h.eq(int(player.obstacle_count()), ostacoli_del_giocatore.size(),
+		"m10 meta' 1: e rimessi gli ostacoli come erano (%d), il mondo per le sezioni dopo e' quello di prima"
+		% ostacoli_del_giocatore.size())
+
+	print("m10 meta' 1: il giocatore si e' fermato a %.3f m dal centro (raggio %.2f + margine %.2f), minimo %.3f m su %d frame, e di fianco ci ha scivolato intorno"
+		% [fermo, OST_RAGGIO, pelle, minima, M10_PASSI])
+
+func _m10_proiettili_passano(h) -> void:
+	_riordina_orda_finta()
+	_reset(Vector3.ZERO)
+	# Quello che c'era **prima**: il disco di prova non deve restare nel mondo
+	# dopo la sezione, altrimenti le sezioni che vengono (che giocano una partita
+	# vera) avrebbero un ostacolo che non esiste e nessuno se ne accorgerebbe.
+	var ostacoli_originali: Variant = game.get("obstacles")
+	var ostacoli_del_giocatore: PackedVector3Array = player.obstacles
+	var disco := PackedVector3Array([OST_CENTRO])
+	_installa_ostacoli(disco)
+	h.eq(int(player.obstacle_count()), 1,
+		"m10 meta' 2: il proiettile viene sparato con lo stesso disco che ferma il giocatore")
+
+	# La dichiarazione esplicita, letta dal file che calcola il contatto. Non e'
+	# la prova: e' la prova che il file **dichiara** la sua meta' del criterio, e
+	# senza questa riga la meta' 2 sarebbe una proprieta' non scritta da nessuna
+	# parte, cioe' un dettaglio che la prossima foglia puo' cancellare.
+	var dichiarato = _script_const(pool, "OBSTACLES_BLOCK_PROJECTILES")
+	h.check(dichiarato is bool and dichiarato == false,
+		"m10 meta' 2: il pool dichiara OBSTACLES_BLOCK_PROJECTILES = false (%s letto): l'ostacolo non ferma un proiettile, ed e' scritto"
+		% str(dichiarato))
+
+	# ## Lo stesso disco e' solido: il criterio e' uno solo
+	#
+	# Non basta che la sezione di prima abbia fermato il giocatore: la meta' 2
+	# spara **attraverso** quel disco, quindi se fosse un disco diverso (o se il
+	# clamp valesse solo per l'altro) il progetto avrebbe due muri con due
+	# regole diverse. Qui il giocatore viene spinto contro **lo stesso** disco e
+	# si vede che non lo attraversa.
+	_reset(Vector3.ZERO)
+	player.velocity = Vector3.ZERO
+	for i in M10_PASSI:
+		player.step(DT, Vector3(0.0, 0.0, 1.0))
+	h.check(not dentro_ostacolo(player.position, disco),
+		"m10 meta' 2: il disco che il proiettile attraversa e' lo stesso che ferma il giocatore: a %.3f m dal centro, dentro un raggio di %.2f m non c'e' mai entrato"
+		% [_distanza_piano(player.position, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z)), OST_RAGGIO])
+	_reset(Vector3.ZERO)
+
+	# La geometria **prima** di sparare: se il segmento canna -> nemico non
+	# attraversa il disco, il colpo passa per fortuna e la sezione direbbe PASS
+	# senza che nessun proiettile abbia mai incontrato un muro. Il controllo e'
+	# dichiarato, quindi il difetto si vede come difetto e non come un colpo perso.
+	var muzzle: Vector3 = weapon.muzzle_position()
+	var al_nemico: Vector3 = NEMICO_DIETRO - muzzle
+	var t := _distanza_punto_segmento(Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z), muzzle, NEMICO_DIETRO)
+	h.check(t < OST_RAGGIO,
+		"m10 meta' 2: la traiettoria passa entro il disco, a %.3f m dal suo centro contro un raggio di %.2f m (lunghezza %.1f m)"
+		% [t, OST_RAGGIO, al_nemico.length()])
+	h.check(t < OST_RAGGIO - 0.5,
+		"m10 meta' 2: e passa in mezzo, non sfiora il bordo (%.3f m)" % t)
+
+	# --- 17c. Il colpo attraversa il disco e colpisce il nemico dietro ---------
+	#
+	# Nemico fermo (`chase_speed = 0`) e un colpo solo in volo (`fire_interval`
+	# altissimo): qui si guarda **quel** proiettile, non la cadenza dell'arma, e il
+	# nemico resta dietro il disco per tutta la misura.
+	var inseguimento := horde.chase_speed
+	var fire_before: float = weapon.fire_interval
+	horde.chase_speed = 0.0
+	horde.target = Vector3.ZERO
+	weapon.fire_interval = 10.0
+	weapon.cooldown = 0.0
+	pool.reset()
+	horde.add(NEMICO_DIETRO, TOUGH)
+
+	var minima_missile := 1.0e9
+	var passato_dentro := false
+	var nemico_al_colpo := -1.0
+	for i in 120:
+		player.step(DT, Vector3.ZERO)
+		horde.step(DT)
+		# Il colpo prima del proiettile: nell'istante in cui il nemico e' stato
+		# colpito il proiettile e' gia' sparito dal pool (`pierce = 0`), quindi
+		# chiedere prima il record darebbe `null` e si perderebbe proprio il
+		# frame che conta.
+		if horde.damage_calls > 0:
+			nemico_al_colpo = _distanza_piano(horde.pos_of(0), Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z))
+			break
+		var p = pool.active_at(0)
+		if p == null:
+			continue
+		var d := _distanza_piano(p.pos, Vector3(OST_CENTRO.x, 0.0, OST_CENTRO.z))
+		minima_missile = minf(minima_missile, d)
+		if d < OST_RAGGIO:
+			passato_dentro = true
+
+	# Il numero che dice che non e' passato per fortuna: il proiettile e' stato
+	# **dentro** il disco, e lo ha colpito il nemico che sta dietro. Le due
+	# righe insieme sono la meta' 2; ognuna da sola direbbe poco.
+	h.check(passato_dentro,
+		"m10 meta' 2: il proiettile e' entrato nel disco, fino a %.3f m dal centro (bordo a %.2f m): ha proprio attraversato il muro"
+		% [minima_missile, OST_RAGGIO])
+	h.check(minima_missile <= OST_RAGGIO - OST_ENTRO_DENTRO,
+		"m10 meta' 2: e non solo sfiorarlo: %.3f m dal centro, cioe' almeno %.2f m dentro il disco"
+		% [minima_missile, OST_RAGGIO - minima_missile])
+	h.eq(horde.damage_calls, 1,
+		"m10 meta' 2: e il nemico DIETRO il disco e' stato colpito una volta sola")
+	h.eq(horde.hits_of(0), 1, "m10 meta' 2: un solo colpo su quel nemico")
+	h.check(nemico_al_colpo > OST_RAGGIO,
+		"m10 meta' 2: e al momento del colpo era ancora dietro il disco, a %.2f m dal centro (raggio %.2f): nessuno ha spostato il bersaglio"
+		% [nemico_al_colpo, OST_RAGGIO])
+	h.eq(horde.out_of_range, 0, "m10 meta' 2: nessun indice fuori dall'orda")
+
+	horde.chase_speed = inseguimento
+	weapon.fire_interval = fire_before
+	# Ripulisci l'ostacolo di prova: le sezioni che vengono dopo devono trovare
+	# il mondo com'era. E' la stessa regola che vale per la regolazione dell'arma:
+	# un test che lascia sporco fa fallire in modo falso chi viene dopo.
+	_ripristina_ostacoli(ostacoli_originali, ostacoli_del_giocatore)
+	print("m10 meta' 2: il proiettile ha attraversato il disco fino a %.3f m dal centro (raggio %.2f) e ha colpito il nemico a %.1f m dal centro del disco: %d hit"
+		% [minima_missile, OST_RAGGIO, nemico_al_colpo, horde.hits_of(0)])
+
+func _m10_ostacoli_del_contratto(h) -> void:
+	# Il punto 5 della semantica: un insieme vuoto non e' un mondo senza muri, e'
+	# un errore. Quindi qui **non** c'e' fallback, non c'e' "se non ci sono, va
+	# bene cosi'", e non c'e' una sezione che dichiara il buco e passa. La
+	# risposta alla catena di consegza mancante e' `FAIL`, e il messaggio dice chi
+	# deve registrare il dato.
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "m10: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+
+	var ha_campo := _il_contratto_ha_obstacoli()
+	h.check(ha_campo,
+		"m10 catena di consegna: il contratto deve dichiarare il campo Game.obstacles (src/core/contracts.gd, congelato dal vertice e non mio). "
+		+ "Finche' il campo non esiste nessuna foglia puo' registrarlo e gli ostacoli non possono esistere.")
+	var letto: Variant = game.get("obstacles")
+	var n := 0
+	if ha_campo:
+		if h.check(letto is PackedVector3Array,
+			"m10: Game.obstacles e' un PackedVector3Array (letto %s)" % type_string(typeof(letto))):
+			var obs: PackedVector3Array = letto
+			n = obs.size()
+			h.check(n > 0,
+				"m10: sulla scena vera gli ostacoli sono registrati, non sono un insieme vuoto (%d)" % n)
+			for o in obs:
+				# L'invariante `y > 0.0` (semantica punto 3): un raggio nullo e' un
+				# ostacolo che non esiste, e si distingue dal raggio negativo solo
+				# per il crash.
+				h.check(o.y > 0.0,
+					"m10: ogni ostacolo ha il raggio positivo in y (elemento %s)" % str(o))
+			var p = scena.get_node_or_null("Player")
+			if h.check(p != null, "m10: la scena vera ha il nodo \"Player\""):
+				h.eq(int(p.obstacle_count()), n,
+					"m10: e il giocatore della scena vera ha letto dal contratto gli stessi %d ostacoli, non zero" % n)
+	else:
+		# Il campo non c'e': il numero e' dichiarato qui e non dedotto, e la
+		# spiegazione dice il file e il proprietario. Questa sezione non puo'
+		# chiudere il buco (il file non e' mio) e non finge di averlo chiuso.
+		print("m10 catena di consegna ANCORA ROSSA: Game.obstacles non e' un campo del contratto, quindi nessun ostacolo e' registrato. "
+			+ "Il campo e' dichiarato in src/core/contracts.gd (vertice), i valori li registra terminal-gun-arena in src/render/arena.gd. "
+			+ "Le due meta' del criterio n. 6 sono verificate sulle sezioni precedenti con un disco dichiarato, non con quello vero.")
+	scena.queue_free()
+
+## `distanza_punto_segmento` e `_distanza_piano` sono i due numeri della
+## geometria: il primo per la traiettoria, il secondo per le posizioni. Nessuno
+## dei due conosce il contratto: sono misure, non letture.
+
+## Il punto piu' vicino a `centro` sul segmento `da..a`, in metri. Serve a dire
+## che la traiettoria **attraversa** il disco prima di sparare, invece di
+## scoprire dopo che il colpo e' passato di lato.
+func _distanza_punto_segmento(centro: Vector3, da: Vector3, a: Vector3) -> float:
+	var sx := a.x - da.x
+	var sz := a.z - da.z
+	var len2 := sx * sx + sz * sz
+	var t := 0.0
+	if len2 > 0.000001:
+		t = ((centro.x - da.x) * sx + (centro.z - da.z) * sz) / len2
+		t = clampf(t, 0.0, 1.0)
+	return Vector2(da.x + sx * t - centro.x, da.z + sz * t - centro.z).length()
+
+## Il punto e' dentro uno dei dischi dati (raggio in `y`, convenzione del
+## contratto)?
+func dentro_ostacolo(punto: Vector3, ostacoli: PackedVector3Array) -> bool:
+	for o in ostacoli:
+		if _distanza_piano(punto, Vector3(o.x, 0.0, o.z)) < o.y:
+			return true
+	return false
 
 # --- Interno -------------------------------------------------------------------
 

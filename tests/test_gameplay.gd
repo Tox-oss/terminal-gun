@@ -48,6 +48,16 @@ extends SceneTree
 ##      del nodo** che la disegna: e' la causa, ed e' misurabile;
 ##  13. **m5, criterio n. 5**: nessun nodo in piu'. `node_count` resta **33**
 ##      sulla scena vera, che e' la sola scena in cui il numero conta.
+##  14. **m7, criterio n. 2**: sulla **scena vera** l'orda raggiunge il giocatore,
+##      e quando il codice di gioco ferisce il giocatore `hp` scende e **resta**
+##      sotto; a `hp <= 0` lo stato e' `game_over`. Il chiamante e' di **-orda**:
+##      questa sezione osserva se c'e' e, quando c'e', asserisce il percorso
+##      intero. Se non c'e' lo **dichiara** e asserisce comunque tutta la parte
+##      che e' di -gameplay, cioe' che il contratto ferisce davvero;
+##  15. **m7, criterio n. 3**: `player.restart_run()` rimette in piedi il
+##      giocatore sulla scena vera — `hp` torna a `max_hp`, l'onda torna a 1,
+##      nessun nodo duplicato, e **un passo di simulazione non rilegge
+##      `game_over`**. E il giocatore può morire di nuovo dopo il restart.
 ##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
@@ -145,6 +155,24 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## e' solo che adesso non e' un numero di -gameplay. Se `top_level` fosse
 ## diventato un nodo, questo numero salirebbe.
 const NODI_SCENA_VERA := 19
+
+## --- m7: il budget e il raggio, e perche' nessuno dei due e' scritto a mano ---
+##
+## `M7_PASSI` e' il **tetto** di quanto la sezione m7 lascia correre la partita
+## vera, in passi di `DT`. 900 passi sono 15 s a 60 Hz: la misura di m4 sullo
+## stesso numero dice che il primo contatto dell'orda col giocatore arriva a
+## 2,28 s, quindi il budget e' piu' di cinque volte quella e il contatto non e'
+## un caso fortunato dentro la finestra.
+const M7_PASSI := 900
+## Il nome del nodo dell'orda nella scena vera. Serve per contare i **duplicati**:
+## un totale di nodi identico non distingue «una orda» da «due orde e una
+## orda morta» (`src/sim/horde.gd` si chiama cosi' anche nella scena).
+const NODO_HORDE := "Horde"
+## Il nome del file di -orda dove sta il raggio entro cui un nemico e' «arrivato».
+## Non e' una costante perche' il file **non e' mio**: si legge a runtime dal suo
+## mapa di costanti, cosi' il numero che questo test confronta e' quello che
+## l'orda usa davvero e non una copia che invecchierebbe qui dentro.
+const ENEMY_SCRIPT := "res://src/sim/enemy.gd"
 
 ## L'orda finta. Doppio di -orda: `count` + `transforms` come dati, e i due
 ## metodi registrati sul contratto.
@@ -401,6 +429,10 @@ func _process(_delta: float) -> bool:
 		_m5_ingresso_su_schermo(h)
 		_m5_trasformazione_del_renderer(h)
 		_m5_nessun_nodo_in_piu(h)
+		# m7: la salute sulla **scena vera**. Va per ultima perche' installa un
+		# secondo giocatore e una seconda orda sul contratto, e le sezioni di m5
+		# contano i nodi di quella che hanno appena liberato.
+		_m7_salute_sulla_scena_vera(h)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -1522,6 +1554,337 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 		+ "(tetto di -gameplay %d); il nodo visivo resta figlio del pool ed e' top_level"
 		% NODI_SCENA_VERA)
 	scena.queue_free()
+
+# --- 14-15. m7: la salute smette di essere un'etichetta ------------------------
+#
+# ## Cosa c'era prima, e cosa c'e' adesso
+#
+# `take_damage` esisteva dal primo giorno e non aveva **nessun chiamante** in tutto
+# `src/`: il giocatore era invulnerabile per costruzione, la barra della salute
+# era piatta e il `game_over` era irraggiungibile (piano §1.4a). m7 lo chiude da
+# due lati, e sono di due foglie diverse:
+#
+#   - **-gameplay** (questa sezione): registra `damage_player` sul contratto e
+#     rimette in piedi il giocatore al restart. E' il destinatario.
+#   - **-orda**: il nemico che chiama `Game.damage_player(x)` dal ciclo di gioco.
+#     E' il chiamante, e il criterio n. 1 di m7 è una `grep` su quello.
+#
+# ## Perche' questa sezione non chiama `damage_player` a mano e basta
+#
+# Chiamarlo a mano dimostrerebbe che **la macchina** reagisce, non che **il gioco**
+# la faccia reagire: sarebbe il difetto di §1.6 ripetuto, e questa sezione non
+# può ripeterlo. Quindi qui la sezione **osserva** il giocatore mentre la partita
+# gira da sola e conta i colpi che arrivano dal gioco. Se il chiamante di -orda c'è,
+# le asserzioni del criterio n. 2 scattano da sole senza che il test tocchi un
+# numero; se non c'è ancora, la sezione **lo dice ad alta voce** e asserisce
+# comunque tutta la parte che è di -gameplay — che è l'unica che questa foglia
+# può chiudere.
+#
+# E in ogni caso resta un'invariante **con denti in entrambi i mondi**: ogni punto
+# di vita perso deve essere stato annunciato dal segnale `hurt`, che `take_damage`
+# emette una e una sola volta per colpo ricevuto. Se qualcuno facesse scendere le
+# vite per una strada che non è il contratto — scrivendo `player.hp` da un
+# nemico, per esempio — quella riga cadrebbe sia oggi che dopo.
+
+func _m7_salute_sulla_scena_vera(h) -> void:
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "m7: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+	var p = scena.get_node_or_null("Player")
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	if not h.check(p != null, "m7: la scena vera ha il nodo \"Player\""):
+		return
+	if not h.check(hd != null, "m7: la scena vera ha il nodo \"%s\"" % NODO_HORDE):
+		return
+	# I due protagonisti si guidano a mano: il ciclo di fisica vero non deve
+	# muovere niente mentre il test conta i passi, altrimenti il numero che
+	# questa sezione misura non sarebbe il numero che dice di misurare.
+	p.drive_manually()
+	hd.set_physics_process(false)
+
+	# Il contratto, su questa scena e non su quella delle sezioni precedenti: e'
+	# la registrazione che il gioco vero fa, non una che il test rifaccia a mano.
+	h.check(game.player == p, "m7: Game.player e' il Player della scena vera")
+	h.check(game.horde == hd, "m7: e Game.horde e' il suo nodo orda")
+	h.check(game.has_impl("damage_player"),
+		"m7: damage_player e' registrato sul contratto dalla scena vera")
+	h.check(game.has_impl("player_position"),
+		"m7: e la registrazione di player_position non e' stata persa")
+	h.check(game.has_impl("spawn_projectile"),
+		"m7: e nemmeno quella di spawn_projectile")
+
+	# Il tetto di nodi, con la **stessa regola** della sezione 13 e la stessa
+	# costante: scena meno HUD. Non un numero scritto qui dentro.
+	var hud_m7 = scena.get_node_or_null("Hud")
+	if h.check(hud_m7 != null, "m7: la scena vera ha ancora il nodo \"%s\"" % NODO_HUD):
+		h.eq(_conta_nodi(scena) - _conta_nodi(hud_m7), NODI_SCENA_VERA,
+			"m7: la scena vera su cui si misura la salute ha gli stessi %d nodi di -gameplay" % NODI_SCENA_VERA)
+
+	# Il raggio d'arrivo letto dal file di **-orda**, non scritto qui dentro.
+	var arrivo := _arrivo_radius(h)
+
+	# I tre contatori della sezione, in un dizionario e non in variabili locali:
+	# una lambda di GDScript cattura per **valore**, quindi una variabile locale
+	# dentro una lambda non cambierebbe mai e il conteggio sarebbe sempre zero.
+	var conto := {"danno": 0.0, "colpi": 0, "morti": 0}
+	p.hurt.connect(_conta_danno(conto))
+	p.died.connect(_conta_morte(conto))
+
+	# =====================================================================
+	# 14. m7 criterio n. 2: l'orda raggiunge il giocatore e lo ferisce
+	# =====================================================================
+	p.restart_run()
+	hd.step(DT)
+	h.eq(str(hd.run_state()), "playing", "m7: alla partenza la partita e' in corso")
+	var hp_avvio: float = p.hp
+	h.near(hp_avvio, p.max_hp, 0.0001, "m7: e il giocatore e' in piedi")
+
+	var vicino := 1.0e9
+	var primo_contatto := -1
+	var passi := 0
+	while passi < M7_PASSI and not hd.is_game_over():
+		passi += 1
+		p.step(DT, Vector3.ZERO)
+		hd.step(DT)
+		var d := _piu_vicino(hd, p.global_position)
+		if d < vicino:
+			vicino = d
+		if primo_contatto < 0 and d <= arrivo:
+			primo_contatto = passi
+
+	h.check(passi > 0, "m7: la partita e' girata (%d passi)" % passi)
+	h.check(primo_contatto > 0,
+		"m7: l'orda raggiunge il giocatore: primo contatto entro %.2f m al passo %d (%.2f s), minimo %.3f m"
+		% [arrivo, primo_contatto, float(primo_contatto) * DT, vicino])
+	h.check(vicino <= arrivo,
+		"m7: e la distanza minima resta dentro il raggio d'arrivo di -orda (%.3f contro %.3f m)" % [vicino, arrivo])
+
+	# L'invariante con i denti in entrambi i mondi: nessun punto di vita puo'
+	# sparire senza che il segnale lo annunci. Oggi vale 0 == 0, e vale anche
+	# quando -orda consegna: la differenza fra i due casi e' solo il numero.
+	var perso: float = hp_avvio - p.hp
+	h.near(perso, float(conto["danno"]), 0.0001,
+		"m7: vita persa %.4f = danno annunciato da hurt %.4f: nessuna strada diversa dal contratto"
+		% [perso, float(conto["danno"])])
+	h.check(p.hp >= 0.0, "m7: le vite non scendono mai sotto zero (%.4f)" % p.hp)
+	h.check(not p.is_dead() or hd.is_game_over(),
+		"m7: a zero vite la partita e' finita: mai morti con la partita che continua")
+
+	if int(conto["colpi"]) > 0:
+		# IL CRITERIO n. 2, per intero, e senza che il test abbia chiamato
+		# `damage_player` una volta sola: i colpi sono arrivati dal gioco.
+		h.check(p.hp < hp_avvio,
+			"m7 criterio n. 2: sulla scena vera hp e' sceso a %.4f senza che il test chiami damage_player"
+			% p.hp)
+		var sotto: float = p.hp
+		for i in 60:
+			if hd.is_game_over():
+				break
+			p.step(DT, Vector3.ZERO)
+			hd.step(DT)
+		h.check(p.hp < hp_avvio,
+			"m7 criterio n. 2: e resta sotto (era %.4f, ora %.4f, massimo %.4f): nessuna cura nascosta"
+			% [sotto, p.hp, hp_avvio])
+		print("m7 criterio 2: percorso intero. %d colpi dal codice di gioco, %.1f -> %.4f di %.1f HP, morti %d"
+			% [int(conto["colpi"]), hp_avvio, p.hp, float(p.max_hp), int(conto["morti"])])
+	else:
+		# Non e' un fallimento e non e' un verde di faccia: e' un **ordine di
+		# consegna** dichiarato. Il chiamante e' di -orda (`src/sim/`, non questo
+		# file) e il criterio n. 1 di m7 e' una `grep`, non un test: questa
+		# sezione non puo' chiuderlo e non finge di averlo chiuso.
+		print("m7 criterio 1 ANCORA ROSSO: nessun codice di gioco chiama Game.damage_player (%d colpi in %d passi). "
+			% [int(conto["colpi"]), passi]
+			+ "Il chiamante e' di -orda (src/sim/). Quel che e' di -gameplay e' verificato sotto.")
+		# L'invariante **invertito**, e non un `check(true, ...)` decorativo: se il
+		# chiamante non c'e', nessuna vita puo' essere sparsa, e questa riga
+		# ascolta anche una perdita che passasse per una strada che non sia il
+		# contratto. Se tornasse verde perche' non gira niente, il numero
+		# accanto lo dice: zero colpi in `passi` passi.
+		h.near(perso, 0.0, 0.0001,
+			"m7: senza il chiamante la vita non si muove: %.4f persi in %d passi con %d colpi"
+			% [perso, passi, int(conto["colpi"])])
+
+	# =====================================================================
+	# La macchina: il contratto ferisce davvero, e ha i denti
+	# =====================================================================
+	# Da qui in avanti il test **chiama** `Game.damage_player`, e quindi quello
+	# che segue prova la macchina e non il gioco. E' dichiarato perche' la
+	# differenza fra le due cose e' esattamente il criterio n. 1.
+	p.restart_run()
+	var conto2 := {"danno": 0.0, "colpi": 0, "morti": 0}
+	p.hurt.connect(_conta_danno(conto2))
+	p.died.connect(_conta_morte(conto2))
+
+	h.check(game.damage_player(25.0), "m7: Game.damage_player(25) entra nel giocatore")
+	h.near(p.hp, p.max_hp - 25.0, 0.0001, "m7: e la vita scende di 25")
+	h.near(float(conto2["danno"]), 25.0, 0.0001,
+		"m7: il conto torna: il danno ricevuto e' quello che il contratto ha consegnato")
+	h.eq(int(conto2["colpi"]), 1, "m7: e `hurt` e' stato emesso una volta sola per un colpo")
+
+	h.check(not game.damage_player(25.0),
+		"m7: il colpo subito dopo non entra, l'invulnerabilita' tiene")
+	h.near(p.hp, p.max_hp - 25.0, 0.0001, "m7: e le vite non scendono due volte")
+	h.check(not game.damage_player(0.0), "m7: un danno di zero non entra")
+	h.check(not game.damage_player(-5.0), "m7: un danno negativo non entra")
+	h.near(p.hp, p.max_hp - 25.0, 0.0001, "m7: e nessuno dei due ha toccato le vite")
+
+	# La morte, e il numero che dice che e' una **transizione**: `died` una volta
+	# sola anche se l'orda continua a colpire un giocatore fermo a zero.
+	var colpi_morte := 0
+	while not p.is_dead() and colpi_morte < 200:
+		p.invuln = 0.0
+		p.dash_timer = 0.0
+		game.damage_player(25.0)
+		colpi_morte += 1
+	h.check(p.is_dead(),
+		"m7: le vite arrivano a zero e il giocatore muore (%d colpi dopo il primo)" % colpi_morte)
+	h.near(p.hp, 0.0, 0.0001, "m7: e a zero esatto, non negativo")
+	h.eq(int(conto2["morti"]), 1, "m7: `died` e' scattata una volta sola")
+	p.invuln = 0.0
+	game.damage_player(25.0)
+	h.eq(int(conto2["morti"]), 1,
+		"m7: un colpo dopo la morte NON riannuncia la morte: la morte e' una transizione")
+	h.check(p.is_dead(), "m7: e il giocatore resta morto")
+
+	# Lo stato della partita, che e' di -orda ma si legge dal contratto: e' il
+	# pezzo che rende il game_over **verificabile** invece che dichiarato.
+	h.eq(str(hd.run_state()), "playing",
+		"m7: a zero vite lo stato non cambia da solo: lo cambia il passo di simulazione")
+	hd.step(DT)
+	h.eq(str(hd.run_state()), "game_over",
+		"m7: al passo successivo lo stato e' game_over")
+	h.check(hd.is_game_over(), "m7: e is_game_over() dice la stessa cosa")
+
+	# =====================================================================
+	# 15. m7 criterio n. 3: morire non corrompe la partita
+	# =====================================================================
+	# Il numero che decide non e' `hp == max_hp`: e' **un passo di simulazione
+	# dopo il restart**. Un restart che rimettesse in piedi il giocatore ma
+	# lasciasse la partita ferma sarebbe verde su tutti i campi e nero sul
+	# gioco, che e' il difetto che questa sezione e' nata per prendere.
+	for giro in 3:
+		_ammazza_dal_contratto(p, game)
+		h.check(p.is_dead(), "m7 restart %d: prima del restart il giocatore e' a zero vite" % (giro + 1))
+		hd.step(DT)
+		h.check(hd.is_game_over(),
+			"m7 restart %d: e la partita e' davvero finita, non solo il giocatore" % (giro + 1))
+
+		var nodi_prima := _conta_nodi(root)
+		var orde_prima := _conta_nomi(root, NODO_HORDE)
+		var morti_prima := int(conto2["morti"])
+
+		p.restart_run()
+
+		h.near(p.hp, p.max_hp, 0.0001,
+			"m7 restart %d: le vite tornano a max_hp = %s" % [giro + 1, p.max_hp])
+		h.positive(p.hp, "m7 restart %d: e il giocatore ha vite da giocare" % (giro + 1))
+		h.check(not p.is_dead(), "m7 restart %d: il giocatore e' di nuovo in piedi" % (giro + 1))
+		h.near(float(p.invuln), 0.0, 0.0001,
+			"m7 restart %d: e non nasce gia' invulnerabile" % (giro + 1))
+		h.eq(int(hd.wave), 1, "m7 restart %d: si torna all'onda 1" % (giro + 1))
+		h.check(int(hd.count) > 0,
+			"m7 restart %d: horde.count azzerato e RIPOPOLATO (%d)" % [giro + 1, hd.count])
+		h.eq(_conta_nodi(root), nodi_prima,
+			"m7 restart %d: nessun nodo creato ne' liberato (%d)" % [giro + 1, nodi_prima])
+		h.eq(_conta_nomi(root, NODO_HORDE), orde_prima,
+			"m7 restart %d: una sola orda sotto root, non due" % (giro + 1))
+		h.check(game.player == p and game.horde == hd,
+			"m7 restart %d: e il contratto punta ancora agli stessi due nodi" % (giro + 1))
+
+		# ## IL NUMERO CHE DECIDE
+		hd.step(DT)
+		h.check(not hd.is_game_over(),
+			"m7 restart %d: dopo il restart un passo di simulazione NON rilegge game_over (stato '%s')"
+			% [giro + 1, str(hd.run_state())])
+		h.eq(str(hd.run_state()), "playing", "m7 restart %d: la partita riparte sul serio" % (giro + 1))
+		var ferma: PackedVector3Array = hd.transforms.duplicate()
+		hd.step(DT)
+		h.check(hd.transforms != ferma,
+			"m7 restart %d: e il mondo si muove di nuovo: non era fermo per sempre" % (giro + 1))
+
+		# E il giocatore può **morire di nuovo**: il flag che fa scattare `died`
+		# una volta sola per vita è stato azzerato dal restart. Senza questa riga
+		# il restart riporterebbe in piedi un giocatore immune alla morte, che è
+		# il difetto opposto a quello che m7 chiude.
+		_ammazza_dal_contratto(p, game)
+		h.check(p.is_dead(),
+			"m7 restart %d: dopo il restart il giocatore puo' morire di nuovo" % (giro + 1))
+		h.eq(int(conto2["morti"]), morti_prima + 1,
+			"m7 restart %d: e `died` e' scattata un'altra volta, non una seconda volta per la stessa morte"
+			% (giro + 1))
+
+	print("m7: contatto al passo %d (%.2f s), minimo %.3f m contro %.3f di raggio d'arrivo; "
+		% [primo_contatto, float(primo_contatto) * DT, vicino, arrivo]
+		+ "danno dal contratto %.4f su %.1f HP; 3 restart con hp a max_hp e nessun nodo duplicato"
+		% [float(conto["danno"]) + float(conto2["danno"]), float(p.max_hp)])
+	scena.queue_free()
+
+## Uccide il giocatore **dal contratto**, che è la strada che usa il nemico di
+## -orda, e non scrivendo `hp` a mano: un test che scrivesse il campo misurerebbe
+## una partita che nessun codice di gioco produce. L'invulnerabilita' si azzera a
+## ogni colpo, altrimenti si misurerebbero i secondi di recupero invece dei punti
+## vita — la stessa cosa che `tests/test_upgrades.gd::_vita` dichiara.
+func _ammazza_dal_contratto(p, game) -> void:
+	var guard := 0
+	while not p.is_dead() and guard < 400:
+		p.invuln = 0.0
+		p.dash_timer = 0.0
+		if not game.damage_player(25.0):
+			return
+		guard += 1
+
+## I due ascoltatori della sezione m7. Sono **funzioni che restituiscono una
+## `Callable`** e non due lambda scritte a mano sul posto, perche' una lambda
+## inline che tocca una variabile locale cattura **per valore**: `conto` qui
+## dentro cambierebbe una copia e il conteggio resterebbe a zero per sempre, e un
+## contatore fermo a zero e' indistinguibile da un contatore che non e' mai stato
+## collegato. Il dizionario e' il contenitore giusto perche' e' un riferimento.
+func _conta_danno(conto: Dictionary) -> Callable:
+	return func(amount: float, _hp_left: float) -> void: _segna_danno(conto, amount)
+
+func _conta_morte(conto: Dictionary) -> Callable:
+	return func() -> void: _bump(conto, "morti")
+
+static func _segna_danno(conto: Dictionary, amount: float) -> void:
+	conto["danno"] = float(conto["danno"]) + amount
+	conto["colpi"] = int(conto["colpi"]) + 1
+
+static func _bump(conto: Dictionary, chiave: String) -> void:
+	conto[chiave] = int(conto[chiave]) + 1
+
+## La distanza minima fra un nemico e il giocatore, sul piano. `1.0e9` quando
+## l'orda e' vuota: «nessun nemico» e «un nemico lontanissimo» sono due fatti
+## diversi, e metterli nello stesso numero fa sembrare pieno un campo vuoto.
+func _piu_vicino(hd, punto: Vector3) -> float:
+	var transforms: PackedVector3Array = hd.transforms
+	var meglio := 1.0e9
+	for i in transforms.size():
+		var d := transforms[i] - punto
+		d.y = 0.0
+		var l := d.length()
+		if l < meglio:
+			meglio = l
+	return meglio
+
+## `Enemy.ARRIVE_RADIUS`, letto dal file di **-orda**. Non e' una costante di questo
+## test perche' quel file non e' mio: copiare il numero qui dentro sarebbe la
+## seconda copia di una regolazione altrui, che e' il difetto che il piano vieta
+## (criterio n. 6 di m7). Se la costante non si legge, il numero torna a 0 e
+## l'asserzione che lo usa cade: una soglia che sparisce silenziosamente sarebbe
+## un test che non puo' fallire.
+func _arrivo_radius(h) -> float:
+	var scr = load(ENEMY_SCRIPT)
+	if not h.check(scr is Script, "m7: src/sim/enemy.gd deve caricare a runtime"):
+		return 0.0
+	var consts: Variant = (scr as Script).get_script_constant_map()
+	if not h.check(consts is Dictionary and (consts as Dictionary).has("ARRIVE_RADIUS"),
+		"m7: Enemy.ARRIVE_RADIUS deve esistere: e' il numero con cui l'orda si dichiara arrivata"):
+		return 0.0
+	var v := float((consts as Dictionary)["ARRIVE_RADIUS"])
+	h.check(v > 0.0, "m7: il raggio d'arrivo letto da -orda e' positivo (%.3f m)" % v)
+	return v
 
 # --- Interno -------------------------------------------------------------------
 

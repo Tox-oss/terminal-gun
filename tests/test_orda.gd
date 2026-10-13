@@ -136,8 +136,168 @@ func _run() -> void:
 	_object_pool(h)
 	_burn_in(h, horde)
 	_damage_kills(h, horde)
+	_touch(h, horde)
 
 	quit(h.finish("orda"))
+
+# --- 11. Il morso: il nemico chiama Game.damage_player (milestone 7) ----------
+#
+# ## La sezione che dimostra il criterio n. 1 di m7
+#
+# Il criterio n. 1 e' una `grep`, non un'asserzione: il chiamante di
+# `damage_player` deve stare in `src/`, e un chiamante solo in `tests/`
+# dimostrerebbe che la funzione **funziona** e non che **qualcuno la chiami**
+# (piano sez. 1.6). Qui sotto ci sono tre prove, e nessuna e' "chiamo la
+# funzione e guardo che cosa fa":
+#
+#   1. una `grep` vera sul disco: fra i file di `src/`, `damage_player`
+#      compare solo nel contratto (che lo dichiara) e in `src/sim/horde.gd`
+#      (che lo chiama);
+#   2. lo **spia** di sotto riceve le chiamate ma non le fa: e' il giocatore,
+#      non il nemico. Il totale che arriva allo spia viene confrontato con il
+#      totale che l'orda dichiara di aver consegnato (`touch_damage_last`), e
+#      i due numeri devono coincidere passo per passo;
+#   3. ogni numero che arriva allo spia deve essere **uno dei quattro** della
+#      tabella delle specie: nessun numero di danno scritto a mano qui dentro
+#      (criterio n. 6 di m7).
+#
+# ## Il giocatore finto e' una spia, non un giocatore
+#
+# `player_position` e `damage_player` sono le due API che registra -gameplay.
+# Non sono un trucco per far funzionare il test: sono il contrattino che il
+# nemico si trova davvero davanti in partita, e registrarle e' l'unico modo di
+# misurare senza toccare `src/player/`, che non e' di questa foglia.
+
+## Dove sta il giocatore finto. Non e' l'origine: `_player_focus()` rifiuta un
+## punto a distanza quasi nulla e ripiega sul fuoco dell'orda, quindi un
+## giocatore finto all'origine misurerebbe una cosa diversa dal gioco.
+const FAKE_PLAYER := Vector3(3.0, 0.0, -5.0)
+
+## Passi di misura dell'economia del morso. 1800 passi a DT = 1/60 sono 30 s,
+## dieci volte il periodo massimo di morso (boss ~2.9 s): la finestra contiene
+## molti periodi e non un numero che dipende dalla fase.
+const TOUCH_STEPS := 1800
+
+## Vita massima del giocatore di riferimento, **solo per tradurre un danno al
+## secondo in secondi di sopravvivenza**. Non e' un numero di gioco: nessuna
+## riga di `src/` lo usa e nessuno puo' leggerlo da qui. Il valore (100.0) e'
+## misurato sulla scena vera, e serve a dare un'unita' leggibile ai numeri.
+const PLAYER_HP_REFERENCE := 100.0
+
+## Bande di misura, non soglie di robustezza: i numeri che escono sono scritti
+## sotto questa sezione e vengono ricontrollati a ogni lancio.
+##
+## La cadenza: sotto `BITE_RATE_MIN` nessuno morderebbe (e il chiamante di m7
+## sarebbe sparito senza che nessuno se ne accorga), sopra `BITE_RATE_MAX` il
+## tetto `TOUCH_INTERVAL` non terrebbe, perche' `1/0.40 = 2.5`.
+const BITE_RATE_MIN := 0.8
+const BITE_RATE_MAX := 2.5
+## Secondi che un giocatore regge **fermo al centro dell'orda** con 100 hp.
+const SURVIVAL_MIN := 5.0
+const SURVIVAL_MAX := 20.0
+## L'orda da 200 vivi puo' fare al massimo questo multiple del danno al secondo
+## dell'orda piccola. **Il primo tetto dichiarato era 2.0 ed era sbagliato**:
+## la misura sul campione qui sotto dà 2.56, e la differenza non e' rumore ma
+## il campione dei morsi: con 25 vivi il contatto lo fanno quasi solo brute
+## (5.94 hp), con 200 vivi quasi solo boss (13.71 hp), perche' l'anello intorno
+## al giocatore si riempie dei nemici piu' grossi. Il tetto a 3.0 resta un
+## tetto vero — **senza** `TOUCH_INTERVAL` lo stesso campione crescerebbe di
+## ~5.7 volte (contatto 3.3 volte x morso 1.7 volte) — ma 2.0 era un numero
+## rotolato sulla fortuna di un campione.
+const DPS_RATIO_MAX := 3.0
+
+## I quattro casi misurati: semi e popolazione. I primi due sono l'onda 1 (25
+## vivi) su due semi diversi, il terzo la curva a meta' strada, il quarto
+## l'onda 8 (200 vivi). Primo e quarto sono i due estremi che il piano dichiara.
+const TOUCH_CASES := [[4242, 25], [7311, 25], [20260912, 75], [20260912, 200]]
+
+## Accumuli dello spia. Sono **campi** e non variabili locali di questa funzione:
+## una lambda di GDScript cattura per valore, e la callback qui e' un metodo,
+## quindi i campi sono l'unica forma che funziona.
+var _totale_danno := 0.0
+var _morsi := 0
+## Quante volte e' arrivato **quello** numero di danno. Le chiavi sono i valori
+## della tabella delle specie: se ne compare uno che non e' in tabella, vuol
+## dire che qualcuno ha scritto un danno a mano.
+var _per_morso := {}
+## L'ultimo numero di danno che e' arrivato allo spia. Serve a confrontarlo, in
+## ogni passo in cui un morso arriva, con `horde.touch_damage_last`: i due
+## numeri vengono da due conti indipendenti e devono coincidere.
+var _ultimo_danno := 0.0
+
+## Lo spia. E' **il giocatore**, non il nemico: il chiamante di `damage_player`
+## e' `src/sim/horde.gd`, e questo file non chiama `damage_player` una volta
+## sola, solo la registra.
+func _spia_damage_player(amount: float) -> bool:
+	_totale_danno += amount
+	_morsi += 1
+	_ultimo_danno = amount
+	_per_morso[amount] = int(_per_morso.get(amount, 0)) + 1
+	return true
+
+## La posizione del giocatore finto, letta dal contratto come in partita.
+func _spia_player_position() -> Vector3:
+	return FAKE_PLAYER
+
+func _touch(h, horde: HORDE) -> void:
+	_touch_table(h)
+	_touch_caller(h)
+
+	# Da qui in poi l'orda ha un giocatore davanti: questa sezione va per ultima
+	# apposta, perche' le precedenti misurano un'orda senza bersaglio.
+	var game := _game()
+	game.register_impl("player_position", _spia_player_position)
+	game.register_impl("damage_player", _spia_damage_player)
+	h.check(game.has_impl("damage_player"),
+		"il contratto accetta damage_player: e' l'API che -gameplay registra")
+
+	var misure: Array = []
+	for caso in TOUCH_CASES:
+		misure.append(_misura_morso(h, horde, int(caso[0]), int(caso[1])))
+	_touch_economia(h, misure)
+	_touch_game_over(h, horde)
+
+# --- 11a. La tabella del morso ------------------------------------------------
+
+## Il danno e la cadenza di ogni specie devono uscire dalla tabella `MASS` e da
+## nient'altro. E' il criterio n. 6 di m7 (un numero in un posto solo) reso
+## verificabile: se qualcuno sostituisce la formula con una tabella di danni per
+## specie, qui viene fuori che non e' piu' la stessa cosa.
+func _touch_table(h) -> void:
+	h.check(ENEMY.TOUCH_DAMAGE_BASE > 0.0, "il morso base e' positivo")
+	h.check(ENEMY.TOUCH_PERIOD > 0.0, "il periodo base e' positivo")
+	h.check(ENEMY.TOUCH_REACH > 0.0, "la portata del morso e' positiva")
+	h.near(ENEMY.touch_damage_of(ENEMY.RUNNER), ENEMY.TOUCH_DAMAGE_BASE, 0.000001,
+		"il runner e' la base del morso: la formula e' ancorata a lui")
+	h.near(ENEMY.touch_period_of(ENEMY.RUNNER), ENEMY.TOUCH_PERIOD, 0.000001,
+		"e del periodo")
+	for k in ENEMY.KIND_COUNT:
+		var atteso := ENEMY.TOUCH_DAMAGE_BASE * ENEMY.MASS[k] / ENEMY.MASS[ENEMY.RUNNER]
+		h.near(ENEMY.touch_damage_of(k), atteso, 0.000001,
+			"il morso di %s esce dalla tabella MASS, non da una tabella sua"
+				% ENEMY.KIND_NAMES[k])
+		var periodo := ENEMY.TOUCH_PERIOD * sqrt(ENEMY.MASS[k] / ENEMY.MASS[ENEMY.RUNNER])
+		h.near(ENEMY.touch_period_of(k), periodo, 0.000001,
+			"la cadenza di %s esce dalla stessa tabella" % ENEMY.KIND_NAMES[k])
+		if k > 0:
+			h.check(ENEMY.touch_damage_of(k) > ENEMY.touch_damage_of(k - 1),
+				"piu' pesante morde piu' forte: %s (%.2f) sopra %s (%.2f)"
+					% [ENEMY.KIND_NAMES[k], ENEMY.touch_damage_of(k),
+						ENEMY.KIND_NAMES[k - 1], ENEMY.touch_damage_of(k - 1)])
+			h.check(ENEMY.touch_period_of(k) > ENEMY.touch_period_of(k - 1),
+				"piu' pesante morde piu' lento: %s (%.2f s) sopra %s (%.2f s)"
+					% [ENEMY.KIND_NAMES[k], ENEMY.touch_period_of(k),
+						ENEMY.KIND_NAMES[k - 1], ENEMY.touch_period_of(k - 1)])
+	# nessun morso uccide da solo: il capo e' la specie piu' pesante e quindi
+	# quella che morde piu' forte, ed e' il numero che tiene sotto il tetto.
+	h.check(ENEMY.touch_damage_of(ENEMY.BOSS) <= PLAYER_HP_REFERENCE / 4.0,
+		"il morso peggiore (%s, %.2f hp) non uccide da solo il giocatore da 100 hp"
+			% [ENEMY.KIND_NAMES[ENEMY.BOSS], ENEMY.touch_damage_of(ENEMY.BOSS)])
+	# e nessuna specie morde piu' di una volta al secondo: sotto il periodo base.
+	for k in ENEMY.KIND_COUNT:
+		h.check(ENEMY.touch_period_of(k) >= ENEMY.TOUCH_PERIOD,
+			"%s non morde piu' di una volta al secondo (periodo %.2f s)"
+				% [ENEMY.KIND_NAMES[k], ENEMY.touch_period_of(k)])
 
 # --- 1. Popolazione -----------------------------------------------------------
 
@@ -198,6 +358,8 @@ func _population(h, horde: HORDE) -> void:
 	h.eq(horde.hp.size(), horde.count, "hp: array parallelo allineato")
 	h.eq(horde.kinds.size(), horde.count, "specie: array parallelo allineato")
 	h.eq(horde.timers.size(), horde.count, "timer: array parallelo allineato")
+	h.eq(horde.bites.size(), horde.count, "morso: array parallelo allineato")
+	h.eq(horde.bite_timers.size(), horde.count, "timer del morso: array parallelo allineato")
 
 	var census := horde.census()
 	var somma := 0
@@ -558,10 +720,12 @@ func _burn_in(h, horde: HORDE) -> void:
 	var mem0 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
 	var passati := 0
 	var morti := 0
+	var morsi := 0
 
 	for s in 600:
 		horde.step(1.0 / 60.0)
 		passati += 1
+		morsi += horde.touch_bites_last
 		# una morte ogni 5 passi: lo scambio-ultimo viene esercitato 120 volte,
 		# quindi i 600 passi non sono una passeggiata
 		if s % 5 == 0 and horde.count > 40:
@@ -597,6 +761,15 @@ func _burn_in(h, horde: HORDE) -> void:
 	var obj1 := int(Performance.get_monitor(Performance.OBJECT_COUNT))
 	var mem1 := int(Performance.get_monitor(Performance.MEMORY_STATIC))
 	h.eq(nodi1, nodi0, "600 passi non aggiungono nodi")
+	# Il ramo negativo del morso: in questo processo **non c'e' un giocatore**
+	# (`player_position` non e' registrata, perche' e' di -gameplay), quindi
+	# nessun nemico deve mordere il centro vuoto dell'arena. E' la prova che
+	# l'accensione del morso dipende da `has_impl("player_position")` e non da
+	# un `if` che la birra di qualcun altro.
+	h.eq(morsi, 0, "senza un giocatore registrato, in 600 passi non e' arrivato un morso")
+	h.eq(horde.touch_damage_last, 0.0, "e l'orda non dichiara nessun danno")
+	h.eq(horde.bites.size(), horde.count, "bites allineato a count")
+	h.eq(horde.bite_timers.size(), horde.count, "bite_timers allineato a count")
 	h.check(obj1 <= obj0 + 16,
 		"600 passi non aggiungono oggetti: %d contro %d" % [obj1, obj0])
 	h.check(mem1 - mem0 < 4 * 1024 * 1024,
@@ -709,7 +882,231 @@ func _damage_kills(h, horde: HORDE) -> void:
 			RUN.population_of(horde.wave), HORDE.MAX_ENEMIES,
 			float(passi_capienza) * DT, RUN.SPAWN_RATE])
 
-# --- Interno ------------------------------------------------------------------
+# --- 11c. L'economia del morso, misurata -------------------------------------
+
+## Un caso di misura: dispone `pop` nemici intorno al giocatore finto, li lascia
+## arrivare, warm-up, e poi guarda per `TOUCH_STEPS` passi.
+##
+## L'onda viene bloccata a 1 (`run.wave` e `wave_killed`) perche' altrimenti
+## l'onda avanza durante il warm-up, `_sync_population()` alza `population` e il
+## caso "25 vivi" finisce a misurarne 75: una misura che non descrive quello che
+## dice di descrivere e' rumore, non una misura.
+func _misura_morso(h, horde: HORDE, seme: int, pop: int) -> Dictionary:
+	horde.auto_respawn = true
+	horde.set_focus(FAKE_PLAYER)
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.reseed(seme)
+	horde.population = pop
+	while horde.count > 0:
+		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+	var passi_pieno := 0
+	while horde.count < pop and passi_pieno < 6000:
+		horde.step(DT)
+		passi_pieno += 1
+	h.eq(horde.count, pop, "il caso seme %d e' arrivato a %d vivi" % [seme, pop])
+	# warm-up: l'orda deve **arrivare**, non essere gia' addosso al primo passo
+	for _i in 1800:
+		horde.step(DT)
+
+	_totale_danno = 0.0
+	_morsi = 0
+	_per_morso = {}
+	var fuori_tabella := 0
+	var delta := TOUCH_STEPS * DT
+	var in_contatto := 0
+	var morse_passo_max := 0
+	var gap_min := 1.0e9
+	var ultimo := -1
+	for s in TOUCH_STEPS:
+		var prima := _morsi
+		horde.step(DT)
+		var caduti := _morsi - prima
+		if caduti > 0:
+			h.eq(caduti, 1,
+				"seme %d: al massimo un morso che arriva per passo (tetto a intervallo)" % seme)
+			h.eq(_ultimo_danno, horde.touch_damage_last,
+				"seme %d: il danno che lo spia riceve e' quello che l'orda dichiara" % seme)
+			if ultimo >= 0:
+				gap_min = minf(gap_min, float(s - ultimo) * DT)
+			ultimo = s
+		morse_passo_max = maxi(morse_passo_max, horde.touch_bites_last)
+		h.eq(horde.bites.size(), horde.count, "seme %d: bites allineato a count" % seme)
+		h.eq(horde.bite_timers.size(), horde.count, "seme %d: bite_timers allineato a count" % seme)
+	fuori_tabella = _valori_fuori_tabella()
+	h.eq(fuori_tabella, 0,
+		"seme %d: ogni numero di danno arrivato allo spia e' un numero di tabella" % seme)
+
+	for i in horde.count:
+		var p := horde.transforms[i]
+		var d := Vector2(p.x, p.z).distance_to(Vector2(FAKE_PLAYER.x, FAKE_PLAYER.z))
+		if d <= ENEMY.RADIUS[horde.kinds[i]] + ENEMY.TOUCH_REACH:
+			in_contatto += 1
+
+	var campi := {
+		"seme": seme, "pop": pop, "vivi": horde.count, "in_contatto": in_contatto,
+		"morsi": _morsi, "cadenza": float(_morsi) / delta,
+		"dps": _totale_danno / delta,
+		"per_morso": _totale_danno / maxf(1.0, float(_morsi)),
+		"sopravvivenza": PLAYER_HP_REFERENCE / maxf(0.001, _totale_danno / delta),
+		"gap_min": gap_min, "morse_passo_max": morse_passo_max,
+	}
+	print("orda: morso seme %d, %d vivi: %d a portata, %.2f morsi/s, %.2f hp per morso, %.2f hp/s, %.1f s da fermo"
+		% [seme, horde.count, in_contatto, float(campi["cadenza"]),
+			float(campi["per_morso"]), float(campi["dps"]), float(campi["sopravvivenza"])])
+	print("orda: morso seme %d, morsi per specie:%s" % [seme, _riparto_morsi()])
+	return campi
+
+## Quanti numeri di danno arrivati allo spia **non** sono un numero di tabella.
+## Il conto e' fatto durante il caso, non dopo: e' l'unico modo per beccare un
+## numero scritto a mano che arriva una volta sola su quattrocento.
+func _valori_fuori_tabella() -> int:
+	var fuori := 0
+	for a in _per_morso:
+		var riconosciuto := false
+		for k in ENEMY.KIND_COUNT:
+			if absf(float(a) - ENEMY.touch_damage_of(k)) < 0.000001:
+				riconosciuto = true
+		if not riconosciuto:
+			fuori += 1
+	return fuori
+
+## Quanti morsi per specie, in ordine di specie. Legge i numeri che sono
+## **arrivati allo spia** e li riconosce confrontandoli con la tabella.
+func _riparto_morsi() -> String:
+	var testo := ""
+	for k in ENEMY.KIND_COUNT:
+		var atteso := ENEMY.touch_damage_of(k)
+		var trovati := 0
+		for a in _per_morso:
+			if absf(float(a) - atteso) < 0.000001:
+				trovati = int(_per_morso[a])
+		testo += " %s(%.2f hp) x%d" % [ENEMY.KIND_NAMES[k], atteso, trovati]
+	return testo
+
+# --- 11b. Il chiamante --------------------------------------------------------
+
+## Il criterio n. 1 di m7, che e' una `grep`, resa asserzione.
+##
+## Un chiamante che sta solo in `tests/` **fallisce** il criterio: significherebbe
+## che la funzione funziona, non che qualcuno nel gioco la chiami. Quindi qui si
+## guarda il disco e non si chiama la funzione.
+##
+## Il confronto e' fatto sulla **chiamata** `game.damage_player(`, col ricevente in
+## minuscolo: il contratto e i commenti scrivono `Game.damage_player(x)` con la G
+## maiuscola, quindi il confronto non li conta. Se un giorno la chiamata cambia
+## forma, questo test lo dice col nome del file: e' il segnale che la `grep` del
+## vertice va rilanciata.
+func _touch_caller(h) -> void:
+	var citano := PackedStringArray()
+	var chiamano := PackedStringArray()
+	for path in _file_gdc_in("res://src"):
+		if _contiene(path, "damage_player("):
+			citano.append(path)
+		if _contiene(path, "game.damage_player("):
+			chiamano.append(path)
+	citano.sort()
+	chiamano.sort()
+	# I tre file che possono legittimamente contenere la parola: il contratto che
+	# la dichiara, `player.gd` che registra l'implementazione, e l'orda che
+	# chiama. Qualunque altro nome significa che una quarta foglia e' entrata in
+	# mezzo, e allora il criterio n. 1 va riletto.
+	const AMMESSI := ["res://src/core/contracts.gd", "res://src/player/player.gd",
+		"res://src/sim/horde.gd"]
+	for path in citano:
+		h.check(AMMESSI.has(path),
+			"in src/ damage_player compare solo nel contratto, in player.gd e in horde.gd: trovato %s"
+				% path)
+	h.check(citano.has("res://src/sim/horde.gd"),
+		"src/sim/horde.gd deve contenere damage_player: trovati %s" % str(citano))
+	h.eq(chiamano.size(), 1,
+		"in src/ deve esserci UN solo file che chiama davvero damage_player")
+	h.check(chiamano.size() == 1 and chiamano[0] == "res://src/sim/horde.gd",
+		"e deve essere src/sim/horde.gd, non un test: trovati %s" % str(chiamano))
+
+## Le asserzioni sull'economia del morso, e la stampa del numero finale.
+##
+## Sono **bande**, non soglie: i numeri che escono sono dichiarati nella sezione
+## 11 e questa funzione li ricontrolla a ogni lancio. Una banda che si stringe
+## fino a diventare un numero esatto smetterebbe di misurare la cosa che
+## descrive e comincerebbe a misurare il caso fortunato.
+func _touch_economia(h, misure: Array) -> void:
+	for m in misure:
+		var seme_i := int(m["seme"])
+		var pop_i := int(m["pop"])
+		h.check(float(m["cadenza"]) >= BITE_RATE_MIN,
+			"seme %d (%d vivi): il nemico morde davvero, %.2f morsi/s non puo' essere sotto %.1f"
+				% [seme_i, pop_i, float(m["cadenza"]), BITE_RATE_MIN])
+		h.check(float(m["cadenza"]) <= BITE_RATE_MAX,
+			"seme %d: la cadenza rispetta il tetto TOUCH_INTERVAL (1/%.2f = %.1f morsi/s), misurata %.2f"
+				% [seme_i, HORDE.TOUCH_INTERVAL, BITE_RATE_MAX, float(m["cadenza"])])
+		h.check(int(m["morsi"]) > 0,
+			"seme %d: almeno un morso in %d passi" % [seme_i, TOUCH_STEPS])
+		h.eq(int(m["morse_passo_max"]), 1,
+			"seme %d: mai piu' di un morso che arriva nello stesso passo" % seme_i)
+		h.check(float(m["gap_min"]) >= HORDE.TOUCH_INTERVAL - DT - 0.000001,
+			"seme %d: due morsi consecutivi distano almeno TOUCH_INTERVAL (%.4f s misurati)"
+				% [seme_i, float(m["gap_min"])])
+		var sopr := float(m["sopravvivenza"])
+		h.check(sopr >= SURVIVAL_MIN and sopr <= SURVIVAL_MAX,
+			"seme %d (%d vivi): %.1f s da fermo al centro deve stare fra %.0f e %.0f"
+				% [seme_i, pop_i, sopr, SURVIVAL_MIN, SURVIVAL_MAX])
+		h.check(int(m["in_contatto"]) > 0,
+			"seme %d: qualcuno e' davvero a portata di morso (%d)" % [seme_i, int(m["in_contatto"])])
+
+	# Il confronto che chiude la curva: il danno al secondo dell'orda piena non
+	# e' un multiplo di quello dell'onda piccola. E' la ragione per cui il tetto
+	# e' a intervallo e non per passo.
+	var piccola := 1.0e9
+	var grande := 0.0
+	for m in misure:
+		piccola = minf(piccola, float(m["dps"]))
+		grande = maxf(grande, float(m["dps"]))
+	var rapporto := grande / maxf(0.001, piccola)
+	h.check(rapporto <= DPS_RATIO_MAX,
+		"l'orda piena fa al massimo %.1f volte il danno al secondo dell'onda piccola: misurato %.2f"			% [DPS_RATIO_MAX, rapporto])
+	print("orda: morso, %.0f s per caso: %.2f-%.2f hp/s, %.2f-%.2f morsi/s, %.1f-%.1f s da fermo con 100 hp, orda piena %.2f volte l'onda piccola"
+		% [float(TOUCH_STEPS) * DT, piccola, grande,
+			float(misure[0]["cadenza"]), float(misure[3]["cadenza"]),
+			float(misure[3]["sopravvivenza"]), float(misure[0]["sopravvivenza"]),
+			rapporto])
+
+## A `game_over` la simulazione e' ferma, quindi nessun morso: il giocatore morto
+## non e' un bersaglio che continua a prendere colpi. E' la continuazione della
+## regola di `step()` ("lo stato della partita si guarda PRIMA di muovere
+## chiunque"), vista dal lato del morso.
+func _touch_game_over(h, horde: HORDE) -> void:
+	var morti := _morsi
+	h.check(horde.run.enter_game_over(), "la partita entra in game_over")
+	h.check(horde.is_game_over(), "e horde.is_game_over() lo dice")
+	for _i in 300:
+		horde.step(DT)
+	h.eq(_morsi, morti, "in game_over nessun morso arriva addosso")
+	h.eq(horde.touch_damage_last, 0.0, "e l'orda non dichiara nessun danno")
+	horde.restart_run()
+	h.check(not horde.is_game_over(), "il restart rimette la partita in corso")
+	h.eq(horde.touch_damage_last, 0.0, "e azzera il danno dell'ultimo passo")
+
+## Tutti i file `.gd` sotto `dir_path`, ricorsivamente. Serve alla `grep` della
+## sezione 11b: il chiamante di `damage_player` va cercato in **tutto** `src/`,
+## non nella directory che questa foglia si aspetta di scrivere.
+func _file_gdc_in(dir_path: String) -> PackedStringArray:
+	var trovati := PackedStringArray()
+	var d := DirAccess.open(dir_path)
+	if d == null:
+		return trovati
+	for nome in d.get_files():
+		if nome.ends_with(".gd"):
+			trovati.append(dir_path.path_join(nome))
+	for sotto in d.get_directories():
+		trovati.append_array(_file_gdc_in(dir_path.path_join(sotto)))
+	return trovati
+
+func _contiene(path: String, ago: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	return f.get_as_text().contains(ago)
 
 ## Il contratto, via nodo e non via identificatore nudo.
 ##

@@ -141,6 +141,36 @@ extends CanvasLayer
 ## pulsanti) e non solo sulla radice, e `tests/test_ui.gd` verifica sia la
 ## dichiarazione sia il fatto.
 
+## ## m7: la barra della salute segue `hp`, e il numero sotto e' quello vero
+##
+## Fino a m6 la barra era **piatta**, e non perche' mancasse un filo: il filo
+## c'era dal primo giorno. `src/render/arena.gd::_health()` legge
+## `Game.player.hp`, `_health_max()` legge `Game.player.max_hp`, e `_process` chiama
+## `set_state(...)` **ogni frame** (arena.gd:83, 87, 91). Il numero che arriva qui
+## era semplicemente sempre quello di prima, perche' nessun codice di gioco
+## scriveva `hp`. Quindi qui dentro non c'e' nessuna aritmetica sulla vita da
+## correggere: la barra disegna il numero che le e' stato dato e la Label lo
+## arrotonda con `roundi`.
+##
+## Tre cose che qui **non** si decidono, e che `tests/test_ui.gd` verifica invece:
+##
+## 1. **La metafora e' dell'utente** (RAM disponibile), quindi il testo non e' mio.
+##    Nessuna verifica confronta la stringa: confronta i **numeri** che ci sono
+##    dentro, cosi' "HP 67 / 100" e "RAM 67% di 100" sono lo stesso HUD, mentre un
+##    HUD che scrive 100 mentre il giocatore ha 67 vite e' un HUD che mente. Il
+##    numero sotto la barra e' quello che `roundi(health)` produce: e' l'unico
+##    arrotondamento dichiarato di questa foglia, e sta nella Label e non nella
+##    barra perche' la barra e' un display e la Label e' la cosa che si legge.
+## 2. **`max_hp` non e' un numero fisso**: il potenziamento "vita massima" lo alza,
+##    quindi il denominatore della barra non puo' essere una costante di questa
+##    foglia ne' un `100` scritto qui dentro. Per questo arriva da `set_state` e il
+##    test lo confronta con il numero che il giocatore espone adesso, non con una
+##    copia.
+## 3. **La soglia `LOW_HEALTH_RATIO` non e' una percentuale di danno**: e' il punto
+##    in cui il colore cambia, e sta in una costante sola. Il criterio n. 6 di m7
+##    chiede che nessun numero di danno sia scritto a mano in due posti: qui non ce
+##    n'e' nessuno, e questo file non ne aggiunge.
+
 ## ## Stringhe a schermo
 ##
 ## Solo ASCII: l'HUD viene letto anche nei log di `--headless`, e la console di
@@ -395,6 +425,18 @@ func health_bar_value() -> float:
 
 func health_bar_max() -> float:
 	return _health.max_value if _health != null else 0.0
+
+## Il numero **sotto** la barra della vita, letto dalla Label e non
+## ricostruito qui dentro.
+##
+## Esiste dal primo giorno ma nessuna verifica lo leggeva, e la ragione per cui
+## la si legge adesso e' il criterio n. 4 di m7: «il numero sotto la barra sia
+## quello vero». Il test non confronta la **stringa** (la metafora e' dell'utente e
+## qui il testo non si decide) ma i **numeri** che ci sono dentro: cosi' la
+## verifica resta vera qualunque metafora l'utente scelga, e un HUD con un numero
+## scritto dentro non la passerebbe lo stesso.
+func health_text() -> String:
+	return _health_text.text if _health_text != null else ""
 
 ## Cosa c'e' scritto, per il test: leggo le Label invece di ricostruire qui la
 ## stringa che metterei dentro.

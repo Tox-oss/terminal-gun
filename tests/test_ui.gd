@@ -32,6 +32,31 @@ extends SceneTree
 ##      qui si verifica su tutte e tre perche' una decisione dichiarata solo in
 ##      un commento decade senza rumore.
 ##
+## ## m7: la meta' di questa foglia, e che cosa **non** e' sua
+##
+## Il criterio n. 4 di m7 e' «la HUD mostra la salute vera». Il cablaggio
+## esisteva gia' dal primo giorno: `src/render/arena.gd` legge `Game.player.hp` e
+## `Game.player.max_hp` e chiama `set_state(...)` ogni frame (arena.gd:83, 87, 91).
+## La barra era **piatta** perche' nessun codice di gioco scriveva `hp`, non
+## perche' mancasse un filo: quindi la meta' di `-ui` qui dentro e' **un test**,
+## non un intervento.
+##
+## Percio' la parte nuova di questo file non scrive `hp` e non chiama
+## `damage_player` a mano per poi dichiarare che la barra e' scesa: **legge la vita
+## vera dal giocatore e confronta** quello che l'HUD ne ha fatto, quattro volte
+## per avvio — vita iniziale, dopo un colpo, dopo una cura, a zero — e in ogni
+## caso confronta tre cose: la barra **disegnata**, il rapporto **ricalcolato qui**,
+## e i **numeri dentro la scritta**. Il testo non e' di questa foglia (la metafora
+## e' dell'utente, RAM disponibile), quindi il confronto non e' sulla stringa: e'
+## sui numeri che ci sono dentro, cosi' "HP 67 / 100" e "RAM 67% di 100" sono lo
+## stesso HUD e un HUD con un numero stampato dentro non passa lo stesso.
+##
+## Il danno e la cura arrivano dai **metodi veri del giocatore**
+## (`take_damage()`, `heal()`), che sono la porta che `Game.damage_player()`
+## chiama e che -orda chiama dal ciclo di gioco: qui il test non scrive il campo
+## `hp` a mano nemmeno per fare scena, perche' un test che scrive il numero che
+## poi confronta sta verificando se stesso.
+##
 ## ## Perche' due parti e non una
 ##
 ## La prima parte istanzia `scenes/hud.tscn` da solo: e' la parte che non puo'
@@ -301,11 +326,47 @@ func _health_bar(h, hud) -> void:
 	h.near(hud.health_bar_value(), OFF_GRID * 20.0, 0.0001,
 		"la barra della vita deve disegnare i HP che le sono stati dati, non un numero arrotondato a scatti dal nodo: con il default di Range non si accorgerebbe nessuno, e la barra mentirebbe dal primo danno frazionario")
 
-	# E i due estremi, che sono i numeri che si vedono davvero in partita.
+	# I due estremi, che sono i numeri che si vedono davvero in partita.
 	hud.set_state(100.0, 100.0, 0, "-", 0, 1)
 	h.near(hud.health_bar_value(), 100.0, 0.0001, "a piena vita la barra della vita e' piena")
 	hud.set_state(1.0, 100.0, 0, "-", 0, 1)
 	h.near(hud.health_bar_value(), 1.0, 0.0001, "a un HP la barra della vita e' quasi vuota, non vuota")
+
+	# ## Il numero **sotto** la barra: il criterio n. 4 di m7
+	#
+	# Qui i numeri li mette `set_state`, quindi non c'e' niente da leggere dal
+	# contratto: la parte dove vengono dal giocatore vero e' `_health_from_contract`.
+	# Quello che si verifica qui e' che la Label e la barra **dicano lo stesso
+	# numero**, e che l'arrotondamento sia quello dichiarato in `hud.gd` (`roundi`,
+	# l'unico arrotondamento di questa foglia, e sta nella Label e non nella barra).
+	#
+	# I tre numeri sono scelti per distinguere `roundi` da `floor` e da `ceil`, che
+	# e' la differenza fra "arrotondato" e "troncato": 66.5 arrotondato fa 67,
+	# troncato 66. Con un numero intero la verifica passerebbe senza aver mai
+	# provato niente. Il terzo elemento di ogni trio e' quello che **si deve
+	# leggere**, scritto qui perche' un numero atteso che si ricava da se stesso
+	# non e' un numero atteso: e' la regola dichiarata, non il suo risultato.
+	#
+	# A `_health_text_numbers` passa il numero **grezzo**: e' lei che arrotonda con
+	# `roundi`, la stessa regola dichiarata in `hud.gd`. Passarle il numero gia'
+	# arrotondato farebbe passare la verifica anche con un'HUD che tronca.
+	for caso in [[66.5, 100.0, 67], [0.4, 100.0, 0], [99.6, 100.0, 100]]:
+		hud.set_state(caso[0], caso[1], 0, "-", 0, 1)
+		h.eq(int(roundi(caso[0])), int(caso[2]),
+			"la regola dichiarata in hud.gd e' roundi: %.1f si deve leggere %d, non %d"
+				% [caso[0], int(caso[2]), int(roundi(caso[0]))])
+		_health_text_numbers(h, hud, float(caso[0]), float(caso[1]),
+			"vita %s su %s" % [caso[0], caso[1]])
+
+	# E con una vita massima che **non e' 100**: il denominatore della barra non
+	# e' un numero di questa foglia (il potenziamento "vita massima" lo alza), e
+	# qui dentro non deve esserci nessun `100` scritto come se lo fosse.
+	hud.set_state(30.0, 120.0, 0, "-", 0, 1)
+	h.near(hud.health_bar_max(), 120.0, 0.0001,
+		"il massimo della barra dev'essere la vita massima che le e' stata data: se qui dentro ci fosse un 100, la barra mentirebbe dal primo potenziamento")
+	h.near(hud.health_bar_value(), 30.0, 0.0001,
+		"la barra della vita deve disegnare i 30 HP su 120 che le sono stati dati")
+	_health_text_numbers(h, hud, 30.0, 120.0, "30 su 120")
 
 ## Il contatore d'onda sale, e non scende mai sotto 1.
 func _wave_counter(h, hud) -> void:
@@ -449,6 +510,10 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 
 	_xp_from_contract(h, game, hud, round_no)
 	_wave_from_contract(h, game, hud, round_no)
+	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
+	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
+	# niente da misurare sulla barra.
+	_health_from_contract(h, game, arena, hud, round_no)
 	_death_from_contract(h, arena, hud, round_no)
 
 	return {"arena": arena, "hud_nodes": _count_nodes(hud), "huds": huds, "boot_pop": boot_pop}
@@ -691,6 +756,206 @@ func _wave_from_contract(h, game: Node, hud, round_no: int) -> void:
 			% round_no
 			+ "la barra dell'onda resta al valore di riserva e non e' disegnata. Il nome e' in hud.gd::_refresh_wave_progress.")
 
+## --- Parte 2-bis: la vita vera (m7) --------------------------------------------
+#
+# ## Che cosa e' la meta' di `-ui` in m7, e perche' qui non si tocca `src/render`
+#
+# Il cablaggio della salute **esiste gia'** e non e' stato scritto in m7:
+# `src/render/arena.gd::_health()` legge `Game.player.hp` (riga 87),
+# `_health_max()` legge `Game.player.max_hp` (riga 91) e `_process` chiama
+# `hud.set_state(...)` **ogni frame** (riga 83). La barra era piatta perche' `hp`
+# non scendeva mai, non perche' mancasse un filo. Quindi la meta' di questa foglia
+# qui dentro e' **una verifica**, e `src/render/**` non e' da toccare: e' di
+# `-arena`, che in m7 non lavora.
+#
+# ## Perche' qui il numero non e' scritto a mano
+#
+# Il test scrive `xp` e `wave` sugli oggetti altrui perche' sono i numeri che il
+# pannello e il contatore devono seguire, e li confronta subito dopo. La vita e'
+# diversa: **non basta** scrivere `player.hp = 63.0` e guardare che la barra scenda,
+# perche' quello verificherebbe che `hud.gd` sappia leggere un numero che il test
+# gli ha appena dato, e non che lo **segua**: una barra ferma a 100 passerebbe lo
+# stesso. Quindi qui il campo `hp` **non viene mai scritto**: si usano
+# `take_damage()` e `heal()`, che sono i metodi di `-gameplay`
+# attraverso cui il gioco ferisce e cura il giocatore, e il numero che la barra
+# deve mostrare e' **riletto dal giocatore** a ogni passo.
+#
+# ## Perche' l'invulnerabilita' viene azzerata a mano
+#
+# `take_damage()` rifiuta il colpo mentre il giocatore e' invulnerabile, e dopo
+# ogni colpo mette un temporizzatore (`invuln`) che dura qualche decimo di secondo.
+# Senza azzerarlo, il secondo colpo del test non entra e la verifica non avrebbe
+# niente da confrontare. Azzerare `invuln` **non e' una scorciatoia che invalida la
+# prova**: e' mettere il giocatore nelle condizioni in cui un colpo entra, che e'
+# esattamente la condizione che il gioco deve soddisfare quando un nemico tocca il
+# giocatore. Il numero che viene dopo il colpo e' comunque quello che **il
+# giocatore** calcola, non quello che il test aveva in mente.
+
+## Quanta vita perde il giocatore a ogni colpo, in frazione della vita massima.
+## Una frazione e non un numero assoluto perche' `max_hp` non e' fisso: il
+## potenziamento "vita massima" lo alza, e un test che colpisse per 10 su una vita
+## massima di 20 non misurerebbe niente. Il numero che conta e' la barra, non i
+## punti vita persi.
+const HIT_FRACTION := 0.25
+
+## L'HUD mostra la vita vera, letta dal giocatore, almeno in un colpo.
+##
+## Il numero non e' scritto qui: si rilegge `player.hp` e `player.max_hp` a ogni
+## passo, e si confronta con quello che l'HUD espone. L'atteso e' **ricalcolato
+## qui** con la formula che l'HUD dichiara, non letto dall'HUD: se lo prendessi
+## dall'HUD starei confrontando l'HUD con se stesso, che e' il difetto di m4
+## riscritto.
+func _health_from_contract(h, game: Node, arena, hud, round_no: int) -> void:
+	var player = _contract_player(game)
+	if not h.check(player != null and arena.is_ancestor_of(player),
+			"avvio %d: il contratto deve esporre un \"player\" che e' un nodo di questa scena: senza, l'HUD non ha nulla da leggere" % round_no):
+		return
+
+	# ## L'avvio: la barra e' quella che il giocatore ha
+	#
+	# Un giocatore appena nato e' a piena vita, quindi questo confronto da solo
+	# passerebbe anche con una barra fissa a 100: e' per questo che il pezzo
+	# interessante e' quello dopo, col colpo.
+	_tick(arena, hud)
+	var hp0: float = _player_number(player, "hp")
+	var max0: float = _player_number(player, "max_hp")
+	if not h.check(max0 > 0.0, "avvio %d: la vita massima del giocatore dev'essere positiva, e' %s" % [round_no, max0]):
+		return
+	h.near(hud.health_ratio(), clampf(hp0 / max0, 0.0, 1.0), 0.0001,
+		"avvio %d: a piena vita la barra dev'essere piena" % round_no)
+
+	# ## Il colpo: `hp` scende, e la barra **insieme**
+	#
+	# Il numero perso e' una frazione della vita massima **vera**, quindi non e' un
+	# letterale di gioco e resta giusto anche se `max_hp` cambia. Il danno entra
+	# dalla porta che il gioco usa davvero: `take_damage()`, che e' anche quello
+	# che `Game.damage_player()` chiama secondo il contratto di m7.
+	if not h.check((player as Object).has_method("take_damage"),
+			"avvio %d: il giocatore non espone \"take_damage\": la meta' di -gameplay in m7 e' renderlo chiamabile dal gioco, e questo test non puo' verificare che la barra segua un colpo" % round_no):
+		return
+	if not h.check((player as Object).has_method("heal"),
+			"avvio %d: il giocatore non espone \"heal\": senza una cura questo test puo' vedere solo la discesa e non il ritorno, e un HUD che non risale passerebbe lo stesso" % round_no):
+		return
+
+	var amount := max0 * HIT_FRACTION
+	_clear_invuln(player)
+	var entrato: bool = (player as Object).call("take_damage", amount)
+	if not h.check(entrato,
+			"avvio %d: il colpo di %.2f vite doveva entrare: nessun codice di gioco lo chiama, ma qui non e' il test a chiamare la porta, e' take_damage() stessa" % [round_no, amount]):
+		return
+	var hp1: float = _player_number(player, "hp")
+	h.check(hp1 < hp0,
+		"avvio %d: dopo il colpo la vita doveva scendere, era %.2f ed e' %.2f" % [round_no, hp0, hp1])
+	h.near(hp1, maxf(hp0 - amount, 0.0), 0.0001,
+		"avvio %d: dopo il colpo la vita dev'essere hp - danno, non un numero a caso" % round_no)
+
+	_tick(arena, hud)
+	h.near(hud.health_ratio(), clampf(hp1 / max0, 0.0, 1.0), 0.0001,
+		"avvio %d: la barra della vita deve scendere **insieme a hp**: il giocatore ha %.2f su %.2f e la barra dice %.4f"
+			% [round_no, hp1, max0, hud.health_ratio()])
+	# Il valore **disegnato**, non il ricalcolato: e' la lezione di m4, cioe' il
+	# numero che arriva giusto e il nodo lo arrotonda lo stesso. Sulla barra della
+	# vita il difetto si salva per scala (max 100, scatto 0.01), quindi oggi questa
+	# verifica non romperebbe niente: e tenuta lo stesso, perche' e' la decisione
+	# `step = 0.0` a dover restare scritta da qualche parte.
+	h.near(hud.health_bar_value(), hp1, 0.0001,
+		"avvio %d: la barra della vita **disegnata** deve essere la vita vera, %.2f" % [round_no, hp1])
+	# E il numero sotto la barra, che e' quello che si legge: il criterio n. 4 di
+	# m7 dice che la metafora e' RAM disponibile e che il testo **non** si decide
+	# qui, quindi il confronto e' sui numeri dentro la scritta e non sulla stringa.
+	_health_text_numbers(h, hud, hp1, max0, "dopo il colpo")
+
+	# ## La cura: la barra sale **insieme** a hp
+	#
+	# Senza questo, una HUD che sapesse solo scendere passerebbe lo stesso. Il
+	# numero e' meta' di quello appena tolto, quindi nessuna delle due meta' e' un
+	# letterale scritto qui dentro.
+	var curato: float = (player as Object).call("heal", amount)
+	if not h.check(curato > 0.0,
+			"avvio %d: la cura di %.2f vite doveva entrare su un giocatore vivo" % [round_no, amount]):
+		return
+	var hp2: float = _player_number(player, "hp")
+	h.near(hp2, minf(hp1 + amount, max0), 0.0001,
+		"avvio %d: dopo la cura la vita dev'essere hp + cura, fermata a max_hp" % round_no)
+	_tick(arena, hud)
+	h.near(hud.health_ratio(), clampf(hp2 / max0, 0.0, 1.0), 0.0001,
+		"avvio %d: la barra della vita deve salire **insieme a hp**: il giocatore ha %.2f su %.2f e la barra dice %.4f"
+			% [round_no, hp2, max0, hud.health_ratio()])
+	_health_text_numbers(h, hud, hp2, max0, "dopo la cura")
+
+	# ## I numeri stampati, uno per volta
+	#
+	# Qui sotto non si confronta niente: si **stampa** quello che e' successo, per
+	#che il rapporto dell'onda abbia i numeri misurati e non una copia di quelli
+	# scritti qui. Il confronto e' quello di `_health_text_numbers`, fatto a ogni
+	# passo: se la scritta mostrasse ancora il numero di prima mentre `hp` e'
+	# cambiato, la verifica sul testo l'avrebbe preso gia' alla riga sopra.
+	print("test_ui: m7, avvio %d: vita vera %.2f -> %.2f -> %.2f su %.2f, barra disegnata %.2f, scritta \"%s\""
+		% [round_no, hp0, hp1, hp2, max0, hud.health_bar_value(), hud.health_text()])
+
+## Il giocatore che il contratto espone, o `null` se non c'e'.
+##
+## Il contratto e' la strada che `src/render/arena.gd` usa gia' per leggere
+## `hp` e `max_hp`, quindi e' la stessa che l'HUD vede. Il controllo che il
+## giocatore sia **un nodo di questa scena** e' quello che distingue "il giocatore
+## vero" da "un giocatore di un'altra partita": senza, un confronto passerebbe
+## anche misurando la barra contro un'altra scena.
+func _contract_player(game: Node):
+	var player = game.get("player")
+	if not (player is Node) or not is_instance_valid(player):
+		return null
+	return player as Node
+
+## Un numero del giocatore letto dal contratto, o `0.0` se il campo non esiste.
+##
+## Come `src/render/arena.gd::_num()`: se il nome non c'e' piu' vale il valore di
+## riserva, e il confronto su quel numero fallisce con un messaggio che nomina il
+## campo invece di far saltare il test. Perche' non `0.0` come segnale di errore e
+## `0.0` come vita? Perche' alla vita si guarda `max_hp > 0` prima, e il controllo
+## e' li' piuttosto che nascosto in un valore di riserva.
+func _player_number(player: Object, key: String) -> float:
+	if player == null or not is_instance_valid(player):
+		return 0.0
+	var raw = (player as Object).get(key)
+	if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
+		return float(raw)
+	return 0.0
+
+## Il numero sotto la barra della vita: intero **arrotondato**, perche' e' quello
+## che si vede. `roundi` e' la stessa regola dichiarata in `hud.gd`: l'HUD non
+## tronca e non arrotonda in eccesso, e qui la stessa regola viene ricalcolata per
+## confrontarla, invece di rileggere il valore dall'HUD che si sta verificando.
+func _health_text_numbers(h, hud, hp: float, max_hp: float, what: String) -> void:
+	var numeri := _numbers_in(hud.health_text())
+	if not h.check(numeri.size() >= 2,
+			"%s: sotto la barra dev'essere \"<vita> / <vita massima>\", ma la scritta e' \"%s\""
+				% [what, hud.health_text()]):
+		return
+	h.near(numeri[0], float(roundi(hp)), 0.0,
+		"%s: il numero sotto la barra dev'essere la vita vera (arrotondata cosi' come la Label la arrotonda), non un numero proprio" % what)
+	h.near(numeri[1], float(roundi(max_hp)), 0.0,
+		"%s: il secondo numero sotto la barra dev'essere la vita massima vera, %.2f" % [what, max_hp])
+
+## Azzera il temporizzatore d'invulnerabilita' del giocatore, se c'e'.
+##
+## `take_damage()` mette `invuln` dopo ogni colpo e rifiuta il successivo finche'
+## non scade, quindi senza questa riga il secondo colpo non entra e non c'e' niente
+## da confrontare. Il campo e' pubblico e questa e' una delle due scritture che
+## questo test fa su un oggetto di un'altra foglia (l'altra e' `progression.xp`),
+## ed e' dichiarata per la stessa ragione: non si puo' pilotare il giocatore senza
+## toccarlo, e non si puo' dichiarare che la barra segue `hp` senza mettere `hp`
+## nella condizione di cambiare.
+func _clear_invuln(player: Object) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	# Il campo e' pubblico e questa e' una delle due scritture che questo test fa
+	# su un oggetto di un'altra foglia (l'altra e' `progression.xp`): non si puo'
+	# pilotare il giocatore senza toccarlo. Il chiamante ha gia' verificato che
+	# `take_damage` esista, quindi qui non si ricontrolla: se il campo `invuln`
+	# non ci fosse, `set()` su un nome assente su un oggetto e' un no-op e
+	# l'asserzione successiva ("il colpo doveva entrare") lo direbbe.
+	(player as Object).set("invuln", 0.0)
+
 ## La morte: a 0 HP la schermata compare, e `arena` e' il chiamante che porta
 ## quel numero all'HUD. Il percorso e' quello vero, non `set_game_over(true)`
 ## scritto a mano: la schermata deve comparire perche' il giocatore e' morto,
@@ -699,7 +964,20 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 	var player = arena.get_node_or_null("Player")
 	if not h.check(player is Object, "avvio %d: la scena deve avere il nodo Player" % round_no):
 		return
-	player.set("hp", 0.0)
+	# Il colpo che uccide passa dalla porta del giocatore, non dalla scrittura
+	# del campo: `take_damage()` e' la via che `Game.damage_player()` chiama
+	# secondo il contratto di m7, e quindi la stessa che il nemico usa in gioco.
+	# Un valore maggiore della vita massima porta `hp` a zero per il clamp del
+	# giocatore, non per una soglia scritta qui.
+	if h.check((player as Object).has_method("take_damage"),
+			"avvio %d: il giocatore non espone \"take_damage\"" % round_no):
+		_clear_invuln(player)
+		(player as Object).call("take_damage", _player_number(player, "max_hp"))
+	else:
+		# Ripiego dichiarato: il campo `hp` resta pubblico, quindi questa riga
+		# funziona anche se `take_damage` sparisce. Non e' il percorso di m7, ed e'
+		# per questo che il ramo di sopra e' quello che il test prova.
+		player.set("hp", 0.0)
 	_tick(arena, hud)
 	h.check(hud.game_over_visible(),
 		"avvio %d: il player a 0 HP deve mostrare la schermata di game over" % round_no)
@@ -707,9 +985,17 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 		"avvio %d: a 0 HP anche la barra della vita deve essere vuota" % round_no)
 
 	# E il ritorno: il restart rimette il giocatore in piedi, quindi la
-	# schermata non deve essere un'insegna appesa per sempre.
-	player.set("hp", 100.0)
+	# schermata non deve essere un'insegna appesa per sempre. Il numero non e'
+	# scritto qui: si rimette in piedi il giocatore e si rilegge la vita che si e'
+	# dato da solo, cosi' la verifica non ha un secondo numero di mano.
+	if h.check((player as Object).has_method("restart_run"),
+			"avvio %d: il giocatore non espone \"restart_run\"" % round_no):
+		(player as Object).call("restart_run")
+	else:
+		player.set("hp", _player_number(player, "max_hp"))
 	_tick(arena, hud)
+	h.check(_player_number(player, "hp") > 0.0,
+		"avvio %d: dopo il restart il giocatore dev'essere in piedi: hp e' %.2f" % [round_no, _player_number(player, "hp")])
 	h.check(not hud.game_over_visible(),
 		"avvio %d: tornato in vita il giocatore, la schermata di game over deve sparire" % round_no)
 

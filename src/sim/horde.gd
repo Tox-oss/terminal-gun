@@ -65,6 +65,20 @@ extends Node3D
 ## `player_position` NON e' registrata qui: e' di -gameplay, e registrarne due
 ## impl per lo stesso nome e' una doppia registrazione.
 ##
+## ## m7: l'orda ferisce il giocatore, e lo chiama dal ciclo di gioco
+##
+## Il chiamante di `Game.damage_player(x)` e' **questa foglia**: e' `_apply_bites`,
+## dentro `step()`, e non un test. Il criterio n. 1 della milestone 7 e' una
+## `grep` su `src/` e non un'asserzione, proprio perche' un test che chiama
+## `damage_player` a mano dimostrerebbe che la funzione funziona e non che
+## qualcuno la chiami.
+##
+## La strada e' il contratto e non `Game.player.take_damage(x)`: la seconda
+## funzionerebbe e obbligherebbe questa foglia a leggere `src/player/player.gd`,
+## cioe' il codice di un'altra (piano sez. 5, regola 3). I numeri del morso
+## stanno in `src/sim/enemy.gd` e sono tre costanti, non una tabella: vedi la
+## sezione "il morso" di quel file, che porta la misura da cui sono usciti.
+##
 ## ## Perche' qui il contratto si prende con `get_node_or_null` e non con `Game.`
 ##
 ## Questo file viene compilato anche dai processi di test lanciati con
@@ -120,6 +134,54 @@ var kinds: PackedInt32Array = PackedInt32Array()
 ## Secondi di pausa dopo un colpo. Colpisce solo l'animazione, non la fisica.
 var timers: PackedFloat32Array = PackedFloat32Array()
 
+# --- Il morso (milestone 7) ---------------------------------------------------
+#
+# Due array paralleli, e sono loro che portano la meta' di questa foglia in m7:
+# il nemico che chiama `Game.damage_player(x)` dal ciclo di gioco.
+#
+# `bite_timers[i]` e' da quanto tempo il nemico i e' addosso al giocatore,
+# `bites[i]` vale 1 **solo nel passo in cui quel nemico morde**. La decisione
+# ("sono abbastanza vicino, e il periodo e' passato") sta in
+# `src/sim/enemy.gd`, dove stanno le specie; qui si applica solo il tetto dei
+# morderci contemporanei e si chiama il contratto.
+
+var bite_timers: PackedFloat32Array = PackedFloat32Array()
+var bites: PackedInt32Array = PackedInt32Array()
+
+## Quanti secondi devono passare fra due morsi **che arrivano addosso**, di
+## qualunque specie. E' il tetto che tiene insieme la m7, ed e' nato da una
+## prima idea **sbagliata** che la misura ha smentita (vedi sotto).
+##
+## ## La prima idea, e perche' la misura l'ha buttata
+##
+## Il primo tentativo era un tetto di **3 nemici che mordono nello stesso passo**,
+## col nome `TOUCH_BITERS`. La misura su 30 s a regime (in `tests/test_orda.gd`)
+## dice: nell'onda 1 il passo peggiore ha **1** morso e sull'onda 8 ne ha **1**.
+## Il tetto non mordeva mai: e' un tetto per passo, e un passo dura 1/60 s, quindi
+## tollera 180 morsi al secondo. Non era un tetto, era una decorazione.
+##
+## ## Il tetto vero, e il numero che l'ha prodotto
+##
+## Quello che cresce con la folla non e' il danno di un morso, e' la **cadenza**:
+## 2.20 morsi al secondo con 25 vivi e **6.50** con 200, misurati senza nessun
+## tetto. Un tetto sulla cadenza e' quindi quello che serve. `TOUCH_INTERVAL =
+## 0.40 s` fissa il massimo teorico a 2.5 morsi/s; la cadenza **misurata** con
+## il tetto dentro e' 1.07-1.57 morsi/s, sotto quel massimo perche' un morso
+## respinto non e' rimesso in coda: chi perde aspetta un periodo intero.
+##
+## Il risultato e' che l'orda da 200 vivi fa **2.56 volte** il danno al secondo
+## dell'orda da 25, contro una crescita di circa 5.7 che senza il tetto avrebbe
+## misurato lo stesso campione (contatto 3.3 volte x morso medio 1.7 volte, perche'
+## a 200 vivi l'anello intorno al giocatore e' fatto di nemici piu' grossi). In
+## secondi da fermo al centro: **6.5 s** con 200 vivi, **16.5 s** con 25.
+const TOUCH_INTERVAL := 0.40
+## Danno consegnato al giocatore nell'ultimo passo. Telemetria: serve a un
+## test per guardare l'economia del morso e a un eventuale HUD per il lampo,
+## e non e' un secondo posto dove il danno e' scritto (criterio n. 6 di m7).
+var touch_damage_last: float = 0.0
+## Quanti nemici hanno morso davvero nell'ultimo passo (non quanti potevano).
+var touch_bites_last: int = 0
+
 # --- Telemetria ---------------------------------------------------------------
 
 ## Nemici ammazzati dall'inizio della partita.
@@ -170,6 +232,11 @@ var _contract_node: Node = null
 ## Il giocatore, tenuto dal dato `Game.player`. Si rivede solo se non e' piu'
 ## valido: nel ciclo di gioco non si fa una ricerca per nome ogni frame.
 var _player_cache: Node = null
+## Quanto manca al **prossimo** morso che puo' arrivare addosso, in secondi.
+## E' il tetto di cadenza di `TOUCH_INTERVAL`, ed e' l'unico stato che serve:
+## nessun cursore, nessun conteggio di morderci per passo (vedi la sezione
+## "il morso" in testa al file: quel tetto li' e' stato provato e non mordeva).
+var _bite_interval_left: float = 0.0
 
 func _ready() -> void:
 	_build()
@@ -255,6 +322,8 @@ func _resize_arrays(n: int) -> void:
 	hp.resize(n)
 	kinds.resize(n)
 	timers.resize(n)
+	bite_timers.resize(n)
+	bites.resize(n)
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -294,6 +363,8 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	kinds[i] = kind
 	hp[i] = E.hp_of(kind) * _hp_scale()
 	timers[i] = 0.0
+	bite_timers[i] = 0.0
+	bites[i] = 0
 	colors[i] = E.color_of(kind)
 
 # --- Simulazione --------------------------------------------------------------
@@ -324,11 +395,75 @@ func step(delta: float) -> void:
 	_rebuild_grid()
 	hit_count = 0
 	var focus := _player_focus()
+	# Il giocatore c'e' davvero? E' la domanda che accende il morso: senza un
+	# giocatore non c'e' nessuno da ferire, e nessun nemico deve "mordere" il
+	# centro vuoto dell'arena. Si calcola una volta per passo, non per nemico.
+	var ha_giocatore := _has_player()
 	for i in count:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
-			kinds, arena_radius)
+			kinds, arena_radius, bite_timers, bites, ha_giocatore)
+	_apply_bites(delta)
 	_sweep_dead()
 	_wave_tick(delta)
+
+## Applica i morsi che `src/sim/enemy.gd` ha deciso in questo passo e chiama
+## `Game.damage_player(x)`.
+##
+## ## Qui, e non altrove, sta la meta' di -orda in m7
+##
+## Il chiamante che il criterio n. 1 cerca con la `grep` e' questa riga: e l'unica
+## in tutto `src/`, e il suo numero non e' scritto qui ma esce da
+## `E.touch_damage_of(kind)`, cioe' dalla tabella delle specie (criterio n. 6: un
+## numero di danno in un posto solo).
+##
+## ## Perche' si passa dal contratto e non da `Game.player`
+##
+## `Game.player.take_damage(x)` funzionerebbe e sarebbe una trappola: obbligherebbe
+## questa foglia a **leggere `src/player/player.gd`**, cioe' il codice di un'altra,
+## che e' l'antipattern che la sezione 5 del piano esiste per impedire. Qui si sa
+## solo che il contratto espone `damage_player(amount) -> bool` e nient'altro.
+##
+## ## Il tetto e' un intervallo, non un numero di morderci
+##
+## `TOUCH_INTERVAL` e' il tetto dichiarato in testa al file. Il giro parte dal
+## primo nemico che morde in ordine d'indice: con un tetto a intervallo il
+##Nemico che vince e' quello con l'indice piu' basso fra quelli pronti, e gli
+## indici cambiano a ogni morte (scambio-ultimo), quindi non e' sempre lo stesso.
+## Gli altri segnali restano accesi fino al passo dopo, dove `enemy.gd` li
+## azzera: chi non ha vinto semplicemente aspetta il suo prossimo periodo.
+##
+## Nessuna allocazione: si scrive dentro array gia' di capienza e si chiama un
+## metodo del contratto. Niente `new()`, niente `instantiate()`, niente
+## `queue_free()`.
+func _apply_bites(delta: float) -> void:
+	touch_damage_last = 0.0
+	touch_bites_last = 0
+	# L'intervallo si scarica **prima** del controllo: cosi' un morso non puo'
+	# costare un passo extra di attesa a ogni fine intervallo.
+	_bite_interval_left = maxf(0.0, _bite_interval_left - delta)
+	if count == 0 or _bite_interval_left > 0.0:
+		return
+	var game := _contract()
+	if game == null:
+		return
+	for i in count:
+		if bites[i] == 0:
+			continue
+		bites[i] = 0
+		var danno := E.touch_damage_of(kinds[i])
+		game.damage_player(danno)
+		touch_damage_last = danno
+		touch_bites_last = 1
+		_bite_interval_left = TOUCH_INTERVAL
+		return
+
+## C'e' un giocatore in scena? `player_position` e' l'API che -gameplay registra:
+## se non c'e', non c'e' nessun giocatore, e nessun morso. Non e' una ipotesi sul
+## contratto, e' la strada che `nearest_enemy` e `random_spawn_point` gia' usano
+## per lo stesso motivo (piano 5.1).
+func _has_player() -> bool:
+	var game := _contract()
+	return game != null and game.has_impl("player_position")
 
 ## Fine dell'onda e riempimento, in un passo solo.
 func _wave_tick(delta: float) -> void:
@@ -442,6 +577,8 @@ func _kill(i: int) -> void:
 		kinds[i] = kinds[last]
 		hp[i] = hp[last]
 		timers[i] = timers[last]
+		bite_timers[i] = bite_timers[last]
+		bites[i] = bites[last]
 	count = last
 	_resize_arrays(count)
 	kills += 1
@@ -540,6 +677,9 @@ func restart_run() -> void:
 	run.restart()
 	kills = 0
 	hit_count = 0
+	_bite_interval_left = 0.0
+	touch_damage_last = 0.0
+	touch_bites_last = 0
 	_sync_wave()
 	_sync_weights()
 	_sync_population()
@@ -807,7 +947,8 @@ func _player_hp() -> float:
 
 ## Il bersaglio dei nemici. Se -gameplay ha registrato `player_position` si usa
 ## quella, altrimenti il centro dell'arena: nessuna dipendenza circolare, e
-## nessun `push_warning` se il contratto non e' ancora popolato.
+## nessun `push_warning` se il contratto non e' ancora popolato. E' anche la
+## domanda che accende il morso: vedi `_has_player()`.
 func _player_focus() -> Vector3:
 	var game := _contract()
 	if game != null and game.has_impl("player_position"):

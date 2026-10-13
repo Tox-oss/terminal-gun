@@ -92,6 +92,10 @@ var _sfx_hurt: AudioStreamPlayer3D
 var _sfx_levelup: AudioStreamPlayer3D
 var _camera: Camera3D
 var _cam_basis := Basis.IDENTITY
+## `died` e' gia' stato emesso per questa vita. Si azzera in `reset_run()` e non
+## altrove: e' il flag che distingue «e' appena morto» da «e' gia' morto», che
+## e' la differenza fra emettere la morte una volta e una volta per colpo.
+var _dead_signalled := false
 
 func _ready() -> void:
 	# Piano §5.1: i dati con l'assegnazione diretta, i metodi con
@@ -100,6 +104,24 @@ func _ready() -> void:
 	# aver registrato e non ha registrato niente.
 	Game.player = self
 	Game.register_impl("player_position", self._player_position)
+
+	## ## m7: la via che il danno prende (`contracts.gd`, "damage_player")
+	##
+	## **Perche' la forma lunga e non quella corta.** La forma corta di piano §5.1
+	## risolve a `self.<nome API>()`, quindi `register_impl("damage_player", self)`
+	## cercherebbe `self.damage_player()`, che questo file non ha e non deve avere:
+	## il metodo si chiama **`take_damage`** e l'API si chiama **`damage_player`**.
+	## I due nomi hanno una faccia sola e non combaciano, quindi qui la forma
+	## lunga non e' una scelta di stile: e' l'unica che registra il metodo giusto.
+	## Con la forma lunga il contratto chiama `take_damage(amount)` e riceve il
+	## `bool` che `take_damage` gia' restituiva.
+	##
+	## Fin qui questa riga non c'era e il giocatore era **invulnerabile per
+	## costruzione**: `take_damage` non aveva nessun chiamante in tutto `src/`
+	## (misurato il 2026-10-13 con una `grep`: una riga, la definizione). Il
+	## chiamante vero e' di **-orda**, che chiama `Game.damage_player(x)` dal ciclo
+	## di gioco: qui si registra il destinatario, e non si registra nessun chiamante.
+	Game.register_impl("damage_player", self.take_damage)
 
 	progression = PROGRESSION_SCRIPT.new()
 	progression.bind(self)
@@ -156,18 +178,36 @@ func drive_manually() -> void:
 # Nessun nodo viene creato ne' liberato: sono numeri in campi che esistono gia',
 # e per il criterio n. 4 ("nessun nodo duplicato") il numero di nodi non puo'
 # cambiare invece di dover essere controllato.
+#
+# ## m7, criterio n. 3: «morire non corrompe la partita»
+#
+# Il debito era dichiarato e aperto (`tests/test_gameloop.gd` lo stampava ad alta
+# voce: dopo il restart le vite erano ancora `0.0` e l'orda ripiombava in
+# `game_over` al passo successivo). La meta' e' di -gameplay perche' a rimettere
+# in piedi **un giocatore** puo' essere solo il giocatore: l'orda non ne tiene uno.
+# Le tre cose che il criterio chiede sono qui sotto, in tre righe, e nessuna
+# delle tre e' un ramo: sono numeri in campi, quindi il numero di nodi non puo'
+# cambiare e non c'e' niente da duplicare.
 
 ## Rimette in piedi il giocatore: vita piena, statistiche ai numeri di codice,
 ## progressione azzerata, arma riportata alla regolazione di partenza.
 func reset_run() -> void:
-	hp = MAX_HP
+	# `max_hp` PRIMA di `hp`: il criterio n. 3 di m7 chiede che `hp` torni a
+	# `max_hp`, e con `hp = max_hp` quella e' un'identita' invece di una
+	# coincidenza fra due costanti che qualcuno ha cambiato solo da una parte.
 	max_hp = MAX_HP
+	hp = max_hp
 	move_speed = MOVE_SPEED
 	accel = ACCEL
 	velocity = Vector3.ZERO
 	invuln = 0.0
 	dash_timer = 0.0
 	dash_cd = 0.0
+	# La vita e' tornata: la morte di questa partita e' finita, e il prossimo
+	# colpo che porta a zero deve poter emettere `died` di nuovo. Senza questa
+	# riga il restart riporterebbe in piedi un giocatore che non si puo' piu'
+	# morire, che e' il difetto opposto a quello che m7 chiude.
+	_dead_signalled = false
 	# Al centro dell'arena: una partita nuova comincia dal centro, e la camera
 	# dell'arena parte gia' li'. Il nemico piu' vicino e' a `Game.nearest_enemy`
 	# nell'arma, quindi la posizione non cambia nulla di quello che segue.
@@ -180,6 +220,11 @@ func reset_run() -> void:
 ## Il restart **completo**: io e -orda, in quest'ordine. Prima il giocatore e poi
 ## l'orda, cosi' nell'istante in cui la partita torna `playing` nessuno e' a zero
 ## vite e nessuno puo' rileggere `game_over`.
+##
+## L'ordine non e' una scelta di stile e non e' invertibile: `horde.restart_run()`
+## chiama `run.restart()` e ripopola l'orda **rispetto a `Game.player_position()`**,
+## cioe' rispetto al giocatore. Se l'orda fosse prima, i nemici nascerebbero dove
+## il giocatore **era** e il restart riporterebbe in gioco un mondo fatto da solo.
 func restart_run() -> void:
 	reset_run()
 	var horde = Game.horde
@@ -323,6 +368,21 @@ func world_direction(input_dir: Vector3) -> Vector3:
 
 ## Un colpo. Restituisce true se è entrato: mentre si è invulnerabili non entra,
 ## e questa è la difesa contro l'orda che ti ammazza in tre frame.
+##
+## È l'implementazione che il contratto chiama con `Game.damage_player(x)`, e il
+## suo `bool` è la risposta che il contratto promette: `true` se la mossa ha
+## fatto scendere `hp`, `false` altrimenti (danno nullo, invulnerabilità, corsa).
+##
+## ## `died` una volta sola, e perché (m7)
+##
+## Prima di m7 questa riga emetteva `died` **ogni volta** che `hp` restava a
+## zero, cioè una volta ogni `INVULN_AFTER_HIT` finché l'orda ti ha accerchiato:
+## il segnale della morte poteva sparare quattro, cinque volte per la stessa
+## morte. Non se ne accorgeva nessuno perche' nessuno moriva (piano §1.4a: il
+## chiamante di `take_damage` non esisteva), e `died` non aveva ascoltatori in
+## tutto `src/`. Da m7 il chiamante c'è — è di -orda — quindi il difetto è
+## diventato raggiungibile, e la spinta è una sola variabile: la morte è una
+## **transizione**, non uno stato che si ri-annuncia a ogni colpo.
 func take_damage(amount: float) -> bool:
 	if amount <= 0.0 or is_invulnerable():
 		return false
@@ -331,7 +391,8 @@ func take_damage(amount: float) -> bool:
 	if _sfx_hurt != null:
 		_sfx_hurt.play()
 	hurt.emit(amount, hp)
-	if hp <= 0.0:
+	if hp <= 0.0 and not _dead_signalled:
+		_dead_signalled = true
 		died.emit()
 	return true
 

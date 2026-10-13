@@ -48,6 +48,61 @@ const SPEED_MAX := 18.0
 ## Spinta verso il centro quando il nemico sborda l'arena.
 const EDGE_PUSH := 3.0
 
+# --- Il morso: cosa fa il nemico al giocatore (milestone 7) -------------------
+#
+# ## Tre costanti e nessuna tabella
+#
+# Il criterio n. 6 della milestone 7 chiede che un numero di danno non viva in
+# due posti: quindi qui sotto ci sono **tre costanti e nessuna tabella**. Il
+# danno e la cadenza di ogni specie escono da `MASS`, che e' gia' la tabella
+# del progetto e gia' governa la separazione (`SEPARATION_FORCE / mass_of(kind)`
+# in `horde.gd::_separation`). Una cosa sola dice "quanto e' pesante", e quella
+# cosa governa sia quanto il nemico ti scarta dal tuo vicino, sia quanto ti
+# morde: e' la stessa fisica, scritta una volta sola.
+#
+#     morso(specie)   = TOUCH_DAMAGE_BASE * massa / massa(runner)
+#     periodo(specie) = TOUCH_PERIOD      * sqrt(massa / massa(runner))
+#     dps(specie)     = morso / periodo   = base/periodo * sqrt(massa/runner)
+#
+# Il `sqrt` sul periodo e' quello che tiene il capo in gioco: senza, il boss
+# (massa 6.0, otto volte e mezzo il runner) morderebbe 8,6 volte tanto e 8,6
+# volte spesso, cioe' 74 volte la dps di un runner. Con il `sqrt` il capo
+# mordere forte e piano, che e' quello che ci si aspetta da una cosa pesante.
+#
+# ## La portata del morso, e da dove viene
+#
+# `TOUCH_REACH` e' **misurato**, non scelto. Sull'orda a regime con un giocatore
+# fermo al centro, passo fisso 1/60 s, 30 s di misura (i numeri sono quelli che
+# escono da `tests/test_orda.gd`, sezione 11, e sono riprodotti a ogni lanzo):
+#
+# | vivi | a portata di morso | distanza minima mai vista |
+# |---|---|---|
+# | 25 (onda 1) | 5-6, cioe' il **20-24%** | 0.14 m |
+# | 75 (curva a meta') | 10, il 13% | — |
+# | 200 (onda 8) | 20, il **10%** (il 51% e' oltre 6 m) | 0.04 m |
+#
+# Con `1.2 m` l'onda 1 mette in contatto poco piu' di un quinto della folla: il
+# nemico che ti morde deve **arrivarti addosso**, non colpirti da tre metri. La
+# riga da 200 dice anche perche' il contatto **non** cresce con la popolazione: a
+# 200 vivi meta' dell'orda non arriva nemmeno a sei metri, perche' l'anello
+# intorno al giocatore e' saturo. Il danno che arriva addosso cresce quindi
+# ~3.3 volte dall'onda 1 all'onda 8 e non 8.
+const TOUCH_REACH := 1.2
+
+## Danno di un morso di runner, e da dove viene questo numero.
+##
+## Il primo tentativo era **2.0** ed era **troppo forte**: misurava 6.40 s da fermo
+## al centro dell'onda 1, cioe' un giocatore che sbaglia un attimo muore prima
+## di capire cosa e' successo. Il numero e' stato abbassato a 1.6 e rimisurato.
+## Il tetto alla cadenza (`TOUCH_INTERVAL` in `horde.gd`) e' stato messo **prima**
+## di questo ritocco ed e' quello che tiene la curva: vedi la sezione "il morso"
+## di `horde.gd`, che dichiara anche il primo tentativo sbagliato.
+const TOUCH_DAMAGE_BASE := 1.6
+
+## Secondi fra due morsi della stessa specie, per il runner. Il resto lo
+## ricava da `MASS` con la radice quadrata (vedi sopra).
+const TOUCH_PERIOD := 1.0
+
 static func clamp_kind(kind: int) -> int:
 	return clampi(kind, 0, KIND_COUNT - 1)
 
@@ -69,17 +124,44 @@ static func color_of(kind: int) -> Color:
 static func knockback_resist_of(kind: int) -> float:
 	return KNOCKBACK_RESIST[clamp_kind(kind)]
 
+## Quanto toglie hp un morso di questa specie. Vedi la sezione "il morso" in
+## testa al file: una sola formula sulla tabella `MASS`, nessun numero scritto
+## due volte.
+static func touch_damage_of(kind: int) -> float:
+	var k := clamp_kind(kind)
+	return TOUCH_DAMAGE_BASE * MASS[k] / MASS[RUNNER]
+
+## Quanti secondi devono passare fra due morsi della stessa specie. Stessa
+## tabella, radice quadrata: piu' pesante significa piu' lento a mordere.
+static func touch_period_of(kind: int) -> float:
+	var k := clamp_kind(kind)
+	return TOUCH_PERIOD * sqrt(MASS[k] / MASS[RUNNER])
+
 ## Un passo di simulazione del nemico `i`.
 ##
 ## `push` e' la spinta di separazione calcolata dalla griglia (l'horda la passa
 ## gia' pronta: qui dentro non si sa niente di griglie ne' di query).
 ##
+## `has_target` dice se il bersaglio e' un **giocatore** e non un punto vuoto.
+## Senza di esso nessun nemico morde: il morso e' l'unica azione che questa
+## simulazione fa sul giocatore, e contro un bersaglio che non c'e' non ha
+## senso accenderla. E' anche il motivo per cui nessun test che mette l'orda da
+## sola si trova un morso senza avergli dato un giocatore.
+##
+## `bite_timers` e `bites` sono due array paralleli in scrittura: il primo
+## tiene da quanto tempo questa specie e' in contatto, il secondo dice "questo
+## passo morde" (1) o no (0). **La decisione del morso e' qui dentro**, dove
+## stanno le specie; a chi tocca applicarlo (`horde.gd`) spetta solo il tetto
+## dei morderci contemporanei e la chiamata al contratto.
+##
 ## Tutti gli array sono paralleli e lunghi `count`: scrive solo `positions[i]`,
-## `velocities[i]` e `timers[i]`. Nessuna allocazione.
+## `velocities[i]`, `timers[i]`, `bite_timers[i]` e `bites[i]`. Nessuna
+## allocazione.
 static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		positions: PackedVector3Array, velocities: PackedVector3Array,
 		timers: PackedFloat32Array, kinds: PackedInt32Array,
-		arena_radius: float) -> void:
+		arena_radius: float, bite_timers: PackedFloat32Array,
+		bites: PackedInt32Array, has_target: bool) -> void:
 	var kind := clamp_kind(kinds[i])
 	var pos := positions[i]
 	var to_target := target - pos
@@ -112,5 +194,20 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		vel -= Vector3(flat.x, 0.0, flat.y) / maxf(r, 0.001) * (r - limit) * EDGE_PUSH
 
 	timers[i] = maxf(0.0, timers[i] - delta)
+	# Il morso riparte da zero quando il contatto si perde: una specie deve
+	# restare addosso per un periodo **intero** prima di mordere, altrimenti un
+	# nemico che sbatte sul bordo del contatto azzererebbe il timer ogni passo e
+	# non morderebbe mai. E il prezzo e' dichiarato: chi entra ed esce spesso
+	# non morde affatto.
+	bites[i] = 0
+	if has_target and dist <= RADIUS[kind] + TOUCH_REACH:
+		var atteso := bite_timers[i] + delta
+		if atteso >= touch_period_of(kind):
+			bites[i] = 1
+			bite_timers[i] = 0.0
+		else:
+			bite_timers[i] = atteso
+	else:
+		bite_timers[i] = 0.0
 	velocities[i] = vel
 	positions[i] = pos + vel * delta

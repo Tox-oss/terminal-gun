@@ -645,6 +645,50 @@ loro dicono **come si chiamano** e **quanto fanno**, e li espone chi possiede i 
 | **m6-w0** | vertice | — | superficie `offer_label`/`offer_effect` congelata in `contracts.gd`, specifica scritta, `PERM: 15/15` prima di lanciare |
 | **m6-w1** | gameplay ∥ ui | 2 agenti, una stessa risposta | `GATE: 8/8`, `--quit-after 300` pulito, denti provati e rimossi, rieseguiti dal vertice |
 
+### 4.7 Onde della milestone 7
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m7-w0** | vertice | — | **GIÀ CHIUSA**, commit `884c711`: superficie `damage_player(amount) -> bool` congelata in `src/core/contracts.gd`, specifica §1.9 scritta. `PERM: 15/15` confermata prima di lanciare: **nessuna riga di permesso nuova** |
+| **m7-w1** | gameplay ∥ orda ∥ ui | 3 agenti, una stessa risposta | `GATE: 8/8` **meno il leak dichiarato**, `--quit-after 300` pulito **salvo lo stesso leak**, denti provati e rimossi, rieseguiti **dal vertice** |
+| **m7-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+**Il confine di m7 è verificato, non dedotto: `src/render/` non serve.** La catena della salute
+**esiste già** e nessuna foglia la deve costruire:
+
+```
+enemy -> Game.damage_player(x)  [caller di -orda, lo scrive in m7-w1]
+       -> player.hp              [scende: lo scrive -gameplay in m7-w1]
+       -> arena.gd:87,91  _num(player, "hp" / "max_hp")   [GIA' ESISTE, e' di -arena]
+       -> hud.set_state(...)  ogni frame                    [GIA' ESISTE, e' di -ui]
+```
+
+`src/render/arena.gd` legge **`Game.player.hp`** e **`Game.player.max_hp`** e li passa alla HUD
+ogni frame: la barra della salute è **piatta perché `hp` non scende**, non perché il cablaggio
+manchi. Quindi il criterio n. 4 di m7 è **un test**, non un intervento, e `-ui` non deve
+chiedere `src/render/**`. Era il rischio di confine di questa onda ed è stato chiuso **prima**
+di lanciare: le tre scope restano disgiunte e nessuna foglia tocca un file di un'altra.
+
+**Baseline riletta dal vertice il 2026-10-13, prima di m7-w1.** Non rileggiata, eseguita:
+
+| misura | valore | cosa significa |
+|---|---|---|
+| `GATE` | **7/8**, exit 1 | l'unico rosso è `test_ui`, e il motivo è `ERROR: 1 resources still in use at exit` |
+| `PERM` | **15/15** | verde |
+| `--quit-after 300` | `WARNING: 2 ObjectDB instances were leaked at exit` + lo stesso `ERROR` | il leak, che è **debito dichiarato**, non un difetto di m7 |
+| `git status --porcelain` | **pulito** | HEAD `884c711` = m7-w0 |
+| `grep damage_player src/` | **una** riga, `src/core/contracts.gd` | il criterio n. 1 è rosso oggi, che è il suo stato iniziale |
+| `grep take_damage src/` | **una** riga, `player.gd:326` = la **definizione** | zero chiamanti: confermato, non dichiarato |
+| `node_count` scena vera | **44** | tetto 120 (§1 criterio n. 3) |
+
+**Come si legge un rosso in m7-w1, e la regola che ne segue.** La porta **tira i dadi**: il
+leak è di `src/weapons/weapon_base.gd:194`, che è nel scope di `-gameplay`, e la baseline
+ dichiarata è **2 allarmi su 5** lanci di `--quit-after 300`. Quindi: **un rosso in `test_ui`
+non è un difetto di `-ui`**, ed è il solo test che va trattato così. **Ogni altro rosso è un
+difetto**, e `-ui` è esonerata dal leak solo finché **non tocca** `weapon_base.gd`: il leak è
+un debito con la sua onda, e misurarlo dentro m7 renderebbe impossibile sapere quale dei due
+cambiamenti ha mosso il numero.
+
 ### m6 SOSPESA il 2026-10-13: che cosa è committato, che cosa resta sporco, e perché
 
 **Decisione dell'utente**: «mettiamo via m6 e committo quello che è buono». E ha ragione: il
@@ -1090,7 +1134,7 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 | 2 | il giocatore perde hp e muore, sulla **scena vera** | `tests/test_gameplay.gd`: la partita parte, l'orda raggiunge il giocatore, `hp` scende di **almeno un colpo** e resta sotto; a `hp <= 0` lo stato è `game_over`. Un test che chiama `damage_player(50.0)` a mano **non soddisfa** il criterio n. 1 e vale come prova del criterio n. 2 solo se il chiamante del n. 1 c'è |
 | 3 | morire **non corrompe** la partita | `restart_run()` **rimette in piedi il giocatore**: `hp` torna a `max_hp`, l'onda torna a 1, nessun nodo duplicato. **Debito già noto e ancora aperto**: `-orda` ha segnalato che `restart_run()` oggi lascia `hp 0.0` e l'orda ripiomba in `game_over` al passo dopo. m7 lo chiude |
 | 4 | la HUD mostra la salute vera | `tests/test_ui.gd`: la barra scende **insieme a `hp`**, non è un valore fittizio. La metafora che l'utente ha scelto è **RAM disponibile**, e qui non si decide il testo: qui si verifica che il numero sotto sia quello vero |
-| 5 | la porta è verde | `GATE: 8/8` **meno il leak dichiarato**, che resta `test_ui` per la ragione iscritta in §1.8-bis. `PERM: 15/15` |
+| 5 | la porta è verde | `GATE: 8/8` **meno il leak dichiarato**, che resta `test_ui` per la ragione iscritta sotto §1.7, in «Il leak: isolato, e la porta è **non deterministica**». `PERM: 15/15` |
 | 6 | la percentuale è **una sola** | nessun numero di danno scritto a mano in due posti. È il difetto di `LABELS` («+15%» per un `×0.85` che è +17,6%), ricomparso dal design dell'utente con `$SUDO` a «+200%» e `chmod 777` a «+15%» |
 
 **Perché la firma è nel contratto e non nella scena.** Il vertice ha aggiunto `damage_player(amount) -> bool` a `src/core/contracts.gd` (il file di cui è proprietario), registrata come `-gameplay`. `-orda` chiama `Game.damage_player(x)` e **non legge mai `player.gd`**: la strada alternativa, `Game.player.take_damage(x)`, funzionerebbe e sarebbe una trappola, perché obbligherebbe una foglia a copiare la conoscenza di un'altra — l'antipattern che la §5 esiste per impedire, e che è già costato un'intera onda a m2.
@@ -1220,6 +1264,89 @@ L'ultima è la più umiliante e la più utile: la mia stessa allowlist nega `god
 permette `godot ...` da solo, e l'ho scoperto **su me stesso** in questa sessione. Due foglie
 hanno perso un'onda intera per la stessa cosa che sapevo da ore e non ho scritto nei brief.
 **Scrivere la cosa che si è imparata nel prompt delle foglie è un atto, non un dettaglio.**
+
+### Le onde della milestone 7, e il verdetto del vertice
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m7-w0** | vertice | superficie `damage_player(amount) -> bool` congelata in `src/core/contracts.gd`, commit `884c711`. **Riletto e confermato** il 2026-10-13 prima di m7-w1 | `PERM: 15/15` | **verde** |
+| **m7-w1** | gameplay, orda, ui — 3 agenti, una stessa risposta | `src/sim/horde.gd` chiamante di `damage_player`; `player.gd` registra la forma lunga e `reset_run()` rimette `hp` a `max_hp`; `hud.gd` espone `health_text()` e dichiara che nella HUD non c'è aritmetica sulla vita | `GATE: 7/8` (unico rosso: il **leak dichiarato**), `--quit-after 300` **pulito**, `PERM: 15/15` | **verdi, con tre debiti dichiarati** |
+| **m7-w2** | vertice | porte rieseguite dal vertice, piano aggiornato, commit | — | **verde** |
+
+**m7-w1 ha avuto due giri, e il primo ha lasciato l'albero non compilante.** È dichiarato perché
+il metodo è la lezione, non il numero:
+
+| giro | `GATE` | cosa era rosso |
+|---|---|---|
+| dopo il lancio | **1/8** | **`src/sim/horde.gd` non compilava** (4 parse error: `TOUCH_BITERS` non dichiarato ×3, `_apply_bites()` chiamata con 1 argomento su 0), e cascata su 6 test su 8; più `tests/test_ui.gd` con `_health_numbers()` non trovata |
+| dopo la rilancia delle due foglie responsabili | **7/8** | **solo** il leak dichiarato |
+
+**Una sola riga rotta teneva rossi sei test.** Il gate l'ha detto al primo colpo
+(`ERROR: Failed to load script "res://src/sim/horde.gd" with error "Parse error"`) e la cascata
+era rumore. La lezione che ne esce è la stessa di §11.11, vista dall'altra parte: **un file che
+non compila non è un difetto, è un rumore che copre ogni altro difetto**, quindi la prima azione
+di un vertice di fronte a un `GATE` crollato è **risalire all'errore di compilazione**, non
+rilanciare foglie.
+
+**Tre errori miei, che le foglie hanno trovati e che io avrei dovuto scrivere nei brief.**
+
+1. Ho scritto che l'asserzione «META' DI -GAMEPLAY» sta in `tests/test_arena.gd`: **sta in
+   `tests/test_gameloop.gd:803-818`**, che è di `-orda`. `-gameplay` si è fermata invece di
+   aggirare, ed ha ragione: il file era di un'altra foglia.
+2. **Non ho scritto che `sleep` è negato**, quindi una foglia **non può aspettare** che una
+   parallela finisca. `-gameplay` l'ha scoperto a runtime (`sleep45` → `Permission denied:
+   shell`) e ha ripiegato su un `grep` di controllo: è stato quello il motivo per cui il suo
+   primo giro di denti è finito **inconcludente**. È già scritto in questo piano che i comandi
+   composti sono negati e due onde sono state perse per quello; **il divieto di aspettare non
+   era scritto, ed è costato un giro**.
+3. Ho scritto «non lasciare mai l'albero non compilante» solo **nella rilancia**, e non nel
+   primo brief. La regola che salva un'onda è quella che si scrive **prima**, non quella che si
+   scrive quando il danno è fatto.
+
+**Il contenimento di questa onda è stato verificato, non dichiarato.** `git status --porcelain`
+dopo le tre foglie: **otto file modificati, tutti dentro uno scope dichiarato** —
+`docs/piramide/piano.md` (vertice), `src/player/player.gd` e `tests/test_gameplay.gd`
+(`-gameplay`), `src/sim/enemy.gd`, `src/sim/horde.gd`, `tests/test_orda.gd` (`-orda`),
+`src/ui/hud.gd`, `tests/test_ui.gd` (`-ui`). **Nessun file fuori scope**, nessuna scrittura in
+`src/render/`, `scenes/`, `project.godot` o `.godot/`: le tre foglie non si sono toccate e la
+foglia che non doveva scrivere (`-ui` su `src/render/`) non ci ha messo mano.
+
+### I sei criteri della milestone 7, uno per uno
+
+Rimisurati dal vertice il 2026-10-13 con `GATE`, `--quit-after 300`, `PERM` e una `grep` propria.
+**Il criterio n. 1 non è un test, e non può essere letto in un report: l'ho misurato io.**
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | il danno arriva da codice di gioco | **sì** | `grep damage_player src/`: il **chiamante** è `src/sim/horde.gd:454 game.damage_player(danno)`, dentro `_apply_bites`, cioè dal ciclo di gioco. `-gameplay` registra l'implementazione in `player.gd:124` con `register_impl("damage_player", self.take_damage)`, **forma lunga**, perché la API e il metodo hanno nomi diversi |
+| 2 | hp scende e muore, sulla scena vera | **sì** | `m7 criterio 2: percorso intero. 9 colpi dal codice di gioco, 100.0 -> 74.1714 di 100.0 HP`, **senza che il test chiami mai `damage_player`**; contatto al passo **158 (2,63 s)** |
+| 3 | restart rimette in piedi il giocatore | **sì** | `3 restart con hp a max_hp e nessun nodo duplicato`. **Il messaggio che resta in `test_gameloop.gd:811` non è il difetto**: quel ramo esercita `horde.restart_run()`, che **per contratto non tocca il giocatore** (`player.gd` non è suo); il file lo dichiara alle righe 805-808 e l'altro ramo, alle 816-818, avvisa che la regola è cambiata |
+| 4 | la HUD mostra la salute vera | **sì** | `vita vera 100.00 -> 75.00 -> 100.00 su 100.00` su **tre** avvii, con la barra disegnata e la scritta rilette. **Denti fatti due volte e rimossi**: barra bloccata a `health_max` → `FAIL atteso 75.0, ottenuto 100.0`; scritta con `health_max` → `FAIL atteso 67.0, ottenuto 100.0`. `-ui` ha corretto anche un difetto che il rename stava nascondendo: le asserzioni passavano il numero **gia' arrotondato**, quindi avrebbero potuto passare con una HUD che tronca |
+| 5 | la porta è verde | **sì, come il criterio è scritto** | `GATE: 7/8` con l'unico rosso `test_ui` per `ERROR: 1 resources still in use at exit` = **il leak dichiarato** di `weapon_base.gd:194`; `--quit-after 300` **pulito** in questo stesso lancio; `PERM: 15/15`. Il `7/8` è il **dado** dichiarato (baseline 2 su 5), non un difetto: stavolta è uscito pulito |
+| 6 | la percentuale è una sola | **sì, dichiarato** | tre costanti (`TOUCH_REACH`, `TOUCH_DAMAGE_BASE`, `TOUCH_INTERVAL`) e danno e periodo **derivati da `MASS`**: nessuna tabella dei numeri duplicata |
+
+**Il numero che è la notizia, e non è un trionfo.** Con `TOUCH_INTERVAL = 0.40 s` e
+`TOUCH_DAMAGE_BASE = 1.6`, il giocatore fermo al centro muore in **6,5 s con l'orda piena** e in
+**16,5 s con l'onda piccola**. Il gioco è passato da **invulnerabile** a **ucciso in sei
+secondi**: è la fine di un difetto che era aperto dal primo giorno e che **nessuna porta
+prendeva** (§1.4a, §1.6, §1.8). `-orda` dichiara anche i suoi due tentativi sbagliati, che
+sono la parte che vale: il tetto `TOUCH_BITERS = 3` per passo non mordeva mai (passo peggiore:
+**un** morso, cioè tollerava 180 morsi/s), e `TOUCH_DAMAGE_BASE = 2.0` misurava 6,40 s ed è
+stato portato a 1,6.
+
+### I tre debiti che m7-w1 lascia dichiarati
+
+1. **I denti di `-orda` non sono stati provati** (3: la `grep` del chiamante, la cadenza sopra
+   `BITE_RATE_MAX`, il ramo `morsi == 0` senza giocatore) né quelli di `-gameplay` (2: `hp = 0.0`
+   in `reset_run()`, e la guardia `_dead_signalled`). Quello che `-ui` ha invece provato due
+   volte e poi rimosso. §11.11: **un'invariante che non è mai stata fatta fallire non è stata
+   verificata**, e va detto con parole diverse da «è verde».
+2. **`tests/test_gameloop.gd:811` stampa ancora un messaggio che descrive un debito chiuso.**
+   Non è un'asserzione rotta — è il ramo `if hp <= 0` che esercita il restart **dell'orda** — ma
+   il testo «META' DI -GAMEPLAY: restart_run() non ha rimesso in piedi il giocatore» è **falso
+   per il giocatore**, che `test_gameplay` dimostra rimettersi in piedi. Il file è di `-orda`, che
+   non ha avuto i passi per allinearlo.
+3. **Il leak di `bonk.wav` resta aperto e resta un dado**: `2` allarmi su `5` dichiarati, `--quit-after 300` pulito in questo lancio. **Nessuna delle tre foglie lo ha toccato**, che era il vincolo che gli avevo dato.
 
 ### Le onde della milestone 3
 

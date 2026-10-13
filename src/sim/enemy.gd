@@ -69,25 +69,75 @@ const EDGE_PUSH := 3.0
 # volte spesso, cioe' 74 volte la dps di un runner. Con il `sqrt` il capo
 # mordere forte e piano, che e' quello che ci si aspetta da una cosa pesante.
 #
-# ## La portata del morso, e da dove viene
+# ## La portata del morso: rimisurata sulla scena vera (milestone 8)
 #
-# `TOUCH_REACH` e' **misurato**, non scelto. Sull'orda a regime con un giocatore
-# fermo al centro, passo fisso 1/60 s, 30 s di misura (i numeri sono quelli che
-# escono da `tests/test_orda.gd`, sezione 11, e sono riprodotti a ogni lanzo):
+# Il numero di prima era **1.2**, dichiarato «misurato» qui sotto — ma
+# misurato **sull'orda isolata**, con uno **spia** al posto del giocatore
+# (`tests/test_orda.gd`, sezione 11). Uno spia accetta ogni morso. Il giocatore
+# vero no: `player.gd::take_damage` scarta il danno durante l'invulnerabilita'
+# dopo un colpo (`INVULN_AFTER_HIT = 0.7 s`). La misura di prima era quindi la
+# **produzione dell'orda**, non **l'ingestione del giocatore**, ed e' su quella
+# che il numero era stato scelto.
 #
-# | vivi | a portata di morso | distanza minima mai vista |
+# ### La misura, sulla scena vera (`tests/test_orda.gd`, sezione 12)
+#
+# `scenes/arena_main.tscn` per intero, orda a 200 vivi, giocatore vero fermo al
+# centro, passo fisso 1/60 s, 30 s di riscaldamento e 30 s di finestra.
+#
+# **La scena vera non ha seme**: `horde.seed = 0` vuol dire `randomize()`, quindi
+# la disposizione e' diversa a ogni avvio. Le righe sotto hanno dispersione e si
+# leggono come **bande**, non come valori; sono stampate a ogni lanzo dalla
+# sezione 12, che e' il posto dove si rileggono. L'unica riga senza dispersione
+# e' la prima, e non per caso: e' l'unica che **sceglie** il numero.
+#
+# | grandezza misurata | prima (`TOUCH_REACH` = 1.2) | dopo (0.45) |
 # |---|---|---|
-# | 25 (onda 1) | 5-6, cioe' il **20-24%** | 0.14 m |
-# | 75 (curva a meta') | 10, il 13% | — |
-# | 200 (onda 8) | 20, il **10%** (il 51% e' oltre 6 m) | 0.04 m |
+# | **raggio del corpo che il giocatore VEDE** | **0.4500 m** | 0.4500 m |
+# | corpi entro `RADIUS + TOUCH_REACH` | 21 su 200 | 8 su 200 |
+# | corpi entro `RADIUS + 0.00` (nessun margine) | 6 su 200 | 8 su 200 |
+# | morsi offerti / accettati in 30 s | 56 / 29 | 22 / 16 |
+# | **hp al secondo sentiti dal giocatore** | **5.97** | **5.24** |
+# | **sopravvivenza, 100 hp, fermo al centro, 200 vivi** | **19.77 s** | **11.57 s** |
 #
-# Con `1.2 m` l'onda 1 mette in contatto poco piu' di un quinto della folla: il
-# nemico che ti morde deve **arrivarti addosso**, non colpirti da tre metri. La
-# riga da 200 dice anche perche' il contatto **non** cresce con la popolazione: a
-# 200 vivi meta' dell'orda non arriva nemmeno a sei metri, perche' l'anello
-# intorno al giocatore e' saturo. Il danno che arriva addosso cresce quindi
-# ~3.3 volte dall'onda 1 all'onda 8 e non 8.
-const TOUCH_REACH := 1.2
+# Le ultime due righe vanno lette insieme: **i morsi sono quasi dimezzati ma sono
+# piu' pesanti**, perche' a portata corta arrivano solo le specie grosse. Il danno
+# al secondo che il giocatore sente scende del 12%, non del 50%: meta' dei morsi
+# offerti non entrava comunque, perche' il giocatore era gia' invulnerabile.
+#
+# ### Perche' questo numero e' quello
+#
+# La condizione del morso e' `dist <= RADIUS[kind] + TOUCH_REACH`: la somma di
+# due raggi deve essere una distanza, e i due raggi che ci sono sono **il corpo
+# del nemico** e **il corpo del giocatore**. Il secondo non era un numero: era
+# un punto. Ed e' il punto che l'utente ha scritto di essere troppo piccolo.
+#
+# Quindi `TOUCH_REACH` non e' una portata e' **il raggio del corpo del
+# giocatore**, letto dalla scena vera: 0.4500 m. Con questo numero la frontiera
+# del morso e' letteralmente **il bordo del nemico che tocca il bordo del
+# giocatore**, per tutte e quattro le specie, e non un margine che non si vede.
+# E' la risposta a «due numeri che dovrebbero essere uno solo erano due»: il
+# secondo dei due non e' sparito, e' diventato **la taglia del giocatore**.
+#
+# ### Il numero e' un vincolo, non una costante scolpita
+#
+# Se il modello del giocatore cambia, questo numero deve cambiare con lui: non
+# e' una convenzione, e' una lettura. Per questo la sezione 12 di
+# `tests/test_orda.gd` asserisce che `TOUCH_REACH` **uguale** il raggio misurato
+# sulla scena vera, e non che sia vicino a 0.45. Quel test e' la difesa: senza
+# di lui questo numero diventerebbe un magico 0.45 che mente alla prima riga
+# cambiata del modello, che e' la lezione di `offer_label` scritta in
+# `src/core/contracts.gd`.
+#
+# ### La difficolta' che cambia, e non e' una regressione
+#
+# Accorciare la portata vuol dire meno corpi a portata e quindi morsi meno
+# frequenti. Ma il giocatore **vero** era gia' protetto da `INVULN_AFTER_HIT`:
+# su 56 morsi offerti ne accettava 29 e meta' del danno offerto non entrava.
+# Percio' i numeri di sezione 11 (l'orda isolata con uno spia che accetta
+# tutto) restano la **produzione** dell'orda e continuano a servire al tetto
+# `TOUCH_INTERVAL`, ma **non** descrivono la difficolta': sulla scena vera quei
+# due numeri sono circa il doppio di quelli che il giocatore sente.
+const TOUCH_REACH := 0.45
 
 ## Danno di un morso di runner, e da dove viene questo numero.
 ##

@@ -205,6 +205,61 @@ func verify_m2_surface() -> Array[String]:
 ## misura la griglia della disposizione **precedente** e il numero che ne ricava
 ## e' vero ma non risponde alla domanda che ha fatto.
 
+# --- Superficie di milestone 8 ---------------------------------------------------
+#
+# ## Il difetto, e perché è una superficie e non un dettagolo di disegno
+#
+# Il 2026-10-13 un utente che ha giocato scrive: «il mio hitbox è troppo piccolo
+# o i nemici troppo grandi». Misurato, il difetto è preciso e non è quello che
+# sembra: **le quattro specie sono disegnate con la stessa mesh alla stessa
+# scala** (`BASE_SCALE = 1.5`, `src/render/horde_renderer.gd:32`) e cambiano
+# solo di tinta (`colors`). Quindi un runner e un boss sono indistinguibili alla
+# vista, mentre il boss morde da ben piu' lontano:
+#
+#     specie  RADIUS    morde fino a (RADIUS + TOUCH_REACH)
+#     runner    0.45     1.65 m
+#     grunt     0.60     1.80 m
+#     brute     1.00     2.20 m
+#     boss      1.90     3.10 m
+#
+# `RADIUS` vive in `src/sim/enemy.gd`, che è di -orda. `-arena` non può leggerlo
+# da sola: sarebbe prendere un numero di un'altra foglia, cioè la copia che mente
+# alla prima riga cambiata (la lezione di `offer_label`, sopra). Quindi il numero
+# attraversa una **superficie dichiarata**, e la stessa forma di m3: due foglie
+# sullo stesso oggetto, nomi congelati **prima** dell'onda.
+#
+# ## Congelato dal vertice il 2026-10-13
+#
+#     horde.radii          # -orda la scrive, -arena la legge. PackedFloat32Array
+#
+# Semantica, in cinque punti. Ogni altro comportamento resta di -orda e di -arena:
+#
+#   1. `radii[i]` e' il **raggio del corpo** del nemico `i`, in metri, preso da
+#      `RADIUS[kind]`. Non e' la distanza di morso e non e' un raggio di
+#      collisione generico: e' la taglia che devi **vedere**;
+#   2. `radii.size() == horde.count`, allineata a `transforms`, `colors` e
+#      `kinds`: l'indice `i` e' lo stesso nemico in tutti e quattro gli array.
+#      Un array parallelo che non allinea e' il difetto che `tests/test_orda.gd`
+#      gia' asserisce su `transforms`, e vale anche per questo;
+#   3. cresce, si svuota e si ricompone **negli stessi punti** degli altri array
+#      paralleli (`_resize_arrays`, `_apply_spawn`, `_kill`, `restart_run`): non
+#      una strada nuova, che e' il modo in cui un array parallelo si stacca;
+#   4. **e' il numero che il renderer deve disegnare.** La taglia disegnata di un
+#      nemico e' proporzionale a `radii[i]`. Se il renderer ne usa una costante,
+#      i due divergono, ed e' esattamente il difetto che m8 esiste per chiudere:
+#      l'invariante e' la **proporzionalita'**
+#      `disegnato_i / disegnato_j == radii[i] / radii[j]`, non la taglia assoluta,
+#      cosi' il fattore di calibrazione puo' cambiare senza falsare l'invariante
+#      e senza che l'onda debba ricominciare;
+#   5. il raggio di una specie si cambia in **un posto solo**, `RADIUS` in
+#      `src/sim/enemy.gd`. Non esiste una seconda copia del raggio da nessuna
+#      parte, ne' nel renderer ne' in un test: e' il criterio n. 6 di m7, che era
+#      stato scritto per i numeri di danno e che vale per tutti i numeri.
+
+## Dichiarato dal vertice il 2026-10-13, **congelato**: il nome qui sotto e' l'unico
+## che -orda scrive e -arena legge. Cambiarlo durante l'onda significa fermare
+## l'onda e tornare dal vertice.
+
 # --- Registrazione -------------------------------------------------------------
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non

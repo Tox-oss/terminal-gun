@@ -137,6 +137,11 @@ func _run() -> void:
 	_burn_in(h, horde)
 	_damage_kills(h, horde)
 	_touch(h, horde)
+	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
+	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
+	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
+	# accorgersene, quindi va in fondo e poi rimette a posto il contratto.
+	_scena_vera(h, horde)
 
 	quit(h.finish("orda"))
 
@@ -190,21 +195,44 @@ const PLAYER_HP_REFERENCE := 100.0
 ## La cadenza: sotto `BITE_RATE_MIN` nessuno morderebbe (e il chiamante di m7
 ## sarebbe sparito senza che nessuno se ne accorga), sopra `BITE_RATE_MAX` il
 ## tetto `TOUCH_INTERVAL` non terrebbe, perche' `1/0.40 = 2.5`.
-const BITE_RATE_MIN := 0.8
+##
+## **Le tre bande sotto sono cambiate in m8, e i valori di prima sono qui
+## dichiarati, non cancellati.** Il numero che le muove e' `TOUCH_REACH`, sceso
+## da **1.2** a **0.45**: la derivazione e' in `src/sim/enemy.gd` e la misura
+## sulla scena vera e' nella sezione 12. Accorciare la portata toglie corpi a
+## portata, e i morsi arrivano meno spesso.
+##
+## | banda | prima (1.2) | dopo (0.45) | perche' |
+## |---|---|---|---|
+## | cadenza misurata | 1.07-1.57 morsi/s | **0.60-1.17** | 3-5 corpi a portata invece di 5-20 |
+## | sopravvivenza massima | 16.5 s | **29.2 s** | segue la cadenza |
+## | rapporto danno pieno/piccolo | 2.56 | **3.27** | l'onda piccola cala piu' della piena |
+##
+## Il **valore di prima non e' una regressione e non e' difeso**: e' la richiesta
+## dell'utente, e il piano lo dichiara (§1.11, "cosa cambia nella difficolta'").
+const BITE_RATE_MIN := 0.5
 const BITE_RATE_MAX := 2.5
 ## Secondi che un giocatore regge **fermo al centro dell'orda** con 100 hp.
 const SURVIVAL_MIN := 5.0
-const SURVIVAL_MAX := 20.0
+const SURVIVAL_MAX := 35.0
 ## L'orda da 200 vivi puo' fare al massimo questo multiple del danno al secondo
 ## dell'orda piccola. **Il primo tetto dichiarato era 2.0 ed era sbagliato**:
-## la misura sul campione qui sotto dà 2.56, e la differenza non e' rumore ma
+## la misura sul campione qui sotto dava 2.56, e la differenza non e' rumore ma
 ## il campione dei morsi: con 25 vivi il contatto lo fanno quasi solo brute
 ## (5.94 hp), con 200 vivi quasi solo boss (13.71 hp), perche' l'anello intorno
-## al giocatore si riempie dei nemici piu' grossi. Il tetto a 3.0 resta un
-## tetto vero — **senza** `TOUCH_INTERVAL` lo stesso campione crescerebbe di
-## ~5.7 volte (contatto 3.3 volte x morso 1.7 volte) — ma 2.0 era un numero
-## rotolato sulla fortuna di un campione.
-const DPS_RATIO_MAX := 3.0
+## al giocatore si riempie dei nemici piu' grossi. Era 3.0 fino a m7; con
+## `TOUCH_REACH` a 0.45 la misura da **3.27** e il tetto sale a 4.0. Il tetto
+## resta un tetto vero: **senza** `TOUCH_INTERVAL` lo stesso campione
+## crescerebbe di ~5.7 volte (contatto 3.3 volte x morso 1.7 volte).
+const DPS_RATIO_MAX := 4.0
+
+## ## Cosa misura questa sezione, e cosa non misura
+##
+## Misura **la produzione dell'orda**: quanti morsi tira e quanto danno consegna a
+## chi riceve. Lo spia accetta ogni morso, quindi qui il numero e' il massimo
+## che l'orda puo' dare. Quello che il **giocatore** sente e' circa la meta':
+## `player.gd::take_damage` scarta meta' dei morsi per `INVULN_AFTER_HIT`. Sono
+## due fatti diversi, e la sezione 12 misura quello vero.
 
 ## I quattro casi misurati: semi e popolazione. I primi due sono l'onda 1 (25
 ## vivi) su due semi diversi, il terzo la curva a meta' strada, il quarto
@@ -354,6 +382,8 @@ func _population(h, horde: HORDE) -> void:
 	h.eq(horde.transforms.size(), horde.count,
 		"transforms e' lunga quanto count: e' l'invariante che arena usa per il MultiMesh")
 	h.eq(horde.colors.size(), horde.count, "un colore per nemico")
+	h.eq(horde.radii.size(), horde.count,
+		"m8: un raggio di corpo per nemico, allineato come transforms e colors")
 	h.eq(horde.velocities.size(), horde.count, "velocita': array parallelo allineato")
 	h.eq(horde.hp.size(), horde.count, "hp: array parallelo allineato")
 	h.eq(horde.kinds.size(), horde.count, "specie: array parallelo allineato")
@@ -738,6 +768,17 @@ func _burn_in(h, horde: HORDE) -> void:
 	h.eq(horde.transforms.size(), horde.count, "transforms resta allineata a count dopo le morti")
 	h.eq(horde.colors.size(), horde.count, "colors resta allineata a count dopo le morti")
 	h.eq(horde.hp.size(), horde.count, "anche hp resta allineata a count")
+	# m8: lo scambio-ultimo sposta **anche** il raggio. Un nemico che eredita la
+	# posizione di un altro e si disegna con il raggio del morto e' esattamente
+	# il difetto che `radii` doveva chiudere.
+	h.eq(horde.radii.size(), horde.count,
+		"m8: radii resta allineata a count dopo 120 scambi-ultimo")
+	var raggi_sbagliati := 0
+	for i in horde.count:
+		if absf(horde.radii[i] - ENEMY.RADIUS[horde.kinds[i]]) > 0.000001:
+			raggi_sbagliati += 1
+	h.eq(raggi_sbagliati, 0,
+		"m8: ogni radii[i] e' il RADIUS della sua specie, anche dopo lo scambio-ultimo")
 	h.eq(horde.kills, morti, "il contatore delle uccisioni")
 
 	var dentro := 0
@@ -794,11 +835,14 @@ func _damage_kills(h, horde: HORDE) -> void:
 	h.eq(horde.count, prima - 1, "damage_enemy uccide e il conteggio scende subito")
 	h.eq(horde.transforms.size(), prima - 1, "transforms accorciata con lo scambio-ultimo")
 	h.eq(horde.hp.size(), prima - 1, "anche hp e' accorciata")
+	h.eq(horde.radii.size(), prima - 1, "m8: anche radii e' accorciata")
 	h.eq(horde.kills, uccisioni + 1, "il contatore delle uccisioni e' salito")
 	h.vec_near(horde.transforms[buco], ultimo, 0.0001,
 		"scambio-ultimo: nel buco deve esserci il vecchio ultimo, non uno zero")
 	h.eq(horde.hp[buco], hp_ultimo, "scambio-ultimo: anche hp spostato")
 	h.eq(horde.kinds[buco], kind_ultimo, "scambio-ultimo: anche la specie spostata")
+	h.near(horde.radii[buco], ENEMY.RADIUS[kind_ultimo], 0.000001,
+		"m8 scambio-ultimo: nel buco c'e' il raggio del vecchio ultimo")
 
 	# fuori indice: nessun crash, nessun effetto e `false` (il contratto fa
 	# `as bool` sul valore di ritorno: con `void` andrebbe in errore in partita)
@@ -836,6 +880,7 @@ func _damage_kills(h, horde: HORDE) -> void:
 	h.eq(horde.count, 0, "orda svuotata")
 	h.eq(horde.transforms.size(), 0, "transforms vuota")
 	h.eq(horde.colors.size(), 0, "colors vuota")
+	h.eq(horde.radii.size(), 0, "m8: anche radii si svuota con l'orda")
 	h.eq(horde.nearest_enemy_index(Vector3.ZERO, 1000.0), -1,
 		"senza nemici la vicina piu' vicina da' -1")
 
@@ -861,6 +906,8 @@ func _damage_kills(h, horde: HORDE) -> void:
 		"e ci mette piu' di un passo: %d passi = %.2f s" % [passi_pieno, float(passi_pieno) * DT])
 	h.eq(horde.transforms.size(), horde.count, "allineata dopo il riempimento")
 	h.eq(horde.colors.size(), horde.count, "colori allineati dopo il riempimento")
+	h.eq(horde.radii.size(), horde.count,
+		"m8: radii si ricompone insieme agli altri nel riempimento, non dopo")
 	h.eq(horde.grid_unknown_cells, 0, "i %d spawn nuovi non hanno creato celle" % horde.count)
 	h.check(horde.nearest_enemy_index(Vector3.ZERO, 100.0) >= 0,
 		"dopo il riempimento si trova qualcuno")
@@ -1086,6 +1133,306 @@ func _touch_game_over(h, horde: HORDE) -> void:
 	horde.restart_run()
 	h.check(not horde.is_game_over(), "il restart rimette la partita in corso")
 	h.eq(horde.touch_damage_last, 0.0, "e azzera il danno dell'ultimo passo")
+	# Punto 3 del contratto di m8: `radii` si ricompone **negli stessi punti** degli
+	# altri array paralleli, e il restart e' uno di quelli.
+	h.eq(horde.radii.size(), horde.count,
+		"m8: radii e' allineata a count dopo restart_run")
+	var raggi_dopo_restart := 0
+	for i in horde.count:
+		if absf(horde.radii[i] - ENEMY.RADIUS[horde.kinds[i]]) > 0.000001:
+			raggi_dopo_restart += 1
+	h.eq(raggi_dopo_restart, 0,
+		"m8: dopo il restart ogni nemico ha il raggio della sua specie")
+
+# --- 12. m8: la portata del morso rimisurata sulla scena vera ------------------
+#
+# ## Perche' una sezione nuova e non una riga cambiata in `TOUCH_REACH`
+#
+# Il valore di prima, **1.2**, era dichiarato «misurato» in `src/sim/enemy.gd`,
+# ed era misurato **sull'orda isolata di questo file**, con uno **spia** al posto
+# del giocatore. Uno spia accetta ogni morso. Il giocatore vero no:
+# `player.gd::take_damage` scarta il danno durante l'invulnerabilita' dopo un
+# colpo (`INVULN_AFTER_HIT = 0.7 s`). Quindi la misura di m7 era **la produzione
+# dell'orda**, non **l'ingestione del giocatore**, ed e' su quella che `TOUCH_REACH`
+# era stato scelto. Qui sotto la scena e' vera, il giocatore e' vero, e i numeri
+# che escono sono quelli che il giocatore sente.
+#
+# ## Cosa misura, e in che ordine
+#
+# 1. **Il corpo che il giocatore vede**: mezzo ingombro orizzontale del modello
+#    vero, in metri. E' l'unico numero che puo' volere la parola «contatto»:
+#    due corpi si toccano quando la somma dei loro raggi e' la distanza, e se il
+#    nemico e' `RADIUS[kind]` allora il margine che resta al giocatore e' **il
+#    suo raggio**, non una costante messa li' per andare bene.
+# 2. **Dove si ferma davvero l'orda** a 200 vivi: la scala delle portate conta i
+#    corpi entro `RADIUS[kind] + r`, quindi dice esattamente quanti nemici
+#    morderebbero a ogni candidato. La scala contiene **0.0** (nessun margine)
+#    e il **valore di prima, 1.2**: scegliere senza aver guardato entrambi
+#    sarebbe scegliere a occhio.
+# 3. **L'ingestione vera**: hp persi dal giocatore vero in 30 s a regime, e poi
+#    il tempo fino alla morte con 100 hp.
+#
+# Il passo e' **fisso** (`DT`) e lo guida questo test, non il ciclo di frame:
+# un passo fisso e' l'unica misura riproducibile (vedi la nota in testa al
+# file). La scena resta vera — stessi nodi, stesso orda, stesso giocatore,
+# stesso renderer — ma il suo `process_mode` e' disabilitato perche' due orologi
+# non si misurano.
+
+const ARENA_SCENE := "res://scenes/arena_main.tscn"
+const NODO_HORDE := "Horde"
+const NODO_PLAYER := "Player"
+
+## Le portate da contare sulla scena vera. Vedi il punto 2 sopra.
+const LADDER_REACH := [0.0, 0.15, 0.30, 0.45, 0.60, 0.90, 1.20]
+## Passi di riscaldamento e di finestra: 1800 passi a DT sono 30 s.
+const VERA_WARMUP := 1800
+const VERA_WINDOW := 1800
+## Vita data al giocatore vero **mentre si misura la geometria e l'ingestione**,
+## cosi' il riscaldamento non finisce a `game_over` a meta' misura. `hp` e' un
+## campo pubblico sul contratto di m2 ed e' gia' pilotato allo stesso modo da
+## `tests/test_gameloop.gd`; nessun'altra proprieta' del giocatore e' toccata.
+const VERA_HP_ALTO := 1000000.0
+
+## La distanza minima mai vista fra il **punto** del giocatore e il **bordo del
+## corpo** di un nemico (`dist - RADIUS[kind]`), su tutta la scena vera.
+var _gap_min_vera := 1.0e9
+## Gli stessi scarti dei nemici entro 6 m dal giocatore, campione del contatto.
+var _gap_vicini := PackedFloat32Array()
+
+func _scena_vera(h, isolate: HORDE) -> void:
+	var arena = _apri_arena(h)
+	if arena == null:
+		return
+	# Due oroli non si misurano: la scena non gira da sola, il passo e' nostro.
+	arena.process_mode = Node.PROCESS_MODE_DISABLED
+	var horda: HORDE = arena.get_node_or_null(NODO_HORDE) as HORDE
+	var giocatore = arena.get_node_or_null(NODO_PLAYER)
+	if not h.check(horda != null and giocatore != null,
+			"la scena vera deve avere i nodi %s e %s" % [NODO_HORDE, NODO_PLAYER]):
+		_chiudi(arena)
+		_ripristina(h, isolate)
+		return
+
+	giocatore.hp = VERA_HP_ALTO
+	horda.population = HORDE.MAX_ENEMIES
+	var passi_pieno := 0
+	while horda.count < HORDE.MAX_ENEMIES and passi_pieno < 6000:
+		_passo_vera(horda, giocatore, DT)
+		passi_pieno += 1
+	h.eq(horda.count, HORDE.MAX_ENEMIES,
+		"scena vera: l'orda arriva a %d nemici vivi, non a 25" % HORDE.MAX_ENEMIES)
+	h.eq(horda.radii.size(), horda.count,
+		"scena vera: anche radii e' allineata a count con 200 vivi")
+	h.eq(horda.transforms.size(), horda.count, "scena vera: transforms allineata")
+
+	# 1. il corpo che il giocatore vede, e il criterio n. 2 di m8
+	var corpo := _corpo_visivo(giocatore)
+	h.positive(corpo,
+		"scena vera: il giocatore ha un corpo visibile di raggio positivo")
+	# L'invariante, non il numero: `TOUCH_REACH` deve **uguale** il raggio del
+	# corpo che il giocatore vede. E' scritto cosi' e non "vicino a 0.45" perche'
+	# se il modello del giocatore cambia il numero deve cambiare con lui, e
+	# l'unita' che se ne accorge e' questo assert. Rimettere `TOUCH_REACH` al
+	# valore di prima (1.2) qui deve dire FAIL: e' il dente del criterio n. 2.
+	h.near(ENEMY.TOUCH_REACH, corpo, 0.0001,
+		"criterio n. 2: TOUCH_REACH (%.4f) e' il raggio del corpo che il giocatore VEDE (%.4f)"
+			% [ENEMY.TOUCH_REACH, corpo])
+	# E la forma del criterio: per **ogni** specie, la frontiera del morso e' il
+	# bordo del nemice che tocca il bordo del giocatore. Nessuna specie e'
+	# esclusa, quindi il numero non vale solo per il runner.
+	for k in ENEMY.KIND_COUNT:
+		h.near(ENEMY.RADIUS[k] + ENEMY.TOUCH_REACH, corpo + ENEMY.RADIUS[k], 0.0001,
+			"criterio n. 2: il %s morde fino a %.2f m = bordo del nemico %.2f + bordo del giocatore %.2f"
+				% [ENEMY.KIND_NAMES[k], ENEMY.RADIUS[k] + ENEMY.TOUCH_REACH,
+					ENEMY.RADIUS[k], corpo])
+	# Il numero del raggio e' **uno solo** (criterio n. 4 di m8): quello che
+	# l'orda espone dev'essere quello della tabella, non una sua copia.
+	var raggi_non_di_tabella := 0
+	for i in horda.count:
+		if absf(horda.radii[i] - ENEMY.RADIUS[horda.kinds[i]]) > 0.000001:
+			raggi_non_di_tabella += 1
+	h.eq(raggi_non_di_tabella, 0,
+		"criterio n. 4: horde.radii[i] e' RADIUS[kinds[i]] per tutti i %d vivi" % horda.count)
+
+	# 2. dove si ferma l'orda: scala delle portate e scarto minimo mai visto
+	_gap_min_vera = 1.0e9
+	_gap_vicini = PackedFloat32Array()
+	for _i in VERA_WARMUP:
+		_passo_vera(horda, giocatore, DT)
+		_campiona_gap(horda, giocatore.global_position)
+	var contatti := _conta_contatti(horda, giocatore.global_position)
+	var ordinati := _gap_vicini.duplicate()
+	ordinati.sort()
+	var dentro := int(contatti[float(ENEMY.TOUCH_REACH)])
+
+	print("m8 scena vera: corpo visibile del giocatore, raggio %.4f m" % corpo)
+	print("m8 scena vera: scarto minimo mai visto (giocatore - bordo del corpo) %.4f m"
+		% _gap_min_vera)
+	if ordinati.size() > 0:
+		print("m8 scena vera: scarto dei %d nemici entro 6 m -- min %.4f, mediana %.4f, max %.4f m"
+			% [ordinati.size(), ordinati[0], ordinati[ordinati.size() / 2],
+				ordinati[ordinati.size() - 1]])
+	for r in LADDER_REACH:
+		print("m8 scena vera: portata %.2f m -> %d nemici a portata di morso su %d"
+			% [float(r), int(contatti[float(r)]), horda.count])
+	h.check(dentro > 0,
+		"scena vera: con TOUCH_REACH = %.2f qualcuno e' davvero a portata (%d su %d)"
+			% [ENEMY.TOUCH_REACH, dentro, horda.count])
+
+	# 3. l'ingestione vera: hp persi in 30 s, e poi il tempo fino alla morte
+	var hp0 := float(giocatore.hp)
+	var offerti := 0
+	var accettati := 0
+	for _i in VERA_WINDOW:
+		var prima := float(giocatore.hp)
+		_passo_vera(horda, giocatore, DT)
+		offerti += horda.touch_bites_last
+		if float(giocatore.hp) < prima:
+			accettati += 1
+	var persi := hp0 - float(giocatore.hp)
+	var finestra := float(VERA_WINDOW) * DT
+	var cadenza := float(offerti) / finestra
+	var danno_morso := persi / maxf(1.0, float(accettati))
+	var dps := persi / finestra
+	print("m8 scena vera: %d morsi offerti in %.0f s (%.2f/s), %d accettati dal giocatore, %.2f hp persi"
+		% [offerti, finestra, cadenza, accettati, persi])
+	print("m8 scena vera: %.2f hp per morso accettato, %.2f hp/s, %d morsi su %d scartati dall'invulnerabilita'"
+		% [danno_morso, dps, offerti - accettati, offerti])
+
+	giocatore.hp = PLAYER_HP_REFERENCE
+	var passi_morte := 0
+	while float(giocatore.hp) > 0.0 and passi_morte < 6000:
+		_passo_vera(horda, giocatore, DT)
+		passi_morte += 1
+	var morto := float(giocatore.hp) <= 0.0
+	var secondi := float(passi_morte) * DT
+	print("m8 scena vera: giocatore fermo al centro, %d vivi: %s dopo %.2f s (calcolato %.2f s)"
+		% [horda.count, "morto" if morto else "VIVO", secondi,
+			PLAYER_HP_REFERENCE / maxf(0.0001, dps)])
+	h.check(morto,
+		"scena vera: il giocatore vero deve morire fermo al centro con l'orda piena")
+	h.check(secondi > 0.0, "scena vera: il tempo di sopravvivenza e' positivo")
+
+	_chiudi(arena)
+	_ripristina(h, isolate)
+
+## Un passo della scena vera, a passo fisso.
+##
+## Della scena si guida **l'orda sola**. Del giocatore si scalda **un solo
+## timer**, `invuln`, ed e' una scelta dichiarata e non una scorciatoia:
+##
+##   - `invuln` e' l'unica cosa che `player.gd::step` fa che riguarda il morso.
+##     Senza scalarlo il giocatore vero resta **permanentemente invulnerabile**
+##     dal primo colpo in poi, e la misura dell'ingestione dava 0.00 hp persi su
+##     51 morsi offerti: era la prima stesura di questa sezione, ed e' il numero
+##     che ha fatto capire che il valore di prima era misurato su uno spia che
+##     accettava tutto.
+##   - chiamare `step()` per intero porterebbe dentro la misura una **seconda
+##     macchina**: l'arma che spara da sola ucciderebbe proprio gli anelli di
+##     nemici che qui si stanno contando. Sarebbe la classe di difetto di
+##     piano 1.5b: un ambiente che azzera la grandezza sotto esame.
+##
+## `invuln` e' un campo pubblico del nodo, come `hp`: qui sotto si scrivono due
+## campi pubblici di un'altra foglia e non si chiama nessun suo metodo.
+func _passo_vera(horda, giocatore, delta: float) -> void:
+	giocatore.invuln = maxf(0.0, float(giocatore.invuln) - delta)
+	horda.step(delta)
+
+## Il contratto torna a puntare sull'orda isolata di questo file. Senza questo la
+## scena vera, appena liberata, lascerebbe il contratto con `horde` e tre API
+## che non portano piu' da nessuna parte: un test che viene dopo leggerebbe un
+## numero e lo chiamerebbe «l'orda».
+func _ripristina(h, isolate: HORDE) -> void:
+	var game := _game()
+	if game == null or isolate == null:
+		return
+	game.horde = isolate
+	game.register_impl("nearest_enemy", isolate.nearest_enemy_index)
+	game.register_impl("damage_enemy", isolate.damage_enemy)
+	game.register_impl("random_spawn_point", isolate.random_spawn_point)
+	h.check(game.horde == isolate,
+		"dopo la scena vera il contratto torna a puntare all'orda isolata")
+
+## Distanza fra il punto del giocatore e il **bordo del corpo** del nemico `i`:
+## `dist - radii[i]`. E' la grandezza che `TOUCH_REACH` e' chiamato a coprire,
+## e su di lei e' costruita la scala delle portate.
+func _gap(horda: HORDE, centro: Vector3, i: int) -> float:
+	return Vector2(horda.transforms[i].x - centro.x,
+			horda.transforms[i].z - centro.z).length() - horda.radii[i]
+
+## Campiona gli scarti: il minimo di tutti e il campione dei nemici entro 6 m.
+func _campiona_gap(horda: HORDE, centro: Vector3) -> void:
+	for i in horda.count:
+		var g := _gap(horda, centro, i)
+		_gap_min_vera = minf(_gap_min_vera, g)
+		if g <= 6.0:
+			_gap_vicini.append(g)
+
+## Quanti corpi sono entro `RADIUS + r`, per ogni r della scala. Conteggio
+## geometrico e quindi esatto: non serve cambiare `TOUCH_REACH` per sapere chi
+## morderebbe a un portata data, basta contare gli scarti.
+func _conta_contatti(horda: HORDE, centro: Vector3) -> Dictionary:
+	var out := {}
+	for r in LADDER_REACH:
+		out[float(r)] = 0
+	for i in horda.count:
+		var g := _gap(horda, centro, i)
+		for r in LADDER_REACH:
+			if g <= float(r):
+				out[float(r)] = int(out[float(r)]) + 1
+	return out
+
+## Il raggio del corpo **visibile** del giocatore: mezzo ingombro orizzontale del
+## suo modello, con la scala del nodo gia' dentro. Cio' che l'occhio chiama
+## «corpo del giocatore». Non e' un numero di questa foglia: e' una lettura
+## della scena vera, ed e' per questo che vale come riferimento e non come
+## costante duplicata da qualche parte.
+func _corpo_visivo(nodo: Node) -> float:
+	var mesh: Array[MeshInstance3D] = []
+	_cerca_mesh(nodo, mesh)
+	var semi := 0.0
+	for m in mesh:
+		if m.mesh == null:
+			continue
+		var aabb: AABB = m.mesh.get_aabb()
+		var s := m.global_transform.basis.get_scale()
+		semi = maxf(semi, maxf(aabb.size.x * 0.5 * absf(s.x), aabb.size.z * 0.5 * absf(s.z)))
+	return semi
+
+func _cerca_mesh(nodo: Node, out: Array[MeshInstance3D]) -> void:
+	for c in nodo.get_children():
+		if c is MeshInstance3D:
+			out.append(c as MeshInstance3D)
+		_cerca_mesh(c, out)
+
+## `scenes/arena_main.tscn` caricata a runtime, mai in `const`: un `const preload`
+## risolve i suoi script **prima** che l'autoload `Game` sia fra le costanti
+## globali di GDScript, e `player.gd` usa l'identificatore nudo `Game`
+## (piano 5.3, la trappola).
+func _apri_arena(h):
+	if not h.check(ResourceLoader.exists(ARENA_SCENE), "manca %s" % ARENA_SCENE):
+		return null
+	var res = load(ARENA_SCENE)
+	if not h.check(res is PackedScene, "%s non e' una PackedScene" % ARENA_SCENE):
+		return null
+	var arena = (res as PackedScene).instantiate()
+	if not h.check(arena is Node3D, "%s non istanzia un Node3D" % ARENA_SCENE):
+		if arena != null:
+			arena.free()
+		return null
+	root.add_child(arena)
+	return arena as Node3D
+
+## Libera la scena **subito**: `remove_child` e poi `free`, non `queue_free`, cosi'
+## l'albero e' pulito quando la funzione torna e il conteggio dei nodi dopo e' un
+## numero e non una promessa.
+func _chiudi(arena) -> void:
+	if arena == null:
+		return
+	if arena.get_parent() != null:
+		arena.get_parent().remove_child(arena)
+	arena.free()
+
 
 ## Tutti i file `.gd` sotto `dir_path`, ricorsivamente. Serve alla `grep` della
 ## sezione 11b: il chiamante di `damage_player` va cercato in **tutto** `src/`,

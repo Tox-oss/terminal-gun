@@ -69,8 +69,6 @@ const DRIVE_STALL_STEPS := 30
 ## piu', il renderer deve fermarsi qui e non crescere.
 const ENEMY_CAPACITY := 256
 const ARENA_RADIUS := 28.0
-## Quanto sopra il terreno il renderer mette il centro di un nemico.
-const BASE_LIFT := 0.75
 ## Ampiezza dell'oscillazione verticale: sotto questa soglia il test non
 ## distingue il bob dal pavimento.
 const BOB_TOLERANCE := 0.1
@@ -127,6 +125,10 @@ func _run() -> void:
 	# disposizione dell'orda della scena vera e crea e libera piu' copie della
 	# scena, quindi sposta `Game.horde` e `Game.player` su nodi diversi.
 	_milestone_3(h, arena)
+	# m8: per ultima. Riscrive l'orda (ripopola a `population`) e rimette a posto
+	# quello che ha toccato, quindi puo' stare dopo tutto quello che conta i
+	# nemici vivi.
+	_milestone_8(h, arena)
 
 	_cleanup(arena)
 	quit(h.finish("test_arena"))
@@ -299,31 +301,75 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 		# esiste) e `get_instance_transform()` restituisce silenziosamente una
 		# trasformazione vuota. Leggere indietro il buffer qui avrebbe fatto
 		# passare il test su un renderer che non scrive niente.
+		#
+		# Il raggio che si passa e' `radii[last]`: da m8 la scala dell'istanza
+		# **non** e' piu' una costante del renderer ma il raggio del corpo
+		# moltiplicato per il fattore di calibrazione (sezione 9).
 		var last := ENEMY_TARGET - 1
-		var placed: Transform3D = enemies.instance_transform(horde.transforms[last], last)
+		var placed: Transform3D = enemies.instance_transform(horde.transforms[last], horde.radii[last], last)
 		var expected: Vector3 = horde.transforms[last]
 		h.near(placed.origin.x, expected.x, 0.001,
 			"la posizione x del nemico deve arrivare dall'orda")
 		h.near(placed.origin.z, expected.z, 0.001,
 			"la posizione z del nemico deve arrivare dall'orda")
-		h.near(placed.origin.y, expected.y + BASE_LIFT, BOB_TOLERANCE,
-			"il nemico deve stare sopra il terreno, non affondato")
+		h.near(placed.origin.y, expected.y + _lift_of(enemies, expected, horde.radii[last]), BOB_TOLERANCE,
+			"la posizione y del nemico deve arrivare dall'orda piu' la sollevata")
 
-	# Oltre la capienza fissa: si ferma, non cresce e non legge fuori dal vettore.
-	# Ultimo controllo del test perche' sovrascrive gli array dell'orda vera.
-	var saved_n = horde.count
-	var saved_x: PackedVector3Array = horde.transforms.duplicate()
-	var saved_c: PackedColorArray = horde.colors.duplicate()
-	horde.count = ENEMY_CAPACITY * 4
-	horde.transforms.resize(horde.count)
-	horde.colors.resize(horde.count)
+	# ## Oltre la capienza fissa: si ferma, non cresce e non legge fuori dal
+	# vettore. Lo si prova con un'orda **finta** e non scrivendo dentro
+	# `transforms`/`colors`/`radii` dell'orda vera: dal m8 quegli array sono
+	# quattro e allineati, e|londerli a mano per far salire `count` romperebbe
+	# proprio l'invariante (`radii.size() == count`) che questa sezione vuole
+	# vedere rispettato. La finte ha la **stessa forma** dei quattro campi di
+	# massa ed e' iniettata con `set_horde()`, che e' esattamente la via che il
+	# renderer mette a disposizione per questo.
+	var fake := FakeHorde.new()
+	fake.name = "FakeHorde1024"
+	fake.fill(ENEMY_CAPACITY * 4)
+	enemies.set_horde(fake)
 	enemies.refresh()
 	h.eq(enemies.drawn_count(), ENEMY_CAPACITY,
 		"oltre la capienza fissa il renderer deve fermarsi alla capienza, non crescere")
+	h.eq(fake.drawn_asked(), ENEMY_CAPACITY * 4,
+		"l'orda finta deve aver chiesto 1024 nemici: altrimenti la prova sarebbe passata sul vuoto")
 	h.eq(_count_nodes(arena), bare_nodes, "un'orda da 1024 non deve aggiungere nodi")
-	horde.count = saved_n
-	horde.transforms = saved_x
-	horde.colors = saved_c
+	enemies.set_horde(horde)
+	fake.free()
+	enemies.refresh()
+
+## Un'orda finta con la **stessa forma** dei quattro campi di massa che il
+## renderer legge (`count`, `transforms`, `colors`, `radii`). Non registra niente
+## sul contratto e non e' nell'albero: vive solo per la durata della prova, e il
+## numero di nodi che questa sezione confronta non cambia nemmeno di uno.
+##
+## `fill()` e' l'unica cosa che scrive i campi, e lo fa una volta sola.
+class FakeHorde extends Node:
+	var count: int = 0
+	var transforms: PackedVector3Array = PackedVector3Array()
+	var colors: PackedColorArray = PackedColorArray()
+	var radii: PackedFloat32Array = PackedFloat32Array()
+	## Quanti nemici il renderer ha **chiesto** all'ultimo `refresh()`, cioe' il
+	## `count` che aveva davanti. Serve perche' `drawn_count()` racconta di quanto
+	## il renderer ne ha disegnati, e senza questo la prova passerebbe anche con
+	## un'orda finta che non chiede niente.
+	var asked: int = 0
+
+	func fill(n: int) -> void:
+		count = n
+		asked = n
+		transforms.resize(n)
+		colors.resize(n)
+		radii.resize(n)
+		for i in n:
+			transforms[i] = Vector3(float(i) * 0.25, 0.0, 0.0)
+			colors[i] = Color.WHITE
+			# Raggio crescente: se il renderer tornasse a una taglia costante,
+			# questa finte da sola lo renderebbe visibile, perche' qui i raggi
+			# non sono tutti uguali.
+			radii[i] = 0.4 + 0.01 * float(i % 8)
+
+	func drawn_asked() -> int:
+		return asked
 
 ## Porta la partita avanti fino a `ENEMY_TARGET` nemici vivi, e dice quanto ci ha
 ## messo. Guida **solo** con l'API di -orda: `damage_enemy` per uccidere, `step`
@@ -1330,6 +1376,354 @@ func _checksum(pts: PackedVector3Array) -> float:
 		var p := pts[i]
 		acc += p.x * 3.0 + p.z * 7.0 + p.y * 11.0
 	return acc
+
+# --- 9. Milestone 8: la taglia che vedi e' quella che morde ---------------------
+#
+# ## Il difetto, e perche' la misura e' una proporzione
+#
+# Prima di m8 `src/render/horde_renderer.gd` aveva **una sola taglia** per tutte e
+# quattro le specie (`BASE_SCALE = 1.5`) e le specie si distinguevano **solo di
+# tinta**. Quindi un runner (raggio 0.45 m) e un boss (raggio 1.90 m) erano
+# identici alla vista, mentre il boss mordeva fino a 3.10 m dal centro: la taglia
+# che il giocatore vedeva non era quella che lo mordeva.
+#
+# Il numero che il renderer deve disegnare ora e' `horde.radii[i]`, esposto da
+# -orda (superficie congelata in `src/core/contracts.gd`, "Supersficie di
+# milestone 8"). **Questo file non conosce `RADIUS[kind]` e non lo ricopia**: legge
+# `radii` dall'orda vera e misura. E' il criterio n. 4, generalizzato a tutti i
+# numeri e non solo a quelli di danno.
+#
+# ## Perche' l'invariante e' la PROPORZIONALITA' e non la taglia assoluta
+#
+#     disegnato_i / disegnato_j  ==  radii[i] / radii[j]
+#
+# Se l'invariante fosse sulla taglia assoluta, l'unico modo per soddisfarlo sarebbe
+# disegnare i nemici **esattamente** a `RADIUS[kind]`, cioe' un runner da 45 cm, e
+# l'orda diventerebbe illeggibile. Con la proporzionalita' c'e' un **fattore di
+# calibrazione libero** (`SIZE_FACTOR` nel renderer): l'invariante resta vero
+# cambiandolo, e il fattore si sceglie sulla misura e si dichiara col numero che
+# produce.
+#
+# La proporzionalita' e' anche la forma piu' economica da asserire: e' equivalente
+# a dire che **`disegnato_i / radii[i]` e' lo stesso numero per tutti i nemici**,
+# e quindi bastano N divisioni invece di N^2 rapporti. E non e' piu' debole: con la
+# taglia costante di prima lo spread dei rapporti e' da 3.33 (runner) a 0.79
+# (boss), cioe' un fattore 4.2, e la tolleranza qui e' di 1e-3.
+
+## La taglia di **prima** di m8, e la sola cosa che questo test deve ricordare di
+## come era. La costante era `BASE_SCALE = 1.5` nel renderer; il modello misurato
+## il 2026-10-13 (`enemy_small.glb`, AABB 0.894425 x 1.000000 x 0.850640 m)
+## dava un corpo disegnato di **1.500000 m** nel suo lato maggiore.
+##
+## Non e' una copia del raggio di una specie: e' **il difetto che m8 corregge**,
+## cioe' la base di confronto del "non regredisce". Il raggio di una specie non
+## compare qui in nessuna forma, quindi questa asserzione non puo' cambiare
+## risposta se `-orda` muove `RADIUS[kind]`: puo' cambiare risposta solo se il
+## renderer torna a una taglia costante, che e' esattamente il difetto.
+const LEGACY_BASE_SCALE := 1.5
+
+## Tolleranza del rapporto `disegnato / radii`. Il rapporto e' un `float` a 32 bit
+## che passa per una `Basis`, quindi l'errore relativo e' dell'ordine di 1e-7: una
+## tolleranza di 1e-3 assoluta sul fattore (che vale ~3.4) e' quattro ordini di
+## grandezza sopra quel rumore e **dieci ordini** sotto il difetto da prendere.
+const RATIO_TOLERANCE := 0.001
+
+## Tolleranza della sollevata. Stessa natura: `Transform3D` e' a 32 bit.
+const LIFT_TOLERANCE := 0.002
+
+## I nomi delle specie, **letti dalla tabella di -orda** (`KIND_NAMES` in
+## `src/sim/enemy.gd`) e non scritti qui. Nessuna copia: `ENEMY_KINDS` non esiste
+## in questo file, e i nomi che compaiono nei messaggi sono quelli che -orda ha
+## nel suo codice al momento della misura.
+##
+## Il percorso e' lo stesso di `_max_enemies()`: si arriva alla tabella passingo
+## per la costante `E` con cui `horde.gd` preloada `src/sim/enemy.gd`. Quindi
+## questo file non sa nemmeno il nome del file che contiene le specie: e' un dato
+## di -orda letto da -orda.
+##
+## Restituisce un array vuoto se la tabella non e' piu' li', e il chiamante lo
+## dichiara invece di procedere con un tetto sbagliato.
+func _kind_names(horde) -> Array:
+	var scr = horde.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return []
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has("E"):
+		return []
+	var e: Object = map["E"]
+	if e == null or not e.has_method("get_script_constant_map"):
+		return []
+	var emap: Dictionary = e.get_script_constant_map()
+	if not emap.has("KIND_NAMES"):
+		return []
+	var names: Array = emap["KIND_NAMES"]
+	return names
+
+func _milestone_8(h, arena: Node3D) -> void:
+	var horde = arena.get_node_or_null("Horde")
+	var enemies = arena.get_node_or_null("Enemies")
+	if not h.check(horde != null, "m8: la scena vera non ha il nodo Horde"):
+		return
+	if not h.check(enemies != null, "m8: la scena vera non ha il nodo Enemies"):
+		return
+
+	# ## Superficie congelata: il campo deve esistere ed essere della forma giusta
+	#
+	# `horde.radii` e' dichiarato in `src/core/contracts.gd`, sezione "Supersficie
+	# di milestone 8", come `PackedFloat32Array`. Se non c'e' la sezione misurerebbe
+	# un'altra cosa, quindi la guardia dice il numero giusto invece di lasciare che
+	# un `Invalid get index` dica "qualcosa non va".
+	var radii = horde.get("radii")
+	if not h.check(radii is PackedFloat32Array,
+			"m8: l'orda della scena vera non espone `radii` come PackedFloat32Array (misurato %s): e' la superficie congelata di src/core/contracts.gd, sezione \"Supersficie di milestone 8\", e lo scrive -orda"
+				% type_string(typeof(radii))):
+		return
+
+	var mm = enemies.multimesh
+	if not h.check(mm != null and mm.mesh != null, "m8: il renderer non ha costruito la MultiMesh con la sua mesh"):
+		return
+	var mesh_size: Vector3 = mm.mesh.get_aabb().size
+	var legacy_extent: float = LEGACY_BASE_SCALE * _max3(mesh_size.x, mesh_size.y, mesh_size.z)
+
+	# L'orologio congelato: con il tempo che scorre cambiano il bob e la rotazione,
+	# e la geometria scritta nel buffer non e' piu' prevedibile. `_geometry_*`
+	# misura sempre con indice 0, dove il bob e' esattamente 0 (e' `sin(0)`), cosi'
+	# la misura della taglia non ha dentro il movimento.
+	enemies.set_time(0.0)
+	enemies.set_horde(horde)
+
+	var cap := _max_enemies(horde)
+	if not h.check(cap > 0,
+			"m8: l'orda non espone piu' MAX_ENEMIES: senza la popolazione piena non si puo' osservare un campione che contenga tutte e quattro le specie"):
+		return
+	var saved_pop: int = horde.population
+	horde.population = cap
+	print("test_arena: m8 campione misurato con population=%d (massimo dichiarato di -orda), ripristinata a %d"
+		% [cap, saved_pop])
+
+	_proporzionalita(h, horde, enemies, mesh_size)
+	var kind_names := _kind_names(horde)
+	if not h.check(kind_names.size() > 0,
+			"m8: dalla tabella delle specie di -orda non si legge KIND_NAMES: senza i nomi il criterio n. 3 non puo' essere asserito per nome"):
+		horde.population = saved_pop
+		horde.reseed(SEED_A)
+		return
+	var kinds: int = kind_names.size()
+
+	# ## Il campione: uno **sweep di semi fissati**, non un dado
+	#
+	# `reseed(s)` con `s != 0` fissa il `_rng` di -orda, quindi l'orda che ne
+	# nasce e' **sempre** la stessa disposizione: la lista delle specie osservate
+	# qui sotto e' un fatto di questo test e non un caso di una esecuzione. I semi
+	# sono **quelli dello sweep di m3** (`SWEEP_FIRST`, `SWEEP_STEP`,
+	# `SWEEP_COUNT`), gia' dichiarati in questo file: nessun numero nuovo.
+	#
+	# Il ciclo si ferma al primo seme che mostra tutte le specie. Serve perche' il
+	# boss pesa il 3% dei nemici dell'onda 1 (`Spawner.KIND_WEIGHTS`) e un singolo
+	# campione da 200 potrebbe non mostrarlo: il numero dei semi usati viene
+	# stampato, cosi' si vede quanto campione e' servito davvero.
+	var by_kind: Dictionary = {}
+	var seeds_used: Array[int] = []
+	for i in SWEEP_COUNT:
+		var s: int = SWEEP_FIRST + i * SWEEP_STEP
+		horde.reseed(s)
+		_accumula(horde, enemies, mesh_size, by_kind)
+		seeds_used.append(s)
+		if by_kind.size() >= kinds:
+			break
+
+	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte"
+		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size()])
+	_quattro_specie(h, by_kind, mesh_size, legacy_extent, kind_names)
+
+	# Ripristino **sempre**: `check()` non interrompe, e una sezione che lascia
+	# l'orda con una popolazione diversa da quella trovata sporca quello che viene
+	# dopo.
+	horde.population = saved_pop
+	horde.reseed(SEED_A)
+
+## ## 9.1 Il criterio n. 1: la taglia disegnata e' PROPORZIONALE a `radii[i]`
+##
+## L'invariante scritto e' `disegnato_i / radii[i] == costante`, che e' la stessa
+## cosa di `disegnato_i / disegnato_j == radii[i] / radii[j]` senza il costo di N^2
+## rapporti. Il confronto e' fra **tutti** i nemici campionati, non fra due: una
+## prova su due coppie passerebbe anche con un renderer che distingue solo due
+## specie.
+func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
+	var radii: PackedFloat32Array = horde.radii
+	# L'allineamento degli array paralleli e' il punto 2 del contratto di m8, e lo
+	# si controlla **prima** di leggere `radii[i]`: leggere fuori dal vettore e'
+	# un crash, e un crash non e' un fallimento con un messaggio.
+	h.eq(radii.size(), horde.count,
+		"m8: radii.size() deve combaciare con count: e' il punto 2 del contratto di m8")
+	h.eq(radii.size(), horde.transforms.size(),
+		"m8: radii deve essere allineato a transforms, stesso indice stesso nemico")
+	h.eq(radii.size(), horde.colors.size(),
+		"m8: radii deve essere allineato a colors, stesso indice stesso nemico")
+	h.eq(radii.size(), horde.kinds.size(),
+		"m8: radii deve essere allineato a kinds, stesso indice stesso nemico")
+	if radii.size() != horde.count or horde.count == 0:
+		return
+
+	var lo := INF
+	var hi := -INF
+	var sample := 0
+	for i in horde.count:
+		var r: float = float(radii[i])
+		if r <= 0.0:
+			continue
+		var t: Transform3D = enemies.instance_transform(horde.transforms[i], r, i)
+		# Il rapporto e' l'invariante, non il confronto a occhio fra due numeri.
+		var ratio: float = _scale_of(t.basis) / r
+		lo = minf(lo, ratio)
+		hi = maxf(hi, ratio)
+		sample += 1
+
+	h.eq(sample, horde.count,
+		"m8: tutti i nemici campionati devono avere un raggio del corpo positivo")
+	if sample == 0:
+		return
+	h.check(hi - lo <= RATIO_TOLERANCE,
+		"m8: la taglia disegnata deve essere PROPORZIONALE a horde.radii: il rapporto disegnato/raggio deve essere lo stesso per tutti, e va da %.6f a %.6f su %d nemici (escursione %.6f, tolleranza %.4f)"
+			% [lo, hi, sample, hi - lo, RATIO_TOLERANCE])
+
+	# E il fattore cosi' ottenuto e' quello che il renderer dichiara: non viene
+	# riletto dalla costante, viene **misurato** dal prodotto. E' il numero che m8
+	# chiede di dichiarare con il numero che produce.
+	var factor: float = (lo + hi) * 0.5
+	print("test_arena: m8 fattore di calibrazione MISURATO: disegnato/raggio = %.4f (min %.6f, max %.6f su %d nemici, escursione %.9f)"
+		% [factor, lo, hi, sample, hi - lo])
+	print("test_arena: m8 mesh %s, AABB %.6f x %.6f x %.6f m"
+		% [_mesh_name(enemies), mesh_size.x, mesh_size.y, mesh_size.z])
+
+## Raccoglie, **senza asserire**, quello che ogni specie osservata mostra nel
+## campione. Le asserzioni sono tutte in `_quattro_specie`: qui si sommano i numeri
+## e basta, cosi' il conteggio resta quello che il difetto merita e non 200 righe
+## che ripetono la stessa verta' per ogni nemico.
+##
+## Per ogni specie: quanti nemici, il raggio **minimo e massimo** (devono essere
+## uguali, perche' `radii[i]` e' una funzione di `kinds[i]`), e la taglia disegnata
+## e la sollevata del primo esemplare visto.
+##
+## Il **nome** non lo mette qui: `horde.kind_name(i)` prende un **indice** di
+## nemico, non un indice di specie, e chiamarlo con `kind` avrebbe scritto il
+## nome di un'altra specie accanto al suo raggio — un errore che si vede solo
+## confrontando la tabella con `src/sim/enemy.gd`. Il nome arriva da
+## `_kind_names()`, cioe' dalla tabella di -orda.
+func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
+	var radii: PackedFloat32Array = horde.radii
+	for i in horde.count:
+		var kind: int = horde.kinds[i]
+		var r: float = float(radii[i])
+		var t: Transform3D = enemies.instance_transform(horde.transforms[i], r, i)
+		if not by_kind.has(kind):
+			by_kind[kind] = {
+				"seen": 0,
+				"r_lo": r,
+				"r_hi": r,
+				"drawn": _drawn_extent(t.basis, mesh_size),
+				"height": _scale_of(t.basis) * mesh_size.y,
+				"lift": _lift_of(enemies, horde.transforms[i], r),
+			}
+		var row: Dictionary = by_kind[kind]
+		row["seen"] = int(row["seen"]) + 1
+		row["r_lo"] = minf(float(row["r_lo"]), r)
+		row["r_hi"] = maxf(float(row["r_hi"]), r)
+
+## ## 9.2 Il criterio n. 3: le quattro specie sono distinguibili, per nome
+##
+## «La misura c'e'» non e' «la misura e' guardata»: l'invariante del criterio n. 1
+## rende la distinguibilita' **automatica**, e proprio per questo va asserita per
+## nome, una specie alla volta.
+##
+## Sono **tre** le cose da guardare, e due delle tre hanno denti propri.
+##   - le specie sono **tutte** quelle che -orda dichiara, e ciascuna ha un raggio
+##     unico: e' la misura indiretta di `radii[i] == RADIUS[kinds[i]]`, fatta sui
+##     dati dell'orda e non sulla tabella;
+##   - le taglie disegnate sono **diverse** fra loro, e nessuna e' piu' piccola
+##     della taglia unica di prima (il "non regredisce");
+##   - ogni specie sta **appoggiata sul pavimento**: la sollevata e' meta'
+##     dell'altezza effettiva del corpo. Questo controllo e' **indipendente** dalla
+##     proporzionalita' — un renderer che scala i nemici e li lascia affondare
+##     rispetta la proporzione e non si vede — ed e' la via corta per i denti.
+func _quattro_specie(h, by_kind: Dictionary, mesh_size: Vector3, legacy_extent: float, kind_names: Array) -> void:
+	h.eq(by_kind.size(), kind_names.size(),
+		"m8: il campione deve contenere tutte le specie dichiarate da -orda (%d), e ne contiene %d"
+		% [kind_names.size(), by_kind.size()])
+
+	var ordered: Array = by_kind.keys()
+	ordered.sort()
+	var names: Array[String] = []
+	var sizes: Array[float] = []
+	var rows: Array[String] = []
+	for k in ordered:
+		var row: Dictionary = by_kind[k]
+		# Il nome viene dalla tabella di -orda, indicata dall'indice di specie.
+		var nm: String = str(kind_names[k]) if k < kind_names.size() else "specie %d" % k
+		names.append(nm)
+		sizes.append(float(row["drawn"]))
+		# `radii[i]` e' una funzione di `kinds[i]`: due nemici della stessa specie
+		# hanno lo stesso raggio. Contratto di m8 punto 1, misurato sui dati.
+		h.near(float(row["r_hi"]), float(row["r_lo"]), 0.0001,
+			"m8: tutti i %d %s campionati devono avere lo stesso raggio del corpo: va da %.6f a %.6f"
+				% [int(row["seen"]), nm, float(row["r_lo"]), float(row["r_hi"])])
+		# ## Il "non regredisce"
+		#
+		# Il requisito non e' che la taglia resti identica, e' che **non
+		# diminuisca**: nessuna specie puo' disegnare piu' piccola di quanto
+		# disegnava quando tutte avevano la taglia unica `LEGACY_BASE_SCALE`. Il
+		# pavimento di questa asserzione e' la base di confronto, non il raggio di
+		# una specie.
+		h.check(float(row["drawn"]) >= legacy_extent - 0.002,
+			"m8: il %s non puo' diventare piu' piccolo di prima: disegna %.3f m di lato maggiore, e prima di m8 ogni nemico ne disegnava %.3f m"
+				% [nm, float(row["drawn"]), legacy_extent])
+		# I piedi sul pavimento. L'altezza disegnata e' la scala dell'istanza per
+		# l'altezza della mesh: entrambe misurate, nessuna copiata.
+		var half: float = float(row["height"]) * 0.5
+		h.near(float(row["lift"]), half, LIFT_TOLERANCE,
+			"m8: il %s deve stare appoggiato sul pavimento, non affondato: centro a %.3f m sopra il terreno contro meta' altezza %.3f m. Con la taglia unica di prima la sollevata era fissa e questo corpo ne avrebbe avuti %.2f m sotto il terreno"
+				% [nm, float(row["lift"]), half, maxf(float(row["drawn"]) - LEGACY_BASE_SCALE * mesh_size.y, 0.0)])
+		rows.append("%s r=%.3f m -> %.3f m (%d visti)" % [nm, float(row["r_lo"]),
+			float(row["drawn"]), int(row["seen"])])
+
+	# Quattro taglie diverse. Due specie che si distinguono di un millimetro non
+	# sono distinguibili, quindi la soglia e' un centimetro e non un epsilon.
+	for a in names.size():
+		for b in range(a + 1, names.size()):
+			h.check(absf(sizes[a] - sizes[b]) > 0.01,
+				"m8: il %s (%.3f m) e il %s (%.3f m) devono essere distinguibili a occhio: due taglie a meno di un centimetro sono la stessa taglia"
+					% [names[a], sizes[a], names[b], sizes[b]])
+
+	print("test_arena: m8 le quattro specie, per nome: %s" % " | ".join(rows))
+
+## La taglia disegnata in metri: **il lato maggiore** del corpo, perche'
+## `enemy_small.glb` non e' una sfera (AABB 0.894425 x 1.000000 x 0.850640 m) e la
+## misura che conta e' quella che si vede. Scala dell'istanza per lato maggiore
+## della mesh.
+func _drawn_extent(basis: Basis, mesh_size: Vector3) -> float:
+	return _scale_of(basis) * _max3(mesh_size.x, mesh_size.y, mesh_size.z)
+
+## La scala uniforme dell'istanza. Il `Basis` arriva gia' ruotato dal renderer
+## (rotazione comune sull'asse Y) e `get_scale()` e' invariante rispetto alla
+## rotazione, quindi il valore letto e' la scala e non una sua componente mista.
+func _scale_of(basis: Basis) -> float:
+	var s := basis.get_scale()
+	return maxf(absf(s.x), maxf(absf(s.y), absf(s.z)))
+
+## Quanto il nemico sta sopra il pavimento, cioe' meta' dell'altezza del suo corpo.
+## Si misura con indice 0 perche' il bob e' `sin(0 * BOB_SPEED + 0 * 0.37)`, che
+## e' esattamente zero: con un indice qualsiasi il bob entrerebbe nella misura e
+## renderebbe il confronto con la meta' altezza una domanda sul pavimento.
+func _lift_of(enemies, pos: Vector3, radius: float) -> float:
+	var t: Transform3D = enemies.instance_transform(pos, radius, 0)
+	return t.origin.y - pos.y
+
+func _max3(a: float, b: float, c: float) -> float:
+	return maxf(a, maxf(b, c))
+
+func _mesh_name(enemies) -> String:
+	var mm = enemies.multimesh
+	return "MultiMesh" if mm == null else str(mm.mesh.resource_path)
 
 # --- Interno -------------------------------------------------------------------
 

@@ -1,22 +1,50 @@
 extends Node3D
 ## L'orda: 200 nemici vivi **senza un nodo per nemico**.
 ##
-## Un nemico e' un record in `transforms` (dove sta) piu' quattro array paralleli
-## (velocita', hp, specie, timer), non un `Node3D`. Il criterio della milestone e'
-## `node_count < 120` con `horde.count == 200`: un nodo per nemico, da solo,
-## farebbe fallire il criterio.
+## Un nemico e' un record in `transforms` (dove sta) piu' cinque array paralleli
+## (velocita', hp, specie, timer, raggio), non un `Node3D`. Il criterio della
+## milestone e' `node_count < 120` con `horde.count == 200`: un nodo per nemico,
+## da solo, farebbe fallire il criterio.
 ##
 ## ## L'API "massa" non passa da funzioni
 ##
 ## Disegnare 200 nemici non e' una query, e' un `MultiMeshInstance3D` che legge
-## tre campi. Per questo sono campi pubblici e non metodi:
+## quattro campi. Per questo sono campi pubblici e non metodi:
 ##
 ##     horde.count        # quanti nemici vivi
 ##     horde.transforms   # PackedVector3Array, posizione mondo di ciascuno
 ##     horde.colors       # PackedColorArray, tinta per specie
+##     horde.radii        # PackedFloat32Array, raggio del CORPO, in metri (m8)
 ##
-## `transforms.size() == colors.size() == count`, sempre: l'invariante e' quello
-## che permette all'arena di non controllare nulla.
+## `transforms.size() == colors.size() == radii.size() == count`, sempre:
+## l'invariante e' quello che permette all'arena di non controllare nulla.
+##
+## ## m8: `radii`, e perche' un array parallelo e non una strada nuova
+##
+## Il difetto che m8 chiude e' che **due numeri che dovrebbero essere uno solo
+## erano due**: il nemico ha un raggio (`RADIUS[kind]`, in `src/sim/enemy.gd`)
+## e un margine di morso (`TOUCH_REACH`), e il renderer ne disegnava **uno solo**,
+## uguale per tutte e quattro le specie. Il giocatore leggeva quindi una taglia
+## che non e' quella che morde, e `RADIUS` stava in un posto solo che nessuna
+## altra foglia poteva raggiungere senza copiarlo.
+##
+## `radii` e' la strada dichiarata dal vertice in `src/core/contracts.gd`
+## ("Supersficie di milestone 8", congelata il 2026-10-13): `-orda` la scrive,
+## `-arena` la legge, e il nome non si inventa due volte.
+##
+## **Perche' un array parallelo e non un metodo.** Perche' `radii[i]` e' un dato
+## grezzo al pari di `transforms[i]`: il renderer lo legge una volta per nemico
+## dentro il ciclo di disegno, e un metodo che calcolasse `RADIUS[kinds[i]]`
+## dentro quel ciclo sarebbe una ricerca per nemico per un numero che cambia
+## solo quando cambia la specie.
+##
+## **Perche' non una strada nuova.** `radii` cresce, si svuota e si ricompone
+## **negli stessi quattro punti** degli altri array paralleli: `_resize_arrays`,
+## `_apply_spawn`, `_kill`, e da li' transitano `_populate` (quindi `restart_run`
+## e `reseed`) e `_spawn_one`. Un array parallelo con una strada sua e' il
+## modo in cui si stacca dagli altri, ed e' gia' successo in questo progetto
+## con `transforms`. Il test asserisce `radii.size() == count` perche' un
+## disallineamento qui e' un nemico disegnato con il raggio di un altro.
 ##
 ## ## La partita non e' fra i tre campi
 ##
@@ -125,6 +153,14 @@ var count: int = 0
 var transforms: PackedVector3Array = PackedVector3Array()
 ## Tinta per nemico (per specie).
 var colors: PackedColorArray = PackedColorArray()
+## Raggio del **corpo** di ogni nemico vivo, in metri: `radii[i] ==
+## RADIUS[kinds[i]]`. Non e' la distanza a cui morde (quella e' `radii[i] +
+## TOUCH_REACH`, e la condizione sta in `src/sim/enemy.gd`), e non e' un raggio
+## di collisione generico: e' **la taglia che devi vedere**. Superficie
+## congelata in `src/core/contracts.gd`, punto 4: e' il numero che il renderer
+## deve disegnare, e la proporzione `disegnato_i / disegnato_j == radii[i] /
+## radii[j]` e' l'invariante, non la taglia assoluta.
+var radii: PackedFloat32Array = PackedFloat32Array()
 
 # --- Dati per nemico: array paralleli, tutti lunghi `count` --------------------
 
@@ -318,6 +354,7 @@ func _register() -> void:
 func _resize_arrays(n: int) -> void:
 	transforms.resize(n)
 	colors.resize(n)
+	radii.resize(n)
 	velocities.resize(n)
 	hp.resize(n)
 	kinds.resize(n)
@@ -366,6 +403,10 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	bite_timers[i] = 0.0
 	bites[i] = 0
 	colors[i] = E.color_of(kind)
+	# Il raggio del corpo, dalla tabella delle specie: un posto solo (criterio
+	# n. 4 di m8). `radii` non e' derivato da `transforms` ne' dalla tinta: e'
+	# l'unico posto in cui la taglia attraversa la foglia.
+	radii[i] = E.radius_of(kind)
 
 # --- Simulazione --------------------------------------------------------------
 
@@ -573,6 +614,7 @@ func _kill(i: int) -> void:
 	if i != last:
 		transforms[i] = transforms[last]
 		colors[i] = colors[last]
+		radii[i] = radii[last]
 		velocities[i] = velocities[last]
 		kinds[i] = kinds[last]
 		hp[i] = hp[last]
@@ -665,6 +707,13 @@ func wave_hp_scale() -> float:
 ## già esistono. Il criterio n. 4 chiede che un restart non lasci nodi
 ## duplicati, e con questa forma il numero di nodi non *può* cambiare invece di
 ## dover essere controllato.
+##
+## **Anche `radii` viene ricomposta qui**, per la via che il contratto di m8
+## dichiara: il restart chiama `_populate`, che chiama `_apply_spawn` per ogni
+## nemico, ed e' li' che `radii[i]` prende il raggio della specie. Non c'e' una
+## strada per `radii` diversa da quella degli altri array paralleli: e' il punto
+## 3 del contratto, ed e' quello che un array parallelo deve rispettare per non
+## staccarsi dagli altri.
 ##
 ## Il giocatore **non** è toccato: è di -gameplay, e rimetterlo in piedi (vite,
 ## potenziamenti, arma) è la sua metà del restart. Chi chiama questo metodo deve

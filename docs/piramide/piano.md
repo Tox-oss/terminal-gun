@@ -1348,6 +1348,170 @@ stato portato a 1,6.
    non ha avuto i passi per allinearlo.
 3. **Il leak di `bonk.wav` resta aperto e resta un dado**: `2` allarmi su `5` dichiarati, `--quit-after 300` pulito in questo lancio. **Nessuna delle tre foglie lo ha toccato**, che era il vincolo che gli avevo dato.
 
+### 1.10 La strada che l'utente ha deciso il 2026-10-13: tre onde, in quest'ordine
+
+Dopo m7 l'utente ha giocato e ha scritto: *«a quanto pare il mio hitbox è troppo piccolo
+o i nemici troppo grandi, ingrandiamo la mappa e aggiungiamo ostacoli»*. **Tre richieste in una
+frase, e sono tre milestone diverse**, con tre proprietari diversi e tre protocolli diversi.
+Decisione dell'utente: **tutti e tre, in tre onde separate**, e alla seconda domanda
+**«il nemico li aggira davvero»**.
+
+L'ordine non è il mio, è una conseguenza di due dipendenze misurate:
+
+| onda | cosa | perché qui e non prima |
+|---|---|---|
+| **m8** | la portata del morso è la taglia del nemico | è il difetto che l'utente ha **descritto**; ed è **prima** perché cambia i numeri che m9 e m10 usano: se le specie si ridimensionano, ogni densità calcolata sopra è sul vecchio |
+| **m9** | l'arena più grande | prima di m10, perché **un ostacolo in un disco da 28 m** non è un ostacolo: è un muro. Gli ostacoli hanno bisogno di spazio per essere una scelta e non un muro |
+| **m10** | gli ostacoli, **aggirati davvero** | il pezzo grosso. Va per ultimo perché è l'unico che introduce un **sottosistema** (vedi sotto) |
+
+**Una cosa che ho misurato prima di rispondere, e che cambia la premessa della richiesta.**
+Il difetto che l'utente chiama «hitbox troppo piccolo» **non è la mappa e non sono gli
+ostacoli**, e nessuna delle due cose lo tocca:
+
+| specie | `RADIUS` | **morde fino a** (`RADIUS + TOUCH_REACH`) |
+|---|---|---|
+| runner | 0.45 | **1.65 m** |
+| grunt | 0.60 | 1.80 m |
+| brute | 1.00 | 2.20 m |
+| boss | 1.90 | **3.10 m** |
+
+E il fatto che rende il difetto **invisibile** e non solo fastidioso: **le quattro specie sono
+disegnate con la stessa mesh alla stessa scala** (`BASE_SCALE = 1.5`,
+`src/render/horde_renderer.gd:32`) e cambiano **solo di tinta**. Un runner e un boss sono
+indistinguibili alla vista, e il boss morde da **1,9 metri piu' lontano**. La "hitbox" che
+l'utente sente e' un cerchio che **non ha nessun corrispondente visivo**, e il giocatore e' un
+**punto**: non ha raggio, quindi il morso arriva 1,2 m oltre il bordo visibile del nemico.
+
+Questo e' anche il perche' di m8 come prima onda: **ingrandire la mappa senza rendere leggibile
+la portata del morso avrebbe reso l'arena piu' grande e il difetto identico.**
+
+**Il numero che resta da misurare, e che nessuno ha misurato** (quindi non e' scritto qui):
+a 200 nemici su un disco da 28 m (2463 m²) con `SEPARATION_RADIUS = 1.6`, l'orda occupa
+una frazione non misurata dell'arena. E' l'ipotesi su «non riesco a muovermi», ed e' **il
+primo passo di m9**, non una premessa di m9.
+
+### 1.11 Milestone 8 — la portata del morso è la taglia del nemico
+
+Il difetto è di **presentazione e di contratto fra due numeri**, non di design dell'arena: due
+numeri che dovrebbero essere uno solo sono due, e quello che disegni non è quello che morde.
+
+**Nessuna cifra di questa milestone è scritta sopra**, per la regola di §1.4b: `TOUCH_REACH`
+è stato dichiarato «misurato» da `-orda`, ma è misurato **sull'orda isolata**, cioè senza che
+nessuno abbia mai visto la porta. Il numero lo sceglie la misura sulla **scena vera**, e va
+stampato in testa al file di test con il perché.
+
+| # | criterio | come si verifica |
+|---|---|---|
+| 1 | **la taglia che vedi è quella che morde** | la taglia disegnata è **proporzionale** a `horde.radii[i]`, e l'invariante è `disegnato_i / disegnato_j == radii[i] / radii[j]`. **Proporzionale, non assoluto**: il fattore di calibrazione puo' cambiare senza falsare l'invariante. Il difetto di oggi è che tutte e quattro hanno la **stessa** taglia, e quella e' la forma da rendere irraggiungibile |
+| 2 | **il morso è contatto, non un margine invisibile** | `TOUCH_REACH` **misurato** sulla scena vera fino a far leggere il morso come contatto col corpo. **Nessun numero scritto qui.** Il numero che ne esce cambia la difficoltà, ed è un cambiamento **desiderato**: è la richiesta dell'utente |
+| 3 | **le quattro specie sono distinguibili** | sulla scena vera, la taglia disegnata di due specie diverse **differisce**: l'invariante del criterio n. 1 rende questo automatico, ma va asserito per nome, perche' «la misura c'è» non è «la misura è guardata» |
+| 4 | **il numero del raggio è uno solo** | `RADIUS` sta in un posto solo (`src/sim/enemy.gd`) e non ne ha una copia nel renderer né nei test. È il criterio n. 6 di m7 generalizzato a tutti i numeri, non solo a quelli di danno |
+| 5 | **i numeri di m7 non regrediscono di nascosto** | `KNOCKBACK` resta **18.0** e il knockback runner resta **≥ 0.3** (`0.3123` oggi, soglia con margine ~4%); `node_count` resta sotto **120** (44 oggi); `worst_bucket` e la densità di m3 restano quelli (`min 5, mediana 6, max 8`, `GRID_CEILING = 11`) |
+| 6 | **i denti, provati e rimossi** | il criterio n. 1 deve dire `FAIL` se tutte e quattro le specie tornano alla stessa taglia; il criterio n. 2 deve dire `FAIL` se `TOUCH_REACH` torna al valore di prima. Entrambi poi rimossi |
+| 7 | **la porta è verde** | `GATE: 8/8` **meno il leak dichiarato**, `PERM: 15/15`, rieseguite dal vertice |
+
+**Cosa cambia nella difficoltà, e va detto che è voluto.** Accorciando la portata del morso i
+morsi arrivano **meno spesso**, quindi il tempo di sopravvivenza con il giocatore fermo **sale**
+dai **6,5 s** di m7. Quel numero era misurato, non scelto, e **qui cambia per scelta dell'utente**:
+non e' una regressione e va riscritto come numeri nuovi, non difesi.
+
+### 3.9 Scope della milestone 8: due foglie, una superficie, quattro file
+
+Come m3 e m6: i file sono disgiunti e **nessuna riga di permesso nuova**, quindi m8 non chiede
+nulla all'utente e `PERM: 15/15` va comunque confermata **prima** di lanciare.
+
+| agente | modello | in m8 scrive | note |
+|---|---|---|---|
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/enemy.gd`, `src/sim/horde.gd`, `tests/test_orda.gd` | **`TOUCH_REACH` rimisurato sulla scena vera** e `radii` scritto negli stessi array paralleli degli altri. **`RADIUS` non si tocca**: non è il difetto, ed è accoppiato al tetto di `arena_radius` |
+| `terminal-gun-arena` | `space-bunny-free#max` | `src/render/horde_renderer.gd`, `tests/test_arena.gd` | la taglia disegnata diventa **proporzionale** a `radii[i]`, con **un fattore di calibrazione dichiarato** |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | la superficie `horde.radii` congelata **prima** del lancio |
+
+**`src/render/arena.gd`, `scenes/hud.tscn` e `src/ui/` restano fuori da m8.** Sono di `-arena`
+e di `-ui`, ma nessuno dei tre ha bisogno di muoversi: la taglia si cambia dentro la
+`MultiMesh`, che è una **trasformazione per istanza** e non un nodo, quindi `node_count` non
+cresce ed è il criterio n. 5 a dirlo.
+
+**Il pericolo di questa onda è di misura, non di codice.** Il difetto è **due numeri che
+dovrebbero essere uno**, quindi la tentazione è fare il verde e basta: le proporzioni tornano,
+la porta passa, e la difficoltà è cambiata di un fattore che nessuno ha dichiarato. Per questo il
+criterio n. 5 esiste: **i numeri di m7 non possono cambiare in silenzio.**
+
+### 4.8 Onde della milestone 8
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m8-w0** | vertice | — | superficie `horde.radii` **congelata** in `src/core/contracts.gd`, specifica scritta, `PERM: 15/15` prima di lanciare |
+| **m8-w1** | orda ∥ arena | 2 agenti, una stessa risposta | `GATE: 8/8` meno il leak, denti fatti e rimossi, numeri di m7 non regrediti, rieseguiti **dal vertice** |
+| **m8-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+**Due foglie sullo stesso oggetto, con una consegna che va in un senso solo**: `-arena` legge
+`horde.radii`, che `-orda` scrive. Non è una race da evitare, è un ordine di consegna, ed è il
+motivo per cui il nome è congelato **prima** e non durante. Se `-arena` parte prima, il campo
+non c'è ancora: **si ferma e lo dice**, non se lo dichiara da sé.
+
+### Le onde della milestone 8, e una correzione che il vertice deve a se stesso
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m8-w0** | vertice | decisione dell'utente registrata (tre onde, ordine dichiarato e motivato), superficie `horde.radii` **congelata** in `contracts.gd`, specifica §1.11 scritta | `PERM: 15/15` prima di lanciare: **nessuna riga di permesso nuova** | **verde** |
+| **m8-w1** | orda ∥ arena | `radii` scritto come **quinto array parallelo**; `TOUCH_REACH` 1.2 → **0.45** rimisurato sulla scena vera; la taglia disegnata e' **proporzionale** a `radii[i]` con `SIZE_FACTOR = 3.4` misurato; denti fatti **due volte** e rimossi | `GATE: 7/8`, l'unico rosso e' il **leak dichiarato**; `PERM: 15/15` | **verde** |
+| **m8-w2** | vertice | porte rieseguite dal vertice, piano aggiornato, commit | — | **verde** |
+
+**La correzione, e perché sta in cima e non in fondo.** Nella mia risposta all'utente dopo m7 ho
+scritto che il giocatore fermo al centro muore in **6,5 s**, e l'ho trattato come misura. **Non
+lo era.** `-orda` l'ha trovato misurando sul giocatore vero e non sullo spia, e la ragione e'
+scritta nel suo file:
+
+> m7 misurava la **produzione** dell'orda, non l'**ingestione** del giocatore.
+
+Lo spia di `tests/test_orda.gd` accetta **ogni** morso; il giocatore vero ne scarta una parte
+per la finestra di invulnerabilita' (`INVULN_AFTER_HIT = 0.7 s`). Quindi i 6,5 s di m7 non erano
+il tempo di sopravvivenza: erano il tempo in cui l'orda **avrebbe** ucciso un giocatore che
+accetta tutto.
+
+**Con una riserva che va dichiarata, perché il numero stesso e' una banda e non un punto.** Le
+due prove stampano tassi di scarto molto diversi: `16 morsi su 41 scartati` in un lancio e
+`6 morsi su 32 scartati` in un altro, cioe' **39% e 19%**. Uno scarto del 19% non spiega da solo
+un fattore 3. Il fatto solido e' piu' piccolo e basta: **lo spia sovrastima il danno al
+giocatore**, e il numero di cui fidarsi e' quello della scena vera. Il fattore esatto **non e'
+misurato**, e va scritto cosi'.
+
+### I sette criteri della milestone 8, uno per uno
+
+Rimisurati dal vertice il 2026-10-13. Il criterio n. 1 e' quello che chiude il difetto, e non e'
+una tolleranza: e' l'uguaglianza di un rapporto.
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | la taglia che vedi e' quella che morde | **si'** | `disegnato/raggio = 3.4000`, **min 3.400000 max 3.400000 su 200 nemici, escursione 0.000000294**. Per specie: runner 0.450 → 1.530, grunt 0.600 → 2.040, brute 1.000 → 3.400, boss 1.900 → 6.460 |
+| 2 | il morso e' contatto, non un margine invisibile | **si'** | `TOUCH_REACH` **1.2 → 0.45**, scelto sulla scena vera: a portata `0.45` ci sono **9** nemici su 200, a `1.20` erano **22**. Nessun numero scritto prima della misura, come chiede §1.4b |
+| 3 | le quattro specie sono distinguibili | **si'** | 4 specie, **4 taglie diverse**, 53/69/48/30 visti. E ha denti **propri**: la prova della sollevata costante fa cadere **solo** il n. 3 con il n. 1 ancora verde |
+| 4 | il numero del raggio e' uno solo | **si'** | `RADIUS` sta in `src/sim/enemy.gd`; il renderer legge `radii` e moltiplica per `SIZE_FACTOR`, e **non ne contiene copia**. La mesh e' stata misurata una volta sola dall'AABB (`0.894425 x 1.000000 x 0.850640 m`) invece di una costante dichiarata |
+| 5 | i numeri di m7 non regrediscono di nascosto | **si'** | knockback runner **0.3128** (soglia 0.3, era 0.3123), `node_count` **44** (tetto 120), m3 `min 5, mediana 6, max 8` invariata |
+| 6 | i denti, provati e rimossi | **si', tre volte** | scala costante → n. 1 **FAIL** con rapporto da **1.789474 a 7.555556** (escursione 5.766082 contro tolleranza 0.0010) e n. 3 FAIL su tutte e **6** le coppie a 3.400 m; sollevata costante → **solo** n. 3, boss 2.48 m fuori e 4.96 m sotto il terreno. Marcatori rimossi, `horde_renderer.gd` ripristinato **byte identico** |
+| 7 | la porta e' verde | **si', come il criterio e' scritto** | `GATE: 7/8` con l'unico rosso `test_ui` per il **leak dichiarato**; `PERM: 15/15` |
+
+**Il contenimento di m8 e' stato verificato, non dichiarato.** `git status` dopo le due foglie:
+sette file, **tutti dentro uno scope dichiarato** — `piano.md` e `contracts.gd` (vertice),
+`src/sim/enemy.gd`, `src/sim/horde.gd`, `tests/test_orda.gd` (`-orda`), `src/render/horde_renderer.gd`,
+`tests/test_arena.gd` (`-arena`). **Nessun file fuori scope**, e in particolare nessuna scrittura in
+`src/player/`, `src/weapons/`, `src/ui/`, `scenes/`, `project.godot` o `.godot/`.
+
+### Il numero che m8 ha cambiato, e che non e' un trionfo
+
+Con la portata accorciata, sulla **scena vera** con 200 nemici e il giocatore fermo al centro:
+**morto dopo 11,25 s** (calcolato 10,20 s), **9,81 hp/s**, 11,31 hp per morso accettato. Sull'orda
+isolata il numero e' **9,5 s** con l'onda piena e **29,2 s** con la piccola, cioe' l'orda piena fa
+**3,27 volte** il danno dell'onda piccola (era 2,56 prima di m8).
+
+**Il difetto che m8 non chiude, e che era la stessa intuizione dell'utente.** `-orda` ha misurato
+lo **scarto minimo mai visto** fra il giocatore e il bordo del corpo di un nemico:
+**−1,4464 m**. Negativo vuol dire che il nemico e' **dentro** il corpo del giocatore, di un metro
+e mezzo. Il giocatore ha un corpo **visivo** di 0.45 m e **nessuna collisione**: e il punto da cui
+era partita la lamentela, cioe' «il mio hitbox e' troppo piccolo», e' letteralmente vero e
+**non e' stato chiuso da m8**, che ha reso leggibile il morso e non ha fermato i nemici
+dall'entrare addosso. E' dichiarato qui con il numero e resta **aperto**.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

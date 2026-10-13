@@ -223,7 +223,28 @@ var touch_bites_last: int = 0
 ## Nemici ammazzati dall'inizio della partita.
 var kills: int = 0
 ## Raggio utile dell'arena, ripreso dal contratto a ogni passo.
-var arena_radius: float = 28.0
+##
+## ## Questo numero e' un FALLBACK DICHIARATO, non una fonte (m9)
+##
+## Il numero che vale davvero e' quello del contratto, e la sua fonte e'
+## `src/render/arena.gd:ARENA_RADIUS` (**46.0**), che la registra sul contratto in
+## `_enter_tree()`; da li' `_contract_radius()` la rilegge a ogni passo, quindi in
+## partita questa riga **non viene mai usata**. Vive per il caso in cui il
+## contratto non c'e' ancora (i processi di test lanciati con `--script`, e
+## l'ordine di ingresso in cui l'orda e' costruita prima dell'arena).
+##
+## Perche' 46.0 e non 28.0: il valore e' uscito dalla sonda
+## `docs/piramide/probe_arena_density.gd` (piano §1.12) — a 200 nemici lo spazio
+## libero passa dall'85,2% al 94,6% e la bolla sicura piu' grande da 9,5 a
+## 19,1 m. Un fallback che dicesse 28.0 mentirebbe proprio nel caso in cui
+## nessuno lo guarda, cioe' quando l'arena non si e' ancora registrata.
+##
+## Il criterio n. 2 di m9 e' sulla **deriva**, non sull'assenza: se qualcuno
+## cambiasse una delle copie senza cambiare le altre, la porta va rossa. Di questa
+## copia si occupa `tests/test_orda.gd` (legge questa riga dal sorgente e la
+## confronta col default del contratto); delle altre si occupa
+## `tests/test_arena.gd`.
+var arena_radius: float = 46.0
 ## Ultimi colpi ricevuti, in un anello di capienza fissa: `hit_count` quanti
 ## sono validi. Serve a sfx/flash senza toccare gli array e senza allocare.
 var hit_count: int = 0

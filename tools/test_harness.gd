@@ -18,7 +18,7 @@ class_name TestHarness
 ##
 ##     func _initialize() -> void:
 ##         var h = H.new()
-##         h.near(Game.arena_radius, 28.0, 0.001, "arena_radius")
+##         h.near(Game.arena_radius, 46.0, 0.001, "arena_radius")
 ##         h.check(x > 0, "x deve essere positivo")
 ##         quit(h.finish("smoke"))
 ##

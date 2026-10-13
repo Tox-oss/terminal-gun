@@ -4,7 +4,7 @@ extends Node3D
 ##
 ## ## L'unica cosa che arena registra
 ##
-##     Game.arena_radius = 28.0
+##     Game.arena_radius = 46.0
 ##
 ## E' un **dato**, quindi assegnazione diretta, una volta sola all'avvio (piano
 ## 5.1). Lo registro in `_enter_tree()` e non in `_ready()`: i figli di questa
@@ -20,7 +20,52 @@ extends Node3D
 ## Non registro neanche `Game.player` e `Game.horde`: sono dati di altre foglie e
 ## arena li **legge**, non li scrive.
 
-const ARENA_RADIUS := 28.0
+## ## IL RAGGIO DELL'ARENA: l'unica fonte del numero (criterio n. 1 e n. 2 di m9)
+##
+## Il raggio e' stato scritto sei volte in sei file (piano 1.12-bis) e cinque
+## copie potevano dire un numero diverso dalla sesta senza che nessuna porta lo
+## vedesse. Qui e' **la fonte**: le altre cinque sono o un default di contratto
+## che questa registrazione sovrascrive, o un **fallback dichiarato** che vale
+## solo quando il contratto non e' ancora raggiungibile, e sono tutte tenute
+## allineate da `tests/test_arena.gd` (criterio n. 2, sulla **deriva**: se una
+## delle copie si discosta da questa, la porta va rossa).
+##
+## ## PERCHE' 46.0: il numero non e' stato scelto, e' stato **misurato**
+##
+## Sonda `docs/piramide/probe_arena_density.gd` del vertice (piano 1.12): mette
+## l'orda a regime e chiede **quanto spazio l'orda concede**, non quanto ne
+## sembra. "Spazio libero" e' definito col numero che morde: un punto e' libero
+## se dista da ogni nemico piu' di `RADIUS[kind] + TOUCH_REACH`. Griglia 0,5 m,
+## DT 1/60, seme 4242, 900 passi di assestamento col giocatore fermo al centro.
+## Sul terreno e sul muro a 28 m: la sonda misura lo spazio che l'orda concede,
+## non quello che si vede.
+##
+##     popolazione    R=28            R=34            R=40            R=46
+##     1 nemico       99,9%  14,5 m   99,9%  17,7 m  100,0% 20,9 m  100,0% 24,0 m
+##     25  (onda 1)   97,5%  12,7 m    98,3%  16,1 m   98,7%  19,1 m   99,0%  22,2 m
+##     200 (onda 8)   85,2%   9,5 m    90,3%  12,6 m   92,8%  15,6 m   94,6%  19,1 m
+##
+##     R       area        libera     disco libero max   tempo till il muro
+##     28      2463 m2     85,2%       9,5 m             1,4 s
+##     46      6648 m2     94,6%      19,1 m             2,7 s
+##
+## **Perche' 46 e non 40, e perche' il guadagno e' nella bolla e non nell'area.**
+## Il tempo till il muro e' `(R - 9,4) / 13,65 m/s`: l'orda forma un anello di
+## ~9,4 m intorno al giocatore, e **R compare nel numeratore mentre quel 9,4 no**.
+## Percio' il guadagno e' **lineare nel raggio e lineare solo nella bolla**:
+## la percentuale di area libera si muove poco (85,2% -> 94,6%, era gia' alta),
+## mentre il **disco libero piu' grande raddoppia** (9,5 -> 19,1 m) e i secondi
+## per scappare passano da 1,4 a 2,7. Passare da 40 a 46 e' mettere quegli
+## stessi secondi davanti a un numero che si ricorda.
+##
+## **Quello che questo numero NON risolve**, dichiarato perche' nessuno ricreda
+## fra sei mesi che 46 sia stato scelto a occhio: lo spazio libero resta
+## **frammentato in tasche** e l'anello di ~9,4 m intorno al giocatore **non si
+## assottiglia**, perche' e' un numero di **simulazione** (popolazione e
+## separazione, `SEPARATION_CHECKS = 6`) e non di mappa. Raddoppiare l'arena non
+## scioglie l'orda: e' per questo che 46 e' un numero di simulazione e non una
+## correzione di mappa.
+const ARENA_RADIUS := 46.0
 
 var _hud: Node = null
 var _registered: bool = false
@@ -35,9 +80,9 @@ func _enter_tree() -> void:
 	# l'orda lo legge per disporre i suoi 200 nemici. Ma il `_ready()` di un
 	# padre viene DOPO il `_ready()` di tutti i suoi figli: registrarsi in
 	# `_ready()` significava che i figli costruivano leggendo il valore che il
-	# contratto aveva per caso, e il contratto lo dichiara come 28.0 per
-	# comodita'. Il risultato era un'arena costruita con il raggio sbagliato
-	# appena qualcosa scriveva un altro valore prima del caricamento.
+	# contratto aveva per caso, e il contratto lo dichiara per comodita'. Il
+	# risultato era un'arena costruita con il raggio sbagliato appena
+	# qualcosa scriveva un altro valore prima del caricamento.
 	#
 	# `_enter_tree()` scende: arriva prima del `_ready()` di ogni figlio.
 	# Resta un'unica registrazione, fatta all'avvio e non nel ciclo di gioco,

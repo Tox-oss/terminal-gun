@@ -1512,6 +1512,203 @@ era partita la lamentela, cioe' «il mio hitbox e' troppo piccolo», e' letteral
 **non e' stato chiuso da m8**, che ha reso leggibile il morso e non ha fermato i nemici
 dall'entrare addosso. E' dichiarato qui con il numero e resta **aperto**.
 
+### 1.12 Milestone 9 — l'arena: la misura del «prima», e **la mia ipotesi era sbagliata**
+
+Il primo passo di m9 **non è** cambiare il raggio: è misurare se l'arena sia il vincolo
+(§1.4b, passo 1: «misurare il prima, senza cambiare niente»). La misura l'ha fatta il vertice
+con `docs/piramide/probe_arena_density.gd`, che **non tocca il codice di nessuna foglia**:
+imposta `horde.arena_radius` e chiama `horde.reseed(s)`, la **superficie congelata in m3**.
+
+**«Spazio libero» è definito con il numero che morde**, non con un altro: un punto è libero se
+la distanza da ogni nemico supera `RADIUS[kind] + TOUCH_REACH` per **quel** nemico. Griglia
+0,5 m, DT 1/60, seme 4242, **900 passi di assestamento** col giocatore fermo al centro, orda a
+regime. Il terreno e il muro restano a 28 m: la sonda misura **lo spazio che l'orda concede**,
+non quello che si vede, ed è dichiarato perche' un numero senza quel paragrafo parla d'altra cosa.
+
+| popolazione | R=28 | R=34 | R=40 | R=46 |
+|---|---|---|---|---|
+| **1 nemico** (riferimento) | **99,9%** libero, disco 14,5 m | 99,9%, 17,7 m | 100,0%, 20,9 m | 100,0%, 24,0 m |
+| **25** (onda 1) | **97,5%** libero, disco 12,7 m | 98,3%, 16,1 m | 98,7%, 19,1 m | 99,0%, 22,2 m |
+| **200** (onda 8) | **85,2%** libero, disco **9,5 m** | 90,3%, 12,6 m | 92,8%, 15,6 m | 94,6%, **19,1 m** |
+| nemici a portata di morso sul centro | **9 su 200** | 8 | 6 | 10 |
+
+**Il caso da 1 nemico è il riferimento, e serve perché la sonda ha sbagliato la prima volta.**
+La prima versione dava **2,5% di area libera con 25 nemici**: impossibile, perché un nemico da
+0,9 m di portata copre al massimo 2,5 m² su 2463. E dava un «disco libero massimo» di **30,0 m**
+su un'arena di raggio **28**. Il difetto era che fuori dall'arena e «minacciato» erano lo
+stesso valore nella stessa griglia, e il totale delle celle le contava entrambe. Corretto, e
+corretto con un caso la cui risposta giusta è nota: uno strumento che non sa dire «99,9%» non
+ha diritto di dire «2,5%». §11.11.
+
+**Il verdetto, e smentisce l'ipotesi che avevo scritto all'utente.** Avevo stimato che a 200
+nemici l'orda coprisse «più di metà dell'arena». **È il 14,8%.** L'arena **non è satura**:
+all'onda 8 l'**85,2%** è libero. La stima era sbagliata per una ragione precisa e vale per
+tutto il progetto: avevo contato `SEPARATION_RADIUS = 1.6` come se ogni nemico lo facesse
+valere **ovunque**, ma `SEPARATION_CHECKS = 6` significa che la separazione è **locale**, e
+l'orda converge sul giocatore lasciando davvero vuoto il resto.
+
+**Quindi «ingrandire la mappa» non è quello che credevamo, e il numero lo dice.** Il guadagno è
+**lineare nel raggio e lineare solo nella bolla**, non nell'area: la porzione libera passa
+dall'85,2% al 94,6%, cioè **poco**, mentre il **disco libero più grande** raddoppia (9,5 → 19,1 m).
+La spiegazione è geometrica e si vede dai numeri: l'orda forma un **anello di raggio ~9,4 m**
+intorno al giocatore e lo spazio libero è la **cintura** fra quell'anello e il muro; il disco
+massimo inscritto in una cintura è circa `(R - 9,4)/2`, e **`R` compare ma il raggio dell'anello
+no**.
+
+**Il numero che spiega «non riesco a muovermi», e non è la mappa.** All'onda 8 **9 nemici su
+200** sono a portata di morso dal centro, ma lo spazio libero è **frammentato in tasche**: 85%
+di area libera con nessun disco continuo oltre **9,5 m**. Non manca area, manca un posto dove
+stare. E l'anello di ~9,4 m è un numero di **simulazione** (popolazione e separazione), non di
+mappa: **raddoppiare l'arena non assottiglia l'orda intorno a te.**
+
+### 1.12-bis Il raggio è in **sei copie**, ed è la prima cosa che m9 deve chiudere
+
+La regola di §3.6-bis — «quando il vertice cambia un numero, si chiede chi altro ci fa
+affidamento, e il modo per trovarli è `grep` del numero **prima** di scrivere la tabella di
+scope» — l'ho applicata prima di scrivere la tabella, e ha trovato **sei** copie di `28.0` che
+vogliono tutte dire «il raggio dell'arena»:
+
+| # | dove | che cosa e' | proprietario |
+|---|---|---|---|
+| 1 | `src/render/arena.gd:23` `const ARENA_RADIUS` | **l'unica che vince**: la registra sul contratto in `_enter_tree()` | `-arena` |
+| 2 | `src/core/contracts.gd:63` `var arena_radius: float = 28.0` | il default del contratto, **sovrascritto** dalla 1 | **vertice** |
+| 3 | `src/sim/horde.gd:226` `var arena_radius: float = 28.0` | fallback se il contratto non c'e' | `-orda` |
+| 4 | `src/render/arena_camera.gd:28` `FALLBACK_RADIUS` | fallback della camera | `-arena` |
+| 5 | `src/render/arena_ground.gd:27` `FALLBACK_RADIUS` | fallback del terreno | `-arena` |
+| 6 | `tests/test_arena.gd:71` `const ARENA_RADIUS` | la copia nel test, che **non e'** un fallback | `-arena` |
+
+E tre asserzioni del valore che diventano rosse cambiando il numero: `tests/test_smoke.gd:85,100`
+(`-scheletro`), `tests/test_gameplay.gd:446` (`-gameplay`), `tests/test_arena.gd:152`
+(`-arena`). C'e' anche `tests/test_orda.gd:625`, che non asserisce il raggio ma **campiona
+query in un quadrato `±28`**: con un'arena piu' grande campionerebbe solo una fetta, quindi
+va allineata per non perdere copertura — e il rischio e' che nessuno se ne accorga, perche'
+`test_orda` resta verde.
+
+**Quindi m9 non e' un'onda a due foglie: e' a quattro.** E il suo criterio numero uno non e'
+il raggio: e' che **`28.0` smetta di essere un numero scritto sei volte**, con la 1 dichiarata
+come **unica fonte** e le altre cinque **fallback dichiarati** (o lette dal contratto). E' la
+stessa regola del criterio n. 4 di m8, applicata alla geometria: un numero che vive in piu'
+posti mente alla prima riga cambiata.
+
+### 3.10 Scope della milestone 9: quattro foglie, e il numero che le lega
+
+La tabella di §1.12-bis è stata scritta **prima** di questa, cioè il `grep` di `28.0` è stato
+fatto prima di assegnare un file a qualcuno: è la regola di §3.6-bis applicata in anticipo, ed
+è il motivo per cui m9 non si è rivelata un'onda a due foglie quando era una a quattro.
+
+| agente | modello | in m9 scrive | note |
+|---|---|---|---|
+| `terminal-gun-arena` | `space-bunny-free#max` | `src/render/arena.gd`, `src/render/arena_ground.gd`, `src/render/arena_camera.gd`, `tests/test_arena.gd` | **`ARENA_RADIUS` e' l'unica fonte** e passa a **46.0**; i due `FALLBACK_RADIUS` diventano fallback **dichiarati**; il criterio sulla camera è suo |
+| `terminal-gun-orda` | `space-bunny-free#max` | `src/sim/horde.gd`, `tests/test_orda.gd` | il fallback dell'orda e il **campionamento `±28`** di `test_orda.gd:625`, che con un'arena più grande coprirebbe solo una fetta **in silenzio** |
+| `terminal-gun-scheletro` | `space-bunny-free#max` | `tests/test_smoke.gd` | due asserzioni del valore di default |
+| `terminal-gun-gameplay` | `space-bunny-free#max` | `tests/test_gameplay.gd` | una asserzione del valore di default, e il **clamp** del giocatore al raggio |
+| `terminal-gun` (vertice) | `space-bunny-free#max` | `docs/piramide/piano.md`, `src/core/contracts.gd` | il default del contratto, **portato a 46.0 in m9-w0** perché è la copia che il vertice possiede e non deve aspettare le foglie per essere coerente con se stessa |
+
+**Nessuna riga di permesso nuova**: tutti e quattro i file di test sono già negli allow `edit`
+dei rispettivi proprietari. `PERM: 15/15` va comunque confermata **prima** di lanciare.
+
+**Il vertice cambia il proprio file per primo, e questo è deliberato.** Il default del
+contratto diventa **46.0** in m9-w0, non in m9-w1: se aspettassi, la porta sarebbe rossa per un
+numero che so gia' essere giusto, e una porta rossa per un numero noto è rumore. Così la rossa
+di m9-w1 è **solo** lavoro delle foglie, che è quello che si vuole vedere.
+
+### 4.9 Onde della milestone 9
+
+| onda | chi | parallelismo | finisce quando |
+|---|---|---|---|
+| **m9-w0** | vertice | — | sonda di densità **misurata e riportata** (§1.12), `grep` di `28.0` fatto **prima** della tabella di scope (§1.12-bis), specifica scritta, default del contratto a 46.0, `PERM: 15/15` prima di lanciare |
+| **m9-w1** | arena, orda, scheletro, gameplay | **4 agenti, una stessa risposta** | `GATE: 8/8` meno il leak dichiarato, denti fatti e rimossi, numeri di m7 e m8 non regrediti, **tetto di m3 rimisurato e non riforzato a mano**, rieseguiti **dal vertice** |
+| **m9-w2** | vertice | — | commit, piano aggiornato, verdetto |
+
+**Quattro foglie e quattro file di test, tutti disgiunti**: nessuna tocca un file di un'altra, e
+le tre che cambiano solo un'asserzione (`-scheletro`, `-gameplay`, `-orda`) non si contendono
+niente. Il parallelismo è vero e la dipendenza è **dichiarata**: `-arena` cambia la fonte del
+numero, e gli altri tre leggono.
+
+| # | criterio di m9 | come si verifica |
+|---|---|---|
+| 1 | **il raggio è 46 m e il numero che l'ha prodotto è scritto accanto** | `src/render/arena.gd:ARENA_RADIUS = 46.0`, con la tabella di §1.12 e il motivo per cui non è 40 |
+| 2 | **`28.0` non è più scritto in cinque posti** | `tests/test_arena.gd` legge le copie che esistono e asserisce che **sono tutte uguali alla fonte**. Il criterio è sulla **deriva**, non sull'assenza: se qualcuno ne cambia una, la porta va rossa |
+| 3 | **la camera tiene il giocatore nell'inquadratura al bordo** | sulla scena vera, con il giocatore al limite del clamp (`arena_radius - ARENA_MARGIN`), `is_position_in_frustum` vero. In headless non si legge un'immagine, ma la proiezione è matematica e si legge |
+| 4 | **i numeri di m7 e m8 non regrediscono** | knockback runner **≥ 0.3** (0,3128), `node_count` **44**, proporzionalita' delle specie **3.4000**, `TOUCH_REACH` **0.45** |
+| 5 | **il tetto di m3 e' rimisurato, non riforzato a mano** | lo sweep dei 24 semi sul disco nuovo: se `worst_bucket` scende, `GRID_CEILING` **va ridotto di conseguenza** e il numero nuovo va dichiarato con il motivo. **Non** si alza il tetto per far passare: la regola di §1.2 è che la costante si dichiara **sulla misura** |
+| 6 | **i denti, provati e rimossi** | il criterio n. 2 deve dire `FAIL` cambiando una sola delle copie; il criterio n. 3 deve dire `FAIL` stringendo la camera |
+| 7 | **la porta è verde** | `GATE: 8/8` meno il leak dichiarato, `PERM: 15/15` |
+
+### Le onde della milestone 9, e il verdetto del vertice
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m9-w0** | vertice | sonda di densità **costruita, verificata e riportata**; `grep` di `28.0` fatto **prima** della tabella di scope; default del contratto portato a **46.0** dal vertice, apposta, perché la rossa di m9-w1 fosse **solo** lavoro delle foglie | `PERM: 15/15` prima di lanciare | **verde** |
+| **m9-w1** | arena, orda, scheletro, gameplay | raggio 46.0 da una fonte unica e cinque copie allineate; camera al bordo **misurata**; `GRID_CEILING` **ridotto** 11 → 8; clamp del giocatore verificato fino a **45,2 m** | `GATE: 7/8`, l'unico rosso è il **leak dichiarato**; `PERM: 15/15` | **verde** |
+| **m9-w1, rilancia** | arena, scheletro | `test_arena.gd` non compilava (5 parse error): helper mancanti, firme diverse, coda duplicata, un carattere CJK. `-scheletro` ha chiuso l'ultima copia di `28.0`, in un **commento** | `GATE: 7/8` | **verde** |
+| **m9-w2** | vertice | porte rieseguite, piano aggiornato, commit | `--quit-after 300` **pulito** | **verde** |
+
+### I sette criteri della milestone 9, uno per uno
+
+| # | criterio | esito | numeri di oggi |
+|---|---|---|---|
+| 1 | il raggio è 46 m con il numero che l'ha prodotto accanto | **sì** | `ARENA_RADIUS = 46.0` in `src/render/arena.gd`, con la tabella di §1.12 e il perché non 40 |
+| 2 | `28.0` non è più scritto in cinque posti | **sì** | `fonte 46.000, deciso 46.000`, copie allineate: `arena_camera.gd` 46.000, `arena_ground.gd` 46.000, `contracts.gd` 46.000. E il `grep` finale di `-scheletro`: **zero** letterali in codice vivo |
+| 3 | la camera tiene il giocatore nell'inquadratura al bordo | **sì, misurato** | viewport headless **64×64, aspect 1,000** (non 16:9: la trappola che solo la misura prende); semi-angoli 31,0°; al muro il giocatore è **5,2 m** fuori dal punto guardato, a **41,6 m** di distanza di visione = **0,208** della semi-larghezza, tetto **0,50** |
+| 4 | i numeri di m7 e m8 non regrediscono | **sì** | knockback runner **0.3119** (soglia 0,3), `node_count` **44** (tetto 120), proporzionalità specie **3.4000**, `TOUCH_REACH` **0.45** |
+| 5 | il tetto di m3 rimisurato, non riforzato a mano | **sì, ridotto** | sweep dei 24 semi sul disco nuovo: **`min 3, mediana 4, max 4`** (era 5/6/8). `GRID_CEILING` **11 → 8**, derivato con la regola dei tre passi: massimo misurato 4, +4 di margine dichiarato, 24 slot liberi su `BUCKET_SLOTS = 32` |
+| 6 | i denti, provati e rimossi | **sì, tre** | una copia a 28.0 → `FAIL criterio n. 2 ... atteso 46.0, ottenuto 28.000`; camera stringata a 14/10 → `FAIL ... misurato 0.562 della semi-larghezza, tetto 0.50`; il campionamento dell'orda a ±28 → `FAIL ... 132 nemici fuori su 200` |
+| 7 | la porta è verde | **sì, come il criterio è scritto** | `GATE: 7/8` con l'unico rosso `test_ui` per il **leak dichiarato**; `PERM: 15/15`; `--quit-after 300` **pulito** in questo lancio |
+
+**Il criterio n. 3 è quello che non esisteva prima, ed è nato dal rischio, non dalla burocrazia.** A 92 m di
+diametro la camera a 34 m di altezza **poteva** lasciare fuori il giocatore, e nessuna porta lo
+guardava. `-arena` ha trovato anche che **le otto direzioni non sono radialmente simmetrici**
+(l'asse di visione è fisso su −Z), che era una premessa sbagliata nella sua prima stima.
+
+### Due difetti che m9 ha trovato per strada, e che nessun criterio guardava
+
+1. **Il terreno aveva un buco di culling.** `custom_aabb` era scritto a mano a **±44 m** mentre il
+   pavimento a 46 m arriva a **±50 m**: una corona di piastrelle fuori dal volume, quindi tagliata.
+   Ora è derivato dal raggio con la diagonale `side/2·√2`. **Sarebbe successo anche a 28 m**, ma
+   lì il margine era di 6 m e nessuno lo vide.
+2. **La sezione knockback di `test_arena` smetteva di reggere, e il difetto non era nel knockback.**
+   `ACQUIRE_RADIUS = 26 m` non raggiunge più un nemico che nasce su un disco da 46 m: il boss non
+   arrivava entro la finestra di 240 frame. Il rimedio giusto **non** è stata una finestra più
+   lunga —che avrebbe reso il test più lento senza motivo— ma **spostare il giocatore** in modo
+   che la geometria resti quella che il criterio voleva. È la regola di §1.4b applicata a un
+   incidente: il numero che il test misura non è il numero che si è rotto.
+
+### La difficoltà è cambiata, e in una direzione che nessuno aveva previsto
+
+I numeri di m7 e m8 esistono, ma **non sono gli stessi**, e la differenza è instructiva:
+
+| | R = 28 | R = 46 |
+|---|---|---|
+| onda 1, 25 vivi, giocatore fermo | 29,2 s | **41,8 s** |
+| onda 8, 200 vivi, giocatore fermo | 9,5 s | **7,0 s** |
+| **contrasto fra l'onda piena e la piccola** | 3,27× | **6,01×** |
+| nemici a portata di morso sul centro | 9 su 200 | **11 su 200** |
+| sopravvivenza sulla scena vera (m8) | 11,25 s | **10,75 s** |
+
+**Il gioco è diventato più facile all'inizio e più difficile alla fine**, e il motivo è geometrico,
+non emotivo: su un disco più largo la **separazione** fra nemici lavora su un'area più grande, quindi
+**più nemici riescono a stare entro la portata del morso dal centro**. Ingrossare l'arena non
+assottiglia l'anello: gli permette di essere **meno addensato ma più vicino**.
+
+Ed è la misura di §1.12 che si chiude su sé stessa: il tempo till il muro raddoppia, la bolla
+raddoppia, e il **centro** diventa più pericoloso. Sono tre fatti, non uno, e vanno detti insieme.
+
+### I debiti che m9 lascia dichiarati
+
+1. **`scenes/arena_main.tscn` non è stato toccato**: `Sun.directional_shadow_max_distance` è a
+   **90** e il diametro dell'arena è **92**, quindi le ombre oltre 45 m dal centro sono tagliate.
+   `-arena` l'aveva deciso (120, col numero dichiarato) ma ha esaurito i passi. **Il file è suo e
+   non posso correggerlo**, e la rilancia di m9-w1 era l'unica consentita.
+2. **Due copie di `28.0` sono rimaste nei file di agente** — `.opencode/agents/terminal-gun-scheletro.md:378`
+   e `docs/piramide/agents_ready/terminal-gun-scheletro.md:378`, dentro il copia-incolla del
+   contratto che sta nel prompt della foglia. Sono **la copia che più probabilmente risemina
+   28.0 nel lavoro futuro**, e nessun agente può correggerle: `.opencode/agents/**` è il muro di
+   §11.5. **È un atto tuo**, in due copie, e finché non è fatto il difetto è dichiarato qui.
+3. **Il tetto di m3 non è più quello dichiarato**: `GRID_CEILING` è **8** e il campione è
+   3/4/4. Il vecchio «min 4, mediana 5, max 7» **non si riproduce più** con il codice di oggi, e
+   va detto perché è il genere di numero che qualcuno citerà fra sei mesi come se fosse ancora vero.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

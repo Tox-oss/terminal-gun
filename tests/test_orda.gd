@@ -15,6 +15,22 @@ extends SceneTree
 ##      nodi, oggetti e memoria;
 ##   6. `damage_enemy` uccide e il conteggio scende, per scambio-ultimo.
 ##
+## ## m9: il raggio dell'arena è in sei copie, e due di queste sono mie
+##
+## La fonte del raggio è `src/render/arena.gd:ARENA_RADIUS` (**46.0**), il numero
+## è uscito dalla sonda `docs/piramide/probe_arena_density.gd` (piano §1.12) e le
+## altre cinque copie sono fallback dichiarati o default (la tabella è in
+## §1.12-bis). Di questa foglia:
+##
+##   - `src/sim/horde.gd` è la copia n. 3: un **fallback dichiarato**, che vale
+##     solo quando il contratto non c'è ancora. La sezione 13 lo asserisce
+##     leggendo **dal sorgente** e confrontandolo col default del contratto;
+##   - il **campionamento delle query** di questo file campionava un quadrato
+##     `±28` scritto a mano. Non asseriva il raggio, quindi **non è diventata
+##     rossa** quando l'arena è passata a 46: campionava metà del disco, il
+##     benchmark restava verde e la copertura si era dimezzata in silenzio. È la
+##     classe di difetto di §3.6-bis, e la sezione 7 lo chiude.
+##
 ## ## LA MISURA DEL PRIMA, e perche' questo file la porta in testa
 ##
 ## Il numero di sotto e' la base di tutta la milestone 4, ed e' stato misurato
@@ -88,7 +104,9 @@ const SEME_CAPACITY := 20260912
 ## Bersaglio dei nemici in questo test: il centro dell'arena, perche' -gameplay
 ## non e' registrato in questo processo.
 const FOCUS := Vector3.ZERO
-## Un punto in cui non c'e' e non puo' esserci nessun nemico.
+## Un punto in cui non c'e' e non puo' esserci nessun nemico. Non e' una copia
+## del raggio: e' un punto **fuori dal campo**, a circa 20 raggi di distanza con
+## l'arena da 46 m, e resta fuori qualunque arena che possa stare qui dentro.
 const LONTANO := Vector3(900.0, 0.0, 900.0)
 
 ## Oggetto del pool: serve solo per contare, non ha comportamento.
@@ -129,6 +147,7 @@ func _run() -> void:
 	_population(h, horde)
 	_no_node_per_enemy(h, horde)
 	_registration(h, horde)
+	_copie_del_raggio(h, horde)
 	_grid_matches_linear(h)
 	_nearest(h, horde)
 	_spawn_points(h, horde)
@@ -196,35 +215,70 @@ const PLAYER_HP_REFERENCE := 100.0
 ## sarebbe sparito senza che nessuno se ne accorga), sopra `BITE_RATE_MAX` il
 ## tetto `TOUCH_INTERVAL` non terrebbe, perche' `1/0.40 = 2.5`.
 ##
-## **Le tre bande sotto sono cambiate in m8, e i valori di prima sono qui
-## dichiarati, non cancellati.** Il numero che le muove e' `TOUCH_REACH`, sceso
-## da **1.2** a **0.45**: la derivazione e' in `src/sim/enemy.gd` e la misura
-## sulla scena vera e' nella sezione 12. Accorciare la portata toglie corpi a
-## portata, e i morsi arrivano meno spesso.
+## ## Le tre bande sono state cambiate due volte, e i valori di prima sono qui
 ##
-## | banda | prima (1.2) | dopo (0.45) | perche' |
-## |---|---|---|---|
-## | cadenza misurata | 1.07-1.57 morsi/s | **0.60-1.17** | 3-5 corpi a portata invece di 5-20 |
-## | sopravvivenza massima | 16.5 s | **29.2 s** | segue la cadenza |
-## | rapporto danno pieno/piccolo | 2.56 | **3.27** | l'onda piccola cala piu' della piena |
+## **Una volta in m8**, quando il numero che le muove e' `TOUCH_REACH`, sceso da
+## **1.2** a **0.45**: la derivazione e' in `src/sim/enemy.gd` e la misura sulla
+## scena vera e' nella sezione 12. Accorciare la portata toglie corpi a portata, e
+## i morsi arrivano meno spesso.
 ##
-## Il **valore di prima non e' una regressione e non e' difeso**: e' la richiesta
+## **E una volta in m9**, quando il numero che le muove e' **il raggio
+## dell'arena, da 28 a 46** (la fonte e' `src/render/arena.gd:ARENA_RADIUS`, il
+## numero e' uscito dalla sonda `docs/piramide/probe_arena_density.gd`, piano
+## §1.12). Nessuna riga di `src/sim/` e' cambiata: e' cambiata **la geometria su
+## cui la simulazione converge**. Nessuna delle due estremita' della banda si e'
+## mossa da sola, e vanno guardate insieme perche' il rapporto e' un quoziente.
+##
+## | banda | m7 (1.2, R=28) | m8 (0.45, R=28) | **m9 (0.45, R=46)** | perche' |
+## |---|---|---|---|---|
+## | cadenza misurata | 1.07-1.57 morsi/s | 0.60-1.17 | **0.50-1.07** | 3-5 corpi a portata invece di 5-20; poi l'anello su un disco 2,7 volte piu' largo |
+## | danno al secondo | 3.3-8.5 hp/s | 3.42-11.19 | **2.39-14.37** | le due estremita' vanno in **direzioni opposte** |
+## | sopravvivenza massima | 16.5 s | 29.2 s | **41.8 s** | segue la cadenza dell'onda piccola |
+## | rapporto danno pieno/piccolo | 2.56 | 3.27 | **6.01** | vedi sotto: non e' l'orda piena che e' cresciuta |
+##
+## **Le due estremita' del rapporto, con i numeri.** L'onda piena fa **1.37 volte**
+## il danno di prima (10.51 -> 14.37 hp/s) e l'onda piccola fa **0.70** (3.42 ->
+## 2.39 hp/s): il quoziente passa da 3.27 a 6.01 senza che nessuno dei due numeri
+## sia impazzito. Il campione dei morsi spiega il calo: a 28 m l'onda piccola li
+## tirava quasi tutti di **boss** (13.71 hp, 17 morsi su 18), a 46 m ne tira **4
+## su 15 di runner** (1.60 hp) — su un disco largo l'anello intorno al giocatore
+## ha piu' posto e il morso tocca piu' spesso un corpo piccolo. Quindi il 6.01 non
+## vuol dire "l'orda piena e' sei volte l'onda piccola": vuol dire che **il
+## denominatore e' sceso**, e il numero storico di ~5.7 volte (senza
+## `TOUCH_INTERVAL`) non e' piu' un metro con cui confrontare, perche' e' stato
+## scritto su un'altra arena.
+##
+## Il **valore di m8 non e' una regressione e non e' difeso**: e' la richiesta
 ## dell'utente, e il piano lo dichiara (§1.11, "cosa cambia nella difficolta'").
-const BITE_RATE_MIN := 0.5
+##
+## ## Perche' i margini sono quelli che sono
+##
+## Un caso da 30 s contiene **15-32 morsi**: un morso in piu' o in meno sposta il
+## danno al secondo del 5-20%, e sul rapporto del 20% e oltre. Una soglia a un
+## morso dal numero misurato non e' una soglia: e' un caso fortunato che fallisce
+## a caso. Percio' i tre numeri qui sotto stanno **lontani** dalla misura, non
+## appiccicati: il pavimento di cadenza e' a meta' del minimo misurato e il tetto
+## del rapporto e' un quarto sopra il massimo misurato. Restano tetr**i** lo stesso:
+## un morso che sparisce del tutto, un tetto a intervallo che non tiene e un'orda
+## piena che diventa cinque volte la piccola vanno rossi tutti e tre.
+const BITE_RATE_MIN := 0.25
 const BITE_RATE_MAX := 2.5
 ## Secondi che un giocatore regge **fermo al centro dell'orda** con 100 hp.
 const SURVIVAL_MIN := 5.0
-const SURVIVAL_MAX := 35.0
+const SURVIVAL_MAX := 50.0
 ## L'orda da 200 vivi puo' fare al massimo questo multiple del danno al secondo
 ## dell'orda piccola. **Il primo tetto dichiarato era 2.0 ed era sbagliato**:
 ## la misura sul campione qui sotto dava 2.56, e la differenza non e' rumore ma
 ## il campione dei morsi: con 25 vivi il contatto lo fanno quasi solo brute
 ## (5.94 hp), con 200 vivi quasi solo boss (13.71 hp), perche' l'anello intorno
 ## al giocatore si riempie dei nemici piu' grossi. Era 3.0 fino a m7; con
-## `TOUCH_REACH` a 0.45 la misura da **3.27** e il tetto sale a 4.0. Il tetto
-## resta un tetto vero: **senza** `TOUCH_INTERVAL` lo stesso campione
-## crescerebbe di ~5.7 volte (contatto 3.3 volte x morso 1.7 volte).
-const DPS_RATIO_MAX := 4.0
+## `TOUCH_REACH` a 0.45 e R=28 la misura dava **3.27** e il tetto era 4.0. In m9,
+## con R=46, la misura da' **6.01** e il tetto sale a 7.5 — col paragrafo sopra,
+## che spiega perche' il quoziente e' salito e da dove. Il tetto resta un tetto
+## vero: **senza** `TOUCH_INTERVAL` il campione crescerebbe ancora, ma la stima
+## di ~5.7 volte era di un'altra arena e non viene riportata qui come se fosse
+## ancora un riferimento.
+const DPS_RATIO_MAX := 7.5
 
 ## ## Cosa misura questa sezione, e cosa non misura
 ##
@@ -404,10 +458,13 @@ func _population(h, horde: HORDE) -> void:
 	var finiti := 0
 	var vivi := 0
 	var specie_ok := 0
+	var piu_esterno := 0.0
 	for i in horde.count:
 		var p := horde.transforms[i]
-		if Vector2(p.x, p.z).length() <= horde.arena_radius + 0.001:
+		var distanza := Vector2(p.x, p.z).length()
+		if distanza <= horde.arena_radius + 0.001:
 			dentro += 1
+		piu_esterno = maxf(piu_esterno, distanza)
 		if is_finite(p.x) and is_finite(p.y) and is_finite(p.z):
 			finiti += 1
 		if horde.hp[i] > 0.0:
@@ -418,6 +475,17 @@ func _population(h, horde: HORDE) -> void:
 	h.eq(finiti, horde.count, "nessuna posizione spazzatura")
 	h.eq(vivi, horde.count, "nessun nemico nasce morto")
 	h.eq(specie_ok, horde.count, "ogni specie e' in tabella")
+	# E il raggio non e' solo un numero che l'orda si tiene: **la disposizione lo
+	# usa**. Il vincolo e' sul bordo perche' e' li' che si vede, e senza questa
+	# riga un `layout_point` nutrito con un raggio suo passerebbe tutto il resto
+	# del file: il campo direbbe 46 e l'orda nascerebbe a 28.
+	# La frazione non e' un numero scelto a occhio: `Spawner.layout_point` mette
+	# l'indice 0 sul bordo (`rr = radius`) e ci mette sopra un jitter del 5% del
+	# raggio, quindi il massimo su 200 e' il bordo meno poco e la soglia sta
+	# sotto quel massimo, non sopra.
+	h.check(piu_esterno > horde.arena_radius * 0.8,
+		"la disposizione arriva al bordo: il nemico piu' esterno e' a %.1f m su %.1f"
+			% [piu_esterno, horde.arena_radius])
 	h.check(census[ENEMY.RUNNER] > 0, "qualche runner")
 	h.check(census[ENEMY.BOSS] < horde.count / 4,
 		"il boss resta raro: %d su %d" % [census[ENEMY.BOSS], horde.count])
@@ -449,6 +517,60 @@ func _registration(h, horde: HORDE) -> void:
 		h.check(game.has_impl(api), "register_impl(%s) deve aver registrato l'API" % api)
 	h.check(not game.has_impl("player_position"),
 		"player_position e' di -gameplay: registrarla qui sarebbe una doppia registrazione")
+
+# --- 3b. Le copie del raggio (criterio n. 2 di m9) -----------------------------
+#
+# ## Cosa controlla, e perche' una `grep` e non un campo
+#
+# Il raggio vive in sei copie (§1.12-bis). La fonte e' `src/render/arena.gd`; la
+# copia di questa foglia e' `horde.arena_radius`, un **fallback dichiarato** che
+# vale solo quando il contratto non c'e' ancora. Il campo, pero', a runtime non la
+# lascia vedere: `_contract_radius()` lo sovrascrive alla costruzione, quindi un
+# test che confrontasse `horde.arena_radius` col contratto starebbe confrontando
+# una copia col valore che l'ha appena sovrascritta, e passerebbe sempre. Per
+# questo il fallback si legge **dal sorgente**, con la stessa forma della `grep`
+# di `damage_player` nella sezione 11b: se la riga di `horde.gd` deriva dal
+# default del contratto, questa sezione va rossa.
+#
+# Il criterio di m9 e' sulla **deriva**, non sull'assenza di `28.0`: un numero che
+# sparisce non lascia traccia, un numero che si discosta lascia una porta rossa.
+
+## Il raggio che il contratto dichiara adesso.
+##
+## In questo processo l'arena vera non e' ancora caricata (`_scena_vera` sta in
+## fondo), quindi il valore letto qui e' il **default dichiarato** in
+## `src/core/contracts.gd`, non quello che `-arena` registra dopo. E' proprio il
+## confronto che serve: il fallback dell'orda deve dire la stessa cosa del
+## contratto che lo sovrascrive.
+func _raggio_contratto() -> float:
+	var game := _game()
+	return 0.0 if game == null else float(game.arena_radius)
+
+## Il raggio dichiarato in `src/sim/horde.gd`, letto dal sorgente. `-1.0` se la
+## riga non c'e' piu': un fallback che sparisce e' una copia che non dice piu'
+## niente, e una copia che non dice niente non si puo' confrontare con nessuna.
+func _raggio_fallback_orda() -> float:
+	var testo := FileAccess.get_file_as_string("res://src/sim/horde.gd")
+	for riga in testo.split("\n"):
+		var t := str(riga).strip_edges()
+		if t.begins_with("var arena_radius"):
+			return float(t.split("=")[1].strip_edges())
+	return -1.0
+
+func _copie_del_raggio(h, horde: HORDE) -> void:
+	var contratto := _raggio_contratto()
+	var fallback := _raggio_fallback_orda()
+	h.check(contratto > 0.0,
+		"il contratto dichiara un raggio positivo: %.1f m" % contratto)
+	h.check(fallback > 0.0,
+		"src/sim/horde.gd dichiara ancora `var arena_radius`: letto %.3f" % fallback)
+	h.eq(fallback, contratto,
+		"criterio n. 2 di m9: il fallback di horde.gd e' il default del contratto, "
+		+ "non due raggi che divergono in silenzio")
+	h.near(horde.arena_radius, contratto, 0.0001,
+		"e l'orda in memoria porta il raggio del contratto, non quello dichiarato in sorgente")
+	print("orda: raggio dal contratto %.1f m, fallback dichiarato in horde.gd %.1f m"
+		% [contratto, fallback])
 
 # --- 4. La griglia contro la scansione lineare -------------------------------
 
@@ -519,6 +641,15 @@ func _grid_matches_linear(h) -> void:
 		pts.size(), "un nemico fuori dal quadrato riscaldato deve essere trovato lo stesso")
 
 ## `n` punti: incrocio sulle celle, griglia regolare, mucchio a caso.
+##
+## **Questa distribuzione non e' una copia del raggio dell'arena e non lo segue
+## per scelta**: e' la distribuzione **nota** del confronto griglia/scansione
+## (criterio n. 2 di m1) e porta con se' la sua griglia, `setup(GRID.CELL, 30.0)`,
+## che e' piu' stretta del disco da 46 m. Il confronto chiede che le due strade
+## diano gli stessi indici su un campo che **entrambe** vedono: dei punti fuori
+## dalla griglia farebbero misurare il ripiego a scansione lineare invece della
+## griglia, e il numero che verrebbe fuori non sarebbe quello di m1. Il raggio
+## dell'arena non c'entra, e il ±26 qui dentro non e' un 28 rimasto indietro.
 func _distribution(n: int) -> PackedVector3Array:
 	var pts := PackedVector3Array()
 	var rng := RandomNumberGenerator.new()
@@ -592,13 +723,29 @@ func _spawn_points(h, horde: HORDE) -> void:
 			rotte += 1
 			continue
 		peggiore = maxf(peggiore, Vector2(p.x, p.z).length())
-		if p.distance_to(FOCUS) < 12.0 - 0.001 or Vector2(p.x, p.z).length() > horde.arena_radius + 0.001:
+		# Il vuoto dal giocatore e' `HORDE.MIN_SPAWN_GAP`, letto dalla costante e
+		# non scritto qui: era `12.0` in questa riga, cioe' una copia che poteva
+		# derivare dal contratto di spawn senza che nessuna porta lo dicesse.
+		if p.distance_to(FOCUS) < HORDE.MIN_SPAWN_GAP - 0.001 \
+				or Vector2(p.x, p.z).length() > horde.arena_radius + 0.001:
 			rotte += 1
 	h.eq(rotte, 0,
 		"random_spawn_point: mai ZERO, sempre dentro l'arena e lontano dal giocatore")
 	h.positive(peggiore, "i punti di spawn si spargono sull'arena")
-	h.check(peggiore > horde.arena_radius * 0.5,
-		"i punti di spawn arrivano fino al bordo: %d su %.1f" % [int(peggiore), horde.arena_radius])
+	# ## La soglia del bordo, e perche' 0.9 e non 0.5
+	#
+	# `Spawner.spawn_point` tira `radius * sqrt(u)` (uniforme in area) e al massimo
+	# `radius * 0.96` quando il tiro e' lontano dal giocatore, quindi su 400 punti
+	# il massimo e' **0.96-1.0 del raggio**: la frazione non dipende dalla
+	# dimensione dell'arena, e a 46 m resta quella che era a 28 m. **Misurato:
+	# 0.958 del raggio** (44.09 m su 46.0). La soglia a meta' raggio era pero' una
+	# soglia che non mordeva piu': con un disco 2,7 volte piu' grande, 0.5 * 46 =
+	# 23 m e un campionamento che si fermasse a meta' passerebbe lo stesso.
+	# Qui si richiede **0.9**: il numero che deve restare sensibile e' la frazione
+	# del raggio, non i metri.
+	h.check(peggiore > horde.arena_radius * 0.9,
+		"i punti di spawn arrivano al bordo: %.2f su %.1f = %.3f del raggio"
+			% [peggiore, horde.arena_radius, peggiore / maxf(1.0, horde.arena_radius)])
 
 # --- 7. Budget di 1000 query --------------------------------------------------
 #
@@ -619,10 +766,53 @@ const BENCH_RADIUS := 6.0
 func _query_budget(h, horde: HORDE) -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99
+	# ## Il quadrato campionato si legge dal contratto, e si dichiara
+	#
+	# Qui c'era `randf_range(-28.0, 28.0)`: un numero scritto a mano che non
+	# asseriva il raggio e quindi **non e' diventato rosso** quando l'arena e'
+	# passata da 28 a 46. Il benchmark restava verde e campionava 56x56 m dentro
+	# un disco di 92x92: meta' della copertura, in silenzio (§3.6-bis).
+	# Il mezzo del quadrato e' adesso il raggio che il contratto dichiara, e
+	# sotto ci sono le tre asserzioni che lo rendono un numero e non una
+	# speranza: il quadrato contiene il disco, contiene **tutti i nemici vivi**,
+	# e le query trovano davvero qualcuno.
+	var semi := _raggio_contratto()
+	h.check(semi >= horde.arena_radius - 0.0001,
+		"il quadrato campionato contiene tutto il disco: mezzo %.1f m su raggio %.1f m"
+			% [semi, horde.arena_radius])
+	var fuori := 0
+	for i in horde.count:
+		var p := horde.transforms[i]
+		if absf(p.x) > semi or absf(p.z) > semi:
+			fuori += 1
+	h.eq(fuori, 0,
+		"il quadrato campionato contiene tutti i %d nemici vivi: %d fuori" % [horde.count, fuori])
+
 	var queries := PackedVector3Array()
 	queries.resize(BENCH_PER_ROUND)
 	for i in BENCH_PER_ROUND:
-		queries[i] = Vector3(rng.randf_range(-28.0, 28.0), 0.0, rng.randf_range(-28.0, 28.0))
+		queries[i] = Vector3(rng.randf_range(-semi, semi), 0.0, rng.randf_range(-semi, semi))
+
+	# Quanta copertura c'e' davvero: quante query cadono dentro il disco e
+	# quante trovano un nemico entro `BENCH_RADIUS`. E' il numero che il ±28
+	# nascondeva, perche' campionava la parte di disco che c'era e ignorava il
+	# resto. Il pavimento e' basso (una su dieci) perche' il buco centrale di
+	# `Spawner.LAYOUT_INNER` e' fatto: pretendere che ogni query trovi un nemico
+	# significherebbe misurare la disposizione, non la griglia.
+	var nell_arena := 0
+	var con_vicino := 0
+	for q in queries:
+		if Vector2(q.x, q.z).length() <= horde.arena_radius:
+			nell_arena += 1
+		if horde.nearest_enemy_index(q, BENCH_RADIUS) >= 0:
+			con_vicino += 1
+	h.check(con_vicino * 10 >= BENCH_PER_ROUND,
+		"almeno una query su dieci trova un nemico entro %.1f m: %d su %d"
+			% [BENCH_RADIUS, con_vicino, BENCH_PER_ROUND])
+	print("orda: campionamento su un quadrato di %.1f m di mezzo (raggio %.1f m): "
+		% [semi, horde.arena_radius]
+		+ "%d query su %d dentro il disco, %d con un vicino entro %.1f m"
+			% [nell_arena, BENCH_PER_ROUND, con_vicino, BENCH_RADIUS])
 
 	# Scaldamento di **entrambe** le strade: senza, la scansione lineare paga la
 	# prima volta il costo di una funzione mai chiamata e il confronto esce

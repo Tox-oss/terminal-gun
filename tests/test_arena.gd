@@ -49,6 +49,12 @@ const H = preload("res://tools/test_harness.gd")
 
 const ARENA_SCENE := "res://scenes/arena_main.tscn"
 const ARENA_SCRIPT := "res://src/render/arena.gd"
+## Gli altri tre file che contengono una copia del raggio (piano 1.12-bis). Sono
+## stringhe di percorso: il test le **legge**, non le scrive, e il fatto che la
+## copia di `src/sim/horde.gd` non ci sia e' dichiarato dove serve.
+const CAMERA_SCRIPT := "res://src/render/arena_camera.gd"
+const GROUND_SCRIPT := "res://src/render/arena_ground.gd"
+const CONTRACT_SCRIPT := "res://src/core/contracts.gd"
 
 ## Il numero del criterio n. 3. Non e' il numero di nemici con cui la partita
 ## parte: e' il numero di nemici **vivi contemporaneamente** di cui si vuole
@@ -68,7 +74,33 @@ const DRIVE_STALL_STEPS := 30
 ## Quanta capienza fissa ha la MultiMesh dei nemici: se l'orda ne chiede di
 ## piu', il renderer deve fermarsi qui e non crescere.
 const ENEMY_CAPACITY := 256
-const ARENA_RADIUS := 28.0
+## Il raggio che m9 ha deciso, e che il vertice ha misurato prima di sceglierlo
+## (piano 1.12, sonda `docs/piramide/probe_arena_density.gd`).
+##
+## **Questa riga non e' una copia del raggio.** Le copie del numero sono le sei
+## di 1.12-bis, e la sesta era proprio questa: un valore scritto qui che il
+## terreno, il muro e la camera confrontavano con la fonte. Da m9 il test
+## **legge la fonte** (`_source_radius()`) e non porta il numero con se', e le
+## righe che restano qui sono due compiti diversi:
+##   - `DECIDED_RADIUS` e' il **criterio n. 1**: il raggio e' 46 m, e il numero
+##     che l'ha prodotto (la tabella e il motivo) e' scritto accanto alla fonte,
+##     in `src/render/arena.gd`. Se qualcuno cambiasse la fonte e non qui, la
+##     porta va rossa: il raggio e' una scelta dichiarata, non un dettaglio.
+##   - `RADIUS_TOLERANCE` e' la tolleranza dei confronti numerici sotto, e non un
+##     raggio.
+##
+## Le copie **dichiarate** che il test confronta con la fonte sono nella sezione
+## `_copie_del_raggio`: `arena_camera.gd`, `arena_ground.gd` e il default del
+## contratto. La copia di `src/sim/horde.gd` non e' di questo test (la confronta
+## `tests/test_orda.gd` col default del contratto, che qui a sua volta e'
+## confrontato con la fonte: la catena e' chiusa e la copia e' guardata una volta
+## sola, dalla foglia che ne e' proprietaria).
+const DECIDED_RADIUS := 46.0
+## Tolleranza dei confronti fra copie del raggio. `float` a 32 bit passato per
+## una `Basis`: l'errore relativo e' dell'ordine di 1e-7, quindi 1e-4 e' tre
+## ordini di grandezza sopra quel rumore e **ben** sotto la divergenza che
+## questo criterio cerca (un numero cambiato di un metro).
+const RADIUS_TOLERANCE := 0.0001
 ## Ampiezza dell'oscillazione verticale: sotto questa soglia il test non
 ## distingue il bob dal pavimento.
 const BOB_TOLERANCE := 0.1
@@ -106,6 +138,12 @@ func _run() -> void:
 
 	# Prima, da solo: che cosa registra arena quando gli altri nodi non ci sono.
 	_arena_alone(h, game)
+
+	# m9, criteri n. 1 e n. 2: il raggio e' quello deciso, e tutte le copie che
+	# esistono dicono quello. Gira **prima** della scena vera perche' il confronto
+	# fra copie e' fra file e non ha bisogno dell'albero, e cosi' una divergenza si
+	# vede anche se la scena non si carica.
+	_copie_del_raggio(h)
 
 	var arena = _load_arena(h, game)
 	if arena == null:
@@ -149,8 +187,9 @@ func _arena_alone(h, game: Node) -> void:
 	bare.set_script(load(ARENA_SCRIPT))
 	root.add_child(bare)
 
-	h.near(_contract_float(game, "arena_radius"), ARENA_RADIUS, 0.0001,
-		"arena deve registrare Game.arena_radius = 28.0 all'avvio, prima che i figli costruiscano")
+	h.near(_contract_float(game, "arena_radius"), _source_radius(), RADIUS_TOLERANCE,
+		"arena deve registrare Game.arena_radius = %.1f all'avvio, prima che i figli costruiscano"
+			% _source_radius())
 	h.check(game.get("player") == null, "arena non deve registrare Game.player: e' di -gameplay")
 	h.check(game.get("horde") == null, "arena non deve registrare Game.horde: e' di -orda")
 	for api in ORDA_APIS + GAMEPLAY_APIS:
@@ -160,12 +199,121 @@ func _arena_alone(h, game: Node) -> void:
 	root.remove_child(bare)
 	bare.free()
 
+# --- 1b. Le copie del raggio: nessuna puo' divergere dalla fonte (m9) -----------
+#
+# ## Il difetto che questa sezione chiude
+#
+# Il raggio era scritto **sei volte** in sei file (piano 1.12-bis) e tutte e sei
+# volevano dire "il raggio dell'arena": la fonte in `src/render/arena.gd`, il
+# default del contratto, il fallback dell'orda, i due fallback di -arena e la
+# copia dentro questo test. Cinque potevano divergere dalla sesta **senza che
+# nessuna porta lo vedesse**: il terreno si costruiva con 28 m e l'orda con 46,
+# e la partita girava senza che nessuno sapesse dire quale dei due fosse vero.
+#
+# ## Perche' il criterio e' sulla DERIVA e non sull'assenza
+#
+# Un numero che sparisce non lascia traccia: fra due mesi qualcuno puo' rimettere
+# `FALLBACK_RADIUS := 28.0` in un file e la porta resta verde perche' non cerca
+# la stringa. Un numero che **diverge** lascia una porta rossa con i due valori
+# nel messaggio. Quindi qui non si cerca `28.0` (e non si puo': il `28.0` della
+# tabella storica dentro i commenti e' lecito, e un `grep` di stringhe sarebbe
+# un test sul testo e non sul codice): si **leggono le copie** e si confrontano
+# con la fonte.
+#
+# ## Perche' dal sorgente e non da un campo a runtime
+#
+# Un fallback, a runtime, non lo si vede: `arena_radius()` lo restituisce solo
+# quando il contratto non c'e', quindi in partita il confronto leggerebbe sempre
+# il contratto e passerebbe sempre, comunque il fallback dicesse. Le copie si
+# leggono quindi **dal sorgente**, con la stessa forma usata da
+# `tests/test_orda.gd` per la copia di -orda.
+
+## Il raggio dichiarato nella fonte, letto dalla **costante** del suo script.
+## `-1.0` se la costante non c'e' piu': una fonte che sparisce non e' una fonte
+## silenziosamente uguale a qualcosa, e va detto.
+func _source_radius() -> float:
+	return _const_of(ARENA_SCRIPT, "ARENA_RADIUS")
+
+## Una costante di uno script, letta dalla sua mappa delle costanti. `-1.0` se lo
+## script non c'e', non e' uno `Script`, o non dichiara quel nome.
+func _const_of(path: String, const_name: String) -> float:
+	var scr = load(path)
+	if scr == null or not (scr is Script):
+		return -1.0
+	if not scr.has_method("get_script_constant_map"):
+		return -1.0
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has(const_name):
+		return -1.0
+	var v = map[const_name]
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return -1.0
+
+## Il valore di un **campo con default** in un file di sorgente. Serve per le due
+## copie che non sono costanti ma variabili con valore iniziale
+## (`var arena_radius: float = ...`): la mappa delle costanti non le contiene, e
+## sono le stesse che `tests/test_orda.gd` legge allo stesso modo. `-1.0` se la
+## riga non c'e' piu'.
+func _field_default_of(path: String, field_prefix: String) -> float:
+	if not FileAccess.file_exists(path):
+		return -1.0
+	var testo := FileAccess.get_file_as_string(path)
+	for riga in testo.split("\n"):
+		var t := str(riga).strip_edges()
+		if t.begins_with(field_prefix) and t.contains("="):
+			return float(t.split("=")[1].strip_edges())
+	return -1.0
+
+func _copie_del_raggio(h) -> void:
+	var fonte := _source_radius()
+
+	# Criterio n. 1: il raggio e' quello deciso dal vertice, e il numero che l'ha
+	# prodotto e' scritto accanto alla fonte. Qui il confronto e' con un numero
+	# **scritto**, non letto: e' l'unica riga del file che tiene memoria del
+	# numero scelto, ed e' quello che distingue "il raggio e' 46" da "il raggio e'
+	# quello che c'era scritto".
+	h.near(fonte, DECIDED_RADIUS, RADIUS_TOLERANCE,
+		"criterio n. 1 di m9: il raggio nella fonte deve essere quello deciso (%.1f m); "
+		% DECIDED_RADIUS
+		+ "il numero che l'ha prodotto e la tabella sono scritti in src/render/arena.gd")
+
+	# Le copie, una per una, con il numero accanto al nome: un FAIL deve dire
+	# *quale* copia mente e *di quanto*.
+	var copie := {
+		"src/render/arena_camera.gd FALLBACK_RADIUS": _const_of(CAMERA_SCRIPT, "FALLBACK_RADIUS"),
+		"src/render/arena_ground.gd FALLBACK_RADIUS": _const_of(GROUND_SCRIPT, "FALLBACK_RADIUS"),
+		"src/core/contracts.gd arena_radius": _field_default_of(CONTRACT_SCRIPT, "var arena_radius"),
+	}
+	var lette: Array[String] = []
+	for nome in copie.keys():
+		var valore: float = copie[nome]
+		lette.append("%s = %.3f" % [nome, valore])
+		h.check(valore > 0.0,
+			"la copia del raggio in %s non c'e' piu': una copia che non dice niente non puo' essere confrontata con la fonte (letto %.3f)"
+				% [nome, valore])
+		h.near(valore, fonte, RADIUS_TOLERANCE,
+			"criterio n. 2 di m9: %s deve dire lo stesso numero della fonte src/render/arena.gd, non %.3f"
+				% [nome, valore])
+
+	print("test_arena: m9 raggio: fonte %.3f m, deciso %.3f m; copie allineate: %s"
+		% [fonte, DECIDED_RADIUS, ", ".join(lette)])
+
+	# E il contratto, **prima** che l'arena si registri: il default del contratto
+	# e' la copia che vive piu' a lungo di tutte le altre, perche' e' l'unica che
+	# esiste prima che qualcuno abbia scritto qualcosa.
+	var game := root.get_node_or_null("Game")
+	if game != null:
+		h.near(_contract_float(game, "arena_radius"), fonte, RADIUS_TOLERANCE,
+			"il default del contratto deve essere quello della fonte prima che l'arena si registri: %.3f"
+				% _contract_float(game, "arena_radius"))
+
 # --- 2. La scena vera ----------------------------------------------------------
 
 ## `scenes/arena_main.tscn` caricata a runtime, non in `const` (vedi la trappola
-## in testa al file). Il raggio parte da un valore che **non** e' 28.0, cosi'
-## l'asserzione dimostra che arena ha registrato e non che il contratto partiva
-## gia' cosi'.
+## in testa al file). Il raggio parte da un valore che **non** e' quello deciso,
+## cosi' l'asserzione dimostra che arena ha registrato e non che il contratto
+## partiva gia' cosi'.
 func _load_arena(h, game: Node):
 	game.arena_radius = 12.0
 	if not ResourceLoader.exists(ARENA_SCENE):
@@ -531,29 +679,57 @@ func _kill_all_quiet(horde) -> int:
 
 ## Il muro deve coprire la circonferenza e il pavimento il quadrato: se no,
 ## l'arena non e' chiusa e si vede il vuoto.
+##
+## Il raggio qui e' **quello che il terreno ha costruito**, letto da lui, e non il
+## numero del test: se i due divergessero, il terreno avrebbe costruito un muro a
+## 28 m dentro un'arena di 46 e questa sezione passerebbe lo stesso, perche' il
+## confronto sarebbe fra due numeri che il test ha scritti entrambi.
 func _terrain(h, arena: Node3D) -> void:
 	var ground = arena.get_node("Ground")
+	var raggio: float = ground.arena_radius()
 	h.eq(ground.get_child_count(), 3,
 		"il terreno deve essere tre MultiMesh (pavimento, muro, casse): uno per mesh, non uno per piastrella")
 	h.check(ground.floor_instances() > 0, "il pavimento deve avere piastrelle")
 	h.check(ground.wall_instances() > 0, "il muro deve avere piastrelle")
 	h.check(ground.crate_instances() > 0, "le casse devono essere disposte")
-	h.check(ground.wall_coverage() >= TAU * ARENA_RADIUS,
+	h.check(ground.wall_coverage() >= TAU * raggio,
 		"il muro deve coprire la circonferenza: %.1f m di piastrelle per %.1f m di circonferenza"
-			% [ground.wall_coverage(), TAU * ARENA_RADIUS])
-	h.check(ground.floor_covered_side() >= ARENA_RADIUS * 2.0,
+			% [ground.wall_coverage(), TAU * raggio])
+	h.check(ground.floor_covered_side() >= raggio * 2.0,
 		"il pavimento deve coprire almeno il diametro dell'arena: %.1f m per %.1f m"
-			% [ground.floor_covered_side(), ARENA_RADIUS * 2.0])
+			% [ground.floor_covered_side(), raggio * 2.0])
+	# E il terreno deve essere stato costruito con il raggio **del contratto**, non
+	# con il suo fallback: il fallback e' dichiarato per il caso in cui il
+	# contratto non c'e', e su questa scena il contratto c'e'. Se il terreno
+	# prendesse il fallback qui, avrebbe costruito un muro di 46 m dentro
+	# qualunque arena e nessuna delle asserzioni qui sopra se ne accorgerebbero.
+	h.near(raggio, _source_radius(), RADIUS_TOLERANCE,
+		"il terreno deve essere stato costruito con il raggio della fonte (%.1f m), non con il fallback: costruito con %.1f m"
+			% [_source_radius(), raggio])
+	print("test_arena: m9 terreno: raggio %.1f m, pavimento %d piastrelle (%.1f m di lato), muro %d piastrelle (%.1f m di circonferenza su %.1f)"
+		% [raggio, ground.floor_instances(), ground.floor_covered_side(),
+			ground.wall_instances(), ground.wall_coverage(), TAU * raggio])
 
 # --- 5. La camera --------------------------------------------------------------
 
 func _camera(h, arena: Node3D) -> void:
 	var cam = arena.get_node("Camera")
+	# L'altezza e il ritardo sono **letti** dalla camera e non scritti qui: erano
+	# due numeri copiati a mano (34 e 24) che potevano divergere da quelli di
+	# `src/render/arena_camera.gd` senza che nessuna asserzione lo vedesse, cioe'
+	# due copie del raggio come altre due. Se la costante sparisce, la sezione lo
+	# dichiara invece di confrontare il camera con se' stesso.
+	var altezza := _const_of(CAMERA_SCRIPT, "HEIGHT")
+	var dietro := _const_of(CAMERA_SCRIPT, "BACK")
+	if not h.check(altezza > 0.0 and dietro > 0.0,
+			"src/render/arena_camera.gd deve dichiarare HEIGHT e BACK: letti %.3f e %.3f" % [altezza, dietro]):
+		return
+
 	cam.track(Vector3(10.0, 0.0, 0.0), 1.0)
 	h.near(cam.global_position.x, 10.0, 0.001,
 		"la camera deve stare sopra il punto che guarda")
-	h.near(cam.global_position.y, 34.0, 0.001,
-		"la camera deve guardare l'arena dall'alto")
+	h.near(cam.global_position.y, altezza, 0.001,
+		"la camera deve guardare l'arena dall'alto: %.1f m" % altezza)
 	h.check(cam.global_position.z > 0.0,
 		"la camera deve stare indietro rispetto al bersaglio, altrimenti non si vede dove va il giocatore")
 	h.check(cam.current, "la camera dell'arena deve essere quella attiva")
@@ -565,12 +741,257 @@ func _camera(h, arena: Node3D) -> void:
 	cam.track(Vector3(500.0, 0.0, 500.0), 1.0)
 	var anchor: Vector3 = cam.anchor()
 	var anchor_flat := Vector2(anchor.x, anchor.z)
-	h.check(anchor_flat.length() <= ARENA_RADIUS + 0.001,
+	h.check(anchor_flat.length() <= _source_radius() + 0.001,
 		"il punto guardato non deve uscire dall'arena: %.1f m dal centro" % anchor_flat.length())
-	h.near(cam.global_position.y, anchor.y + 34.0, 0.001,
-		"la camera deve restare 34 m sopra il punto che guarda")
-	h.near(cam.global_position.z, anchor.z + 24.0, 0.001,
-		"la camera deve restare 24 m indietro rispetto al punto che guarda")
+	h.near(cam.global_position.y, anchor.y + altezza, 0.001,
+		"la camera deve restare %.1f m sopra il punto che guarda" % altezza)
+	h.near(cam.global_position.z, anchor.z + dietro, 0.001,
+		"la camera deve restare %.1f m indietro rispetto al punto che guarda" % dietro)
+
+	# m9, criterio n. 3: al limite del clamp il giocatore deve restare
+	# nell'inquadratura. E' l'unica sezione che **sposta il giocatore**, quindi
+	# sta dopo tutto quello che conta i nodi e le piastrelle e rimette a posto la
+	# posizione prima di restituire il nodo.
+	_camera_al_bordo(h, arena, cam)
+
+## ## Il criterio n. 3 di m9: al bordo il giocatore e' ANCORA IN QUADRO
+##
+## L'arena e' passata da 56 m a 92 m di diametro e la camera e' rimasta a 34 m
+## di altezza e 24 m dietro. Il rischio dichiarato dal vertice era che il
+## giocatore, al limite del clamp, **uscisse dall'inquadratura**. Il numero che
+## decide la domanda e' uno solo e non e' il raggio: e' di quanto il giocatore
+## puo' stare **fuori dal punto guardato** quando e' al muro, cioe'
+## `EDGE_MARGIN - ARENA_MARGIN` = 6,0 - 0,8 = **5,2 m**, perche' la camera
+## spinge indietro il punto guardato a `arena_radius - EDGE_MARGIN` mentre il
+## giocatore si ferma a `arena_radius - ARENA_MARGIN`. Quel 5,2 m e' diviso per
+## la distanza di visione (40,8 m) e il risultato e' confrontato con il
+## semi-angolo orizzontale della camera: sotto, il numero **misurato**.
+##
+## Il passo e' `track(pos, 1.0)` e non un `await`: con `delta = 1.0` il
+## `clampf(delta * FOLLOW_SPEED, 0, 1)` della camera da' 1, quindi il bersaglio e'
+## esattamente quello e non una posizione che converge dalla precedente. Si
+## misura la camera **ferma sul bersaglio**, che e' il caso peggiore: durante
+## l'inseguimento l'ancora e' piu' vicina al centro e il giocatore sta quindi
+## piu' vicino al centro dell'inquadratura.
+##
+## Otto direzioni (quattro assi e quattro diagonali), e **non sono equivalenti**:
+## l'asse di visione della camera e' fisso (la camera guarda sempre verso -Z, non
+## radialmente), quindi gli stessi 5,2 m di scarto dal punto guardato si
+## scompongono in parti diverse a seconda della direzione: laterale (0 e 180),
+## lungo il braccio (90 e 270) o in mezzo (le diagonali). Il caso peggiore non e'
+## "quello radiale" ma quello in cui lo scarto **accorcia** la distanza di
+## visione, cioe' il giocatore fra la camera e il punto guardato. Misurato con la
+## camera **stringata** a 14 m e 10 m, lo sweep ha dato 0,503 (0 e 180 gradi),
+## 0,409 (45 e 135), **0,562 (90, il peggiore)**, 0,315 e 0,287 (225 e 270); con
+## la camera **vera** a 34 m e 24 m il peggiore e' invece 0,208 a 0 gradi e 90
+## gradi vale 0,185. Per questo qui si asserisce il **massimo delle otto** e non
+## una direzione sola scelta a occhio: il caso peggiore si sposta con i numeri
+## della camera, e un test che ne avesse fissata una continuerebbe a passare
+## mentre il gioco cambia.
+
+## Direzioni in cui il giocatore viene portato al limite del clamp: quattro assi
+## e quattro diagonali, in gradi.
+const BORDO_DIREZIONI := [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
+
+func _camera_al_bordo(h, arena: Node3D, cam) -> void:
+	var player = arena.get_node_or_null("Player")
+	if not h.check(player != null, "la scena vera non ha il nodo Player: il criterio n. 3 non si puo' misurare"):
+		return
+
+	# Il margine del giocatore **letto dal suo codice**, non scritto qui: se
+	# -gameplay lo cambiasse, il "limite del clamp" da misurare cambierebbe con
+	# lui, e questo test starebbe ancora misurando il numero di ieri.
+	var player_script = player.get_script()
+	if player_script == null or not player_script.has_method("get_script_constant_map"):
+		h.fail("src/player/player.gd non espone la sua mappa delle costanti: il clamp del giocatore non e' piu' misurabile")
+		return
+	var margin_v = player_script.get_script_constant_map().get("ARENA_MARGIN")
+	if not h.check(typeof(margin_v) == TYPE_FLOAT or typeof(margin_v) == TYPE_INT,
+			"src/player/player.gd deve dichiarare ARENA_MARGIN: e' il numero che tiene il giocatore lontano dal muro"):
+		return
+	var margine := float(margin_v)
+	var raggio := _source_radius()
+	var limite := maxf(raggio - margine, 0.5)
+
+	# Il viewport: serve per l'aspetto, e l'aspetto e' meta' della domanda. Lo si
+	# **stampa** perche' in headless la dimensione arriva dalla configurazione e
+	# non da un monitor, e un criterio che dipende da un numero non stampato non
+	# si puo' ricontrollare.
+	var vp: Viewport = cam.get_viewport()
+	var size := Vector2(1.0, 1.0)
+	if vp != null:
+		size = vp.get_visible_rect().size
+	h.check(size.x > 1.0 and size.y > 1.0,
+		"il viewport deve avere una dimensione reale: %s" % str(size))
+	var aspect := size.x / maxf(size.y, 1.0)
+
+	var posizione_salvata: Vector3 = player.global_position
+	var peggiore := 0.0
+	var peggiore_grado := 0.0
+	var peggiore_distanza := 0.0
+	var fuori := 0
+	var righe: Array[String] = []
+	for grado in BORDO_DIREZIONI:
+		var sul_bordo := _sul_bordo(limite, float(grado))
+		player.global_position = sul_bordo
+		cam.track(sul_bordo, 1.0)
+		var dentro: bool = cam.is_position_in_frustum(player.global_position)
+		var rapporto := _rapporto_in_quadro(cam, player.global_position)
+		if not dentro:
+			fuori += 1
+		if rapporto > peggiore:
+			peggiore = rapporto
+			peggiore_grado = float(grado)
+			peggiore_distanza = _distanza_di_vista(cam, player.global_position)
+		righe.append("%d deg %.3f%s" % [int(grado), rapporto, "" if dentro else " FUORI"])
+	player.global_position = posizione_salvata
+	cam.track(player.global_position, 1.0)
+
+	# ## IL CRITERIO: al limite del clamp il giocatore e' dentro al frustum
+	h.check(fuori == 0,
+		"criterio n. 3 di m9: al limite del clamp (%.1f m dal centro, %.1f m di margine) il giocatore deve restare nell'inquadratura: fuori in %d direzioni su %d [%s]"
+			% [limite, margine, fuori, BORDO_DIREZIONI.size(), ", ".join(righe)])
+
+	# ## E IL MARGINE, dichiarato sul numero misurato qui sopra
+	#
+	# Il booleano da solo, a questi numeri, e' un'asserzione che **non puo'**
+	# fallire: per uscire dall'inquadratura al muro la camera dovrebbe arrivare a
+	# pochi metri dal giocatore, e nessuno ricala la camera di cosi' tanto di
+	# proposito. Quindi qui si asserisce anche **dove** sta nel quadro, e il tetto
+	# viene dalla misura delle otto direzioni qui sopra, non da un occhio.
+	h.check(peggiore <= FRAME_LIMIT,
+		"il giocatore al limite del clamp deve restare nella meta' centrale dell'inquadratura: misurato %.3f della semi-larghezza a %d gradi, tetto dichiarato %.2f [%s]"
+			% [peggiore, int(peggiore_grado), FRAME_LIMIT, ", ".join(righe)])
+
+	var semi := _semi_angoli(cam, aspect)
+	var offset := _offset_al_bordo(cam, margine)
+	print("test_arena: m9 camera al bordo: clamp a %.1f m dal centro (raggio %.1f - margine %.1f di player.gd); viewport %s, aspect %.3f; fov %.1f (keep_aspect %d); semi-angoli %.1f gradi in verticale e %.1f in orizzontale"
+		% [limite, raggio, margine, str(size), aspect, cam.fov, int(cam.keep_aspect), semi.x, semi.y])
+	print("test_arena: m9 camera al bordo: il giocatore al muro e' %.1f m fuori dal punto guardato (EDGE_MARGIN - ARENA_MARGIN), a %.1f m di distanza di visione: %.3f della semi-larghezza, peggiore su %d gradi, tetto %.2f"
+		% [offset, peggiore_distanza, peggiore, int(peggiore_grado), FRAME_LIMIT])
+	print("test_arena: m9 camera al bordo: con questi numeri il giocatore uscirebbe dall'inquadratura solo se la camera scendesse sotto i %.1f m di distanza di visione (oggi %.1f m): il booleano da solo non avrebbe denti, il tetto %.2f si"
+		% [_limite_di_uscita(offset, semi.y), peggiore_distanza, FRAME_LIMIT])
+
+## La posizione del limite del clamp in una data direzione, in gradi.
+func _sul_bordo(limite: float, grado: float) -> Vector3:
+	var a := deg_to_rad(grado)
+	return Vector3(cos(a) * limite, 0.0, sin(a) * limite)
+
+## Quanto il giocatore e' **fuori dal punto guardato** quando e' al muro: e' la
+## differenza fra i due clamp, non un numero scritto qui. `EDGE_MARGIN` e' di
+## `src/render/arena_camera.gd` e `ARENA_MARGIN` di `src/player/player.gd`: se un
+## giorno la camera o il giocatore stringessero il proprio margine, questa
+## misura direbbe quanto, invece di continuare a raccontare il numero di ieri.
+## `-1.0` se la camera non dichiara `EDGE_MARGIN`: un margine che sparisce e' un
+## margine che nessuno puo' piu' confrontare.
+func _offset_al_bordo(cam, margine_giocatore: float) -> float:
+	var edge := -1.0
+	var scr = cam.get_script()
+	if scr != null and scr.has_method("get_script_constant_map"):
+		var v = scr.get_script_constant_map().get("EDGE_MARGIN")
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			edge = float(v)
+	if edge < 0.0:
+		return 0.0
+	return maxf(edge - margine_giocatore, 0.0)
+
+## I due semi-angoli del frustum in gradi, `x` verticale e `y` orizzontale. Il
+## `fov` di Godot e' quello **verticale** con `keep_aspect = KEEP_HEIGHT` (il
+## default): l'orizzontale si ricava dall'aspetto del viewport, che in headless
+## viene dalla configurazione del progetto e non da un monitor.
+func _semi_angoli(cam, aspect: float) -> Vector2:
+	var semi_v := deg_to_rad(cam.fov) * 0.5
+	var semi_h := atan(tan(semi_v) * aspect)
+	if cam.keep_aspect == Camera3D.KEEP_WIDTH:
+		semi_h = deg_to_rad(cam.fov) * 0.5
+		semi_v = atan(tan(semi_h) / maxf(aspect, 0.0001))
+	return Vector2(rad_to_deg(semi_v), rad_to_deg(semi_h))
+
+## Quanto e' lontana la camera dal punto guardato **lungo l'asse di visione**: e'
+## il denominatore del rapporto angolare. Non e' `distance_to` perche' quello
+## include il disassamento radiale fra camera e ancora, che qui e' piccolo ma non
+## deve esserlo per ipotesi.
+func _distanza_di_vista(cam, pos: Vector3) -> float:
+	var local: Vector3 = cam.global_transform.affine_inverse() * pos
+	return maxf(-local.z, 0.001)
+
+## Dove sta un punto rispetto al centro dell'inquadratura, come frazione della
+## semi-larghezza (o dell'altezza) del quadro: `0` e' il centro esatto, `1` e'
+## esattamente il bordo. E' la proiezione che `is_position_in_frustum` fa senza
+## dirla, e serve per dichiarare un **margine** e non un booleano.
+func _rapporto_in_quadro(cam, pos: Vector3) -> float:
+	var semi := _semi_angoli(cam, _aspecto(cam))
+	var semi_v := deg_to_rad(semi.x)
+	var semi_h := deg_to_rad(semi.y)
+	var depth := _distanza_di_vista(cam, pos)
+	if depth <= 0.001:
+		return INF
+	var local: Vector3 = cam.global_transform.affine_inverse() * pos
+	return maxf(absf(local.x / depth) / tan(semi_h), absf(local.y / depth) / tan(semi_v))
+
+## L'aspetto del viewport della camera, con un minimo dichiarato: un aspetto zero
+## produrrebbe un semi-angolo orizzontale nullo e un rapporto infinito, cioe' un
+## FAIL che non parla di camera ma di viewport.
+func _aspecto(cam) -> float:
+	var vp: Viewport = cam.get_viewport()
+	var size := Vector2(1.0, 1.0)
+	if vp != null:
+		size = vp.get_visible_rect().size
+	return size.x / maxf(size.y, 1.0)
+
+## La distanza di visenza a cui la camera dovrebbe arrivare **per perdere** il
+## giocatore dall'inquadratura al muro: l'angolo col centro del quadro e'
+## `offset / distanza` e il bordo e' quando diventa 1. E' il numero che dice se
+## l'asserzione ha denti, e con `FRAME_LIMIT` dice quanto si puo' stringere la
+## camera prima che la porta diventi rossa.
+func _limite_di_uscita(offset: float, semi_h_gradi: float) -> float:
+	if offset <= 0.0:
+		return INF
+	return offset / tan(deg_to_rad(semi_h_gradi))
+
+## ## `FRAME_LIMIT`: quanto lontano dal centro dell'inquadratura puo' arrivare il
+## giocatore al limite del clamp, come frazione della semi-larghezza del quadro.
+##
+## ## COME E' STATO DERIVATO (misura prima del numero)
+##
+## Sweep delle otto direzioni di `_camera_al_bordo`, scena vera, camera vera
+## (34 m di altezza, 24 m dietro, `fov` 62, `KEEP_HEIGHT`), arena a 46 m:
+##
+##     il giocatore al muro e' a 45,2 m dal centro (46 - ARENA_MARGIN 0,8)
+##     la camera spinge il punto guardato a 40,0 m (46 - EDGE_MARGIN 6,0)
+##     quindi il giocatore e' 5,2 m fuori dal centro dell'inquadratura,
+##     a 41,6 m di distanza di visione **misurata** (non 40,8 = sqrt(33^2+24^2):
+##     la differenza e' il metro fra il giocatore a terra e il punto guardato a
+##     LOOK_HEIGHT = 1 m, che accorcia l'asse di visione)
+##     semi-angolo orizzontale 31,0 gradi  ->  tan = 0,6009
+##     MISURATO: 5,2 / (41,6 x 0,6009) = 0,208 della semi-larghezza
+##
+## e la stampa dice anche che, cosi', il giocatore uscirebbe dall'inquadratura
+## solo se la camera scendesse sotto gli **8,7 m** di distanza di visione: cioe'
+## il booleano `is_position_in_frustum`, da solo, non avrebbe denti (nessuno
+## ricala la camera di quattro volte di proposito). Per questo il criterio ha due
+## righe: il booleano che il vertice ha chiesto, e il margine sotto.
+##
+## **Perche' 0,50 e non il massimo misurato (0,208)**: un tetto poggiato sul
+## massimo cadrebbe alla prima flessione di un pixel e direbbe piu' del gioco di
+## quanto il gioco sappia fare. 0,50 mette il giocatore dentro la **meta'
+## centrale** del quadro, che e' la richiesta di progetto ("non basta che ci sia,
+## deve restare dove lo vedi"), e lascia **2,4 volte** la misura: in metri, il
+## giocatore puo' stare fino a 12,5 m dal centro dell'inquadratura invece dei 5,2
+## che c'e' oggi. Per arrivare a 0,50 la distanza di visione deve scendere da
+## 41,6 m a **17,3 m**: una camera stringuta (per esempio 14 m di altezza e 10 m
+## dietro, cioe' il 40% della distanza di oggi) la porta rossa.
+##
+## ## ATTENZIONE AL NUMERO MISURATO IN HEADLESS
+##
+## In headless il viewport e' **64x64**, aspetto **1,000**, e non i 1280x720 di
+## `project.godot`: l'aspetto non viene da un monitor. Percio' il semi-angolo
+## orizzontale e' 31 gradi, non i 46,9 di un 16:9, e il rapporto misurato
+## (0,208) e' il **caso peggiore**: con la finestra vera a 1,778 di aspetto lo
+## stesso giocatore sta a 0,117. La misura e' quindi conservativa per costruzione,
+## e non un artefatto da correggere: e' il caso in cui il criterio e' piu' facile
+## da violare.
+const FRAME_LIMIT := 0.50
 
 # --- 6. L'HUD ------------------------------------------------------------------
 
@@ -641,6 +1062,24 @@ const AFTER_HIT_FRAMES := 30
 ## proiettile senza mai entrare nella zona d'arrivo di `src/sim/enemy.gd`, dove il
 ## nemico insegue a meta' velocita' e la previsione sotto non vale piu'.
 const MIN_SPAWN_DISTANCE := 14.0
+## Distanza di partenza **imposta** dal test (vedi `_solo_enemy`): e' il punto in
+## cui i due vincoli si incontrano, e i due sono letti, non indovinati.
+##   - sotto `SPAWN_DISTANCE` non si puo' scendere: sotto `MIN_SPAWN_DISTANCE` il
+##     runner entra nella zona d'arrivo durante i 60 frame di assestamento e la
+##     previsione di `_predicted_moved` non vale piu';
+##   - sopra non si puo' salire: l'arma mira solo entro `ACQUIRE_RADIUS` = 26 m
+##     (`src/weapons/weapon_base.gd`), quindi a 46 m di raggio un nemico libero di
+##     nascere dove vuole puo' restare **fuori portata di mira** e il colpo non
+##     parte mai. 20 m sta dentro con 6 m di margine sotto il tetto di mira e
+##     lascia al runner 13,4 m dopo l'assestamento, ben sopra `ARRIVE_RADIUS` = 3 m.
+const SPAWN_DISTANCE := 20.0
+## Passi di attesa che il test concede a -orda per fare **nascere** il nemico di
+## prova con `population = 1`. Il riempimento e' graduale (m4) a 8 crediti/s, cioe'
+## un credito ogni 7,5 passi: 240 passi (4 s) sono **trenta volte** il necessario,
+## e il numero non serve a mascherare un'orda che non riempie — se il nemico non
+## arriva, la sezione lo dice e restituisce un retto vuoto invece di proseguire
+## con `kinds[0]` su un array vuoto, che e' un crash e non un fallimento.
+const SPAWN_STEPS_MAX := 240
 ## Specie per cui il knockback **deve** funzionare: runner e grunt, che sono
 ## l'80% dell'onda (`Spawner.KIND_WEIGHTS`) e hanno resistenza 0 e 0.20.
 const KINDS_MUST_KNOCK := [0, 1]
@@ -777,7 +1216,7 @@ func _criterion_4(h, arena: Node3D, game: Node) -> void:
 ## (`population = 1` e un passo della sua `step()`, che chiama `_top_up` ->
 ## `_spawn_one` -> `Spawner.spawn_point`): nessun record scritto a mano.
 func _knockback_of_kind(h, horde, player, weapon, pool, kind: int) -> Dictionary:
-	_solo_enemy(h, horde, player, kind)
+	_solo_enemy(h, horde, player, weapon, kind)
 	if horde.count != 1:
 		return {}
 
@@ -899,33 +1338,87 @@ func _knockback_of_kind(h, horde, player, weapon, pool, kind: int) -> Dictionary
 ## `damage_enemy` (l'API di -orda), abbassa `population` e lascia che sia la sua
 ## `step()` a rifarlo nascere: nessun record scritto a mano.
 ##
-## Lo spawn e' casuale e puo' cadere addosso al player, perche' `Spawner.spawn_point`
-## accetta il fallback dopo 8 tentative: un nemico dentro la zona d'arrivo insegue
-## a meta' velocita' e la misura cambierebbe da specie a specie per il motivo
-## sbagliato. Si riprova finche' non e' lontano.
-func _solo_enemy(h, horde, player, kind: int) -> void:
+## ## Perche' da m9 la distanza di partenza e' **imposta**, e non piu' subita
+##
+## Prima la misura accettava **qualsiasi** spawn a piu' di 14 m dal giocatore e,
+## quando il nemico nasceva troppo addosso, riprovava con un altro spawn. Con
+## l'arena a 46 m l'arbitrio e' andato dalla parte opposta: `Spawner.spawn_point`
+## puo' depositare il nemico a 45 m dal centro, `ACQUIRE_RADIUS` dell'arma e'
+## 26 m, quindi l'arma **non ha un bersaglio da mirare** e il colpo non parte
+## mai: il boss (inseguimento 1,7 m/s) non arrivava addosso al giocatore dentro
+## la finestra di 240 frame e la sezione ha detto FAIL.
+##
+## La correzione non e' allungare la finestra (sarebbe allargare un tetto per far
+## passare) e non e' muovere il nemico (sarebbe scrivere un record a mano):
+## qui viene spostato **il giocatore**, che e' un nodo che questo test gia'
+## guidava a mano (`player.position = Vector3.ZERO`), e il nemico resta quello
+## che il percorso vero di -orda ha creato. La misura del knockback non
+## dipende dalla distanza di partenza: dipende dal colpo, dalla specie e dalla
+## fisica, e quelle tre restano vere.
+func _solo_enemy(h, horde, player, weapon, kind: int) -> void:
 	horde.population = 0
 	_kill_all(h, horde)
 	horde.population = 1
-	var attempt := 0
-	while attempt < 8:
+	# Il riempimento e' **graduale** (m4): `Run.SPAWN_RATE` = 8/s accoda un
+	# credito di spawn ogni 7,5 passi, quindi un passo solo non fa nascere
+	# nessuno e `kinds` sarebbe ancora vuoto. Si aspetta il nemico vero con un
+	# tetto dichiarato, non con un numero di tentative a caso: se non arriva, la
+	# sezione lo dice e smette.
+	var passi := 0
+	while horde.count == 0 and passi < SPAWN_STEPS_MAX:
 		horde.step(DT)
-		if horde.count == 0:
-			continue
-		horde.kinds[0] = kind
-		horde.velocities[0] = Vector3.ZERO
-		if _flat(horde.transforms[0] - player.global_position).length() >= MIN_SPAWN_DISTANCE:
-			break
-		horde.damage_enemy(0, 1000000.0, Vector3.ZERO)
-		horde.population = 1
-		attempt += 1
+		passi += 1
+	if not h.check(horde.count == 1,
+			"l'orda deve essere scesa a un nemico solo: dopo %d passi e population 1 ci sono %d vivi"
+				% [passi, horde.count]):
+		return
+	# `horde.kinds` e' un `PackedInt32Array` (lo e' diventato in m8) e scrivere
+	# `horde.kinds[0] = kind` attraverso una base non tipizzata viene **rifiutato
+	# a runtime** ("Invalid assignment of index '0' ..."), non fallito: quindi qui
+	# si passa da una copia locale dichiarata con il suo tipo e si rimette dentro.
+	# Il nemico resta quello nato dal percorso vero di -orda; cambia solo la
+	# specie che si misura, che e' la variabile della misura.
+	var kinds: PackedInt32Array = horde.kinds
+	kinds[0] = kind
+	horde.kinds = kinds
+	horde.velocities[0] = Vector3.ZERO
+
+	# Il giocatore a `SPAWN_DISTANCE` dal nemico, lungo la direzione che lo
+	# riporta verso il centro dell'arena: cosi' il punto di partenza e' dentro il
+	# campo per qualunque posizione di spawn, anche le piu' esterne.
+	var pos: Vector3 = horde.transforms[0]
+	var dal_centro := Vector2(pos.x, pos.z)
+	var dir := Vector2(1.0, 0.0)
+	if dal_centro.length() > 0.001:
+		dir = dal_centro.normalized()
+	player.global_position = pos - Vector3(dir.x, 0.0, dir.y) * SPAWN_DISTANCE
+	player.velocity = Vector3.ZERO
+
+	var d := _flat(horde.transforms[0] - player.global_position).length()
+	h.near(d, SPAWN_DISTANCE, 0.001,
+		"il nemico di prova deve partire a %.1f m dal player: lo spawn di -orda e' "
+			% SPAWN_DISTANCE
+			+ "casuale su un disco da %.0f m e il colpo non puo' arrivare oltre %.0f m"
+			% [horde.arena_radius, _acquire_radius(weapon)])
+	h.check(d <= _acquire_radius(weapon),
+		"il nemico di prova deve essere a portata di mira: %.1f m contro %.1f m di %s"
+			% [d, _acquire_radius(weapon), "ACQUIRE_RADIUS"])
 	h.check(horde.count == 1,
 		"l'orda deve essere scesa a un nemico solo, ne' sono rimasti %d" % horde.count)
-	if horde.count == 1:
-		h.check(_flat(horde.transforms[0] - player.global_position).length() >= MIN_SPAWN_DISTANCE,
-			"il nemico di prova deve nascere a %.0f m dal player: lo spawn di -orda e' "
-			% MIN_SPAWN_DISTANCE
-			+ "casuale e puo' cadere addosso, dove l'inseguimento rallenta")
+
+## Il raggio di acquisizione dell'arma, **letto dal suo codice** (e' di
+## -gameplay). Serve a dichiarare `SPAWN_DISTANCE`: se la smessa di prendere a 26
+## m, la distanza di partenza va abbassata e la porta deve dirlo qui invece di
+## fallire piu' avanti con "il colpo non e' arrivato", che non dice perche'.
+## `-1.0` se la costante non c'e' piu': il controllo viene saltato **e detto**.
+func _acquire_radius(weapon) -> float:
+	var scr = weapon.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return -1.0
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has("ACQUIRE_RADIUS"):
+		return -1.0
+	return float(map["ACQUIRE_RADIUS"])
 
 ## Lo spostamento che la fisica vera di `src/sim/enemy.gd` prevede per questi
 ## numeri, calcolato a passi discreti con la sua stessa formula:
@@ -1042,29 +1535,52 @@ const SWEEP_STEP := 10
 
 ## Tetto dichiarato di `worst_bucket()` sulla scena vera.
 ##
+## ## m9: il tetto e' stato RIMISURATO, non alzato (criterio n. 5)
+##
+## L'arena e' passata da 56 m a **92 m** di diametro con gli stessi 200 nemici:
+## stesso numero, disco 2,7 volte piu' grande, quindi **densita' calata**. Un
+## tetto derivato a 28 m e' un tetto dichiarato su una misura che non e' piu'
+## quella di oggi, e la regola di 1.2 e' che la costante si dichiara sulla
+## misura: qui sotto ci sta la misura nuova e il numero che ne deriva.
+##
 ## ## COME E' STATO DERIVATO (misura prima del numero)
 ##
-## Sweep di 24 semi (1, 11, ..., 231) sulla **scena vera**, stampato dalla sezione
-## 8.2 di questo stesso file:
+## Sweep degli stessi 24 semi (1, 11, ..., 231), stessa banda, `population` al
+## massimo dichiarato da -orda (200), sulla **scena vera** con il raggio nuovo:
 ##
-##     worst_bucket: min 4, mediana 5, max 7; semi traboccati 0 su 24
+##     worst_bucket a R=46 (oggi):  min 3, mediana 4, max 4; traboccati 0 su 24
+##     worst_bucket a R=28 (misurato con il codice di -orda di oggi, prima di
+##                           cambiare il raggio): min 5, mediana 6, max 8
 ##
-## Il tetto e' **11**, e si deriva in tre passi, tutti sul numero misurato:
+## Il confronto e' il punto: sul disco 2,7 volte piu' grande il **massimo** e'
+## sceso da 8 a 4, cioe' la densita' per cella da 4 m si e' dimezzata, che e'
+## esattamente quello che la sonda di 1.12 aveva gia' visto sullo spazio libero
+## (85,2% -> 94,6%). Nota storica dichiarata perche' non torni': il
+## "min 4, mediana 5, max 7" scritto qui sotto nel 2026-10-12 **non si riproduce
+## piu'** con il codice di -orda di oggi (che al vecchio raggio dà 5/6/8): quel
+## numero appartiene a una disposizione che non e' piu' quella del gioco, e
+## quindi non puo' piu' fare da base a nessun tetto.
 ##
-##   1. base = 7, il **massimo misurato**. Non il minimo (4): un tetto poggiato
-##      sul minimo cadrebbe appena la densita' torna alla norma, e direbbe piu'
-##      del gioco di quanto il gioco sappia fare. Non la mediana (5): un tetto
-##      sulla mediana cadrebbe alla meta' dei semi, cioe' non piu' che rumore.
-##   2. margine dichiarato = **+4 slot**. L'escursione fra minimo e massimo
-##      misurati e' di 3 slot (4 -> 7), quindi il margine e' ** maggiore
-##      dell'escursione dell'intero campione**: anche dimezzandolo (tetto 9) tutti
-##      i 24 semi starebbero sotto. Il tetto non e' tarato sul caso peggiore, e'
-##      tarato su uno scarto che un cambiamento di densita' deve superare.
-##   3. coerenza col codice: `BUCKET_SLOTS` = 32, e 11 ne lascia **21 slot** di
+## Il tetto e' **8**, e si deriva con **la stessa regola dei tre passi** usata a
+## 28 m, cambiato solo il numero misurato:
+##
+##   1. base = 4, il **massimo misurato** (su 24 semi, 22 valgono 4 e 2 valgono
+##      3: il massimo coincide con la mediana, e resta il massimo perche' un
+##      tetto sulla mediana cadrebbe alla meta' dei semi, cioe' non piu' che
+##      rumore). Non il minimo (3): cadrebbe appena la densita' torna alla norma.
+##   2. margine dichiarato = **+4 slot**, invariato. L'escursione dell'intero
+##      campione e' adesso di **1** slot (3 -> 4), quindi il margine e' quattro
+##      volte l'escursione: era tre volte quella di allora (3 slot su un
+##      margine di 4). Il tetto non e' tarato sul caso peggiore.
+##   3. coerenza col codice: `BUCKET_SLOTS` = 32, e 8 ne lascia **24 slot** di
 ##      margine prima del punto in cui le query cadono davvero a scansione
-##      lineare. Un balzo della densita' deve quindi essere di quasi tre volte
-##      perche' questo tetto cada, e non e' un numero che si puo' spostare di un
-##      passo senza accorgersene.
+##      lineare. Un balzo della densita' deve quindi essere di **quattro volte**
+##      perche' questo tetto cada.
+##
+## **Perche' scende da 11 a 8 e non resta 11**: 11 era `7 + 4`, cioe' il massimo
+## di allora piu' lo stesso margine. Il massimo di oggi e' 4, e `4 + 4 = 8`.
+## Tenere 11 sarebbe stato alzare il tetto per far passare una misura che e'
+## **scesa**, cioe' l'esatto opposto di quello che il criterio chiede.
 ##
 ## ## PERCHE' NON `BUCKET_SLOTS - 1`
 ##
@@ -1095,7 +1611,22 @@ const SWEEP_STEP := 10
 ##    traboccamento era green e **quella del tetto ha detto FAIL** lo stesso.
 ##    Senza questo, il tetto 11 potrebbe essere portato dalla sola segnalazione di
 ##    traboccamento e non starebbe misurando la densita'. Uscita 1.
-const GRID_CEILING := 11
+##
+## ## I DENTI RIFATTI SU m9, PERCHE' IL TETTO E' CAMBIATO (criterio n. 6)
+##
+## Una costante nuova ha bisogno dei suoi denti, non eredita quelli del numero
+## vecchio: il blocco qui sopra provava il tetto **11**, e contro 8 quegli stessi
+## numeri non dimostrerebbero piu' niente. Quindi il 2026-10-13 il tetto e' stato
+## portato a **8** e i due denti sono stati rifatti sul tetto nuovo, con numeri
+## che stanno **fra** la misura e il tetto (e non al di la', che provano solo
+## l'overflow e non la densita'):
+##   1. **6 nemici in una cella** -> `worst_bucket` 6: sotto il tetto 8, sopra la
+##      mediana 4, e `grid_overflowed()` resta falso -> l'asserzione del tetto e'
+##      quella che reagisce, e reagisce a 6 e non a 32.
+##   2. **9 nemici in una cella** -> `worst_bucket` 9: sopra il tetto 8, e
+##      `grid_overflowed()` resta ancora falso -> e' il numero che dimostra che il
+##      tetto sta guardando la densita' e non la saturazione del secchiello.
+const GRID_CEILING := 8
 
 ## Quante posizioni devono cambiare fra due semi **diversi**: il criterio n. 2 di
 ## m3 dice "seme diverso -> diversi", e senza un numero minimo quella frase

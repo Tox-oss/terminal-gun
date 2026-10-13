@@ -82,7 +82,12 @@ func _autoload_is_registered(h) -> void:
 	if not h.check(game != null, "l'autoload Game non e' stato istanziato: i test delle altre foglie non possono usarlo"):
 		return
 	h.eq(game.get_script().resource_path, CONTRACTS_PATH, "Game deve essere src/core/contracts.gd")
-	h.near(game.arena_radius, 28.0, 0.0001, "arena_radius di default")
+	## Il 46.0 qui è un PERNO e resta scritto a mano (piano §1.12-bis, m9).
+	## Non leggerlo dal contratto ne' da arena.gd: letto dalla fonte non puo'
+	## piu' fallire, e un test che non puo' fallire non e' un test (§11.11).
+	## Il criterio diverso — "le copie del raggio non divergono" — sta in
+	## tests/test_arena.gd, perche' e' di -arena e puo' solo confrontarle fra loro.
+	h.near(game.arena_radius, 46.0, 0.0001, "arena_radius di default")
 	h.check(game.player == null, "player deve partire da null: nessuna foglia e' ancora registrata")
 	h.check(game.horde == null, "horde deve partire da null: nessuna foglia e' ancora registrata")
 
@@ -97,7 +102,7 @@ func _autoload_is_registered(h) -> void:
 ## false non è un uccisione: sono valori che non possono creare un falso bersaglio.
 func _stubs_are_neutral(h) -> void:
 	var probe = CONTRACTS.new()
-	h.near(probe.arena_radius, 28.0, 0.0001, "arena_radius di default su un'istanza nuova")
+	h.near(probe.arena_radius, 46.0, 0.0001, "arena_radius di default su un'istanza nuova")
 
 	var nearest := probe.nearest_enemy(Vector3(5.0, 0.0, 5.0), 10.0)
 	h.eq(nearest, -1, "nearest_enemy non registrato deve dare -1 (nessun nemico), non crashare")

@@ -7,8 +7,9 @@ extends Node3D
 ## rigenero e non li modifico, li solo uso come mesh.
 ##
 ## Il pavimento e' una MultiMesh e non un `GridMap` o 900 nodi: la regola "un
-## nodo per cosa'" del progetto vale anche per il terreno, e a 28 m di raggio un
-## pavimento a nodi da solo mangerebbe il budget del criterio n. 3.
+## nodo per cosa'" del progetto vale anche per il terreno, e a 46 m di raggio
+## (100 m di lato, 2500 piastrelle) un pavimento a nodi da solo mangerebbe il
+## budget del criterio n. 3 da solo.
 
 const FLOOR_SCENE := "res://assets/models/ground_tile.glb"
 const CRATE_SCENE := "res://assets/models/crate.glb"
@@ -22,9 +23,25 @@ const WALL_ROWS := 2
 ## un labirinto.
 const CRATE_COUNT := 28
 const CRATE_SEED := 20240502
-## Raggio di fallback se il contratto non e' ancora raggiungibile. Il valore
-## vero viene da `Game.arena_radius`, registrato da `src/render/arena.gd`.
-const FALLBACK_RADIUS := 28.0
+## ## FALLBACK RADIUS: un fallback **dichiarato**, non una fonte (criterio n. 2 di m9)
+##
+## Vive **solo** quando il contratto non e' ancora raggiungibile. In partita non
+## viene mai usato: il valore vero arriva da `Game.arena_radius`, e quel campo lo
+## scrive `src/render/arena.gd`, che e' la **fonte unica** del numero (piano
+## 1.12-bis, copia 5 di 6).
+##
+## Perche' 46.0 e non 28.0: un terreno costruito con il fallback vecchio su
+## un'arena di 46 avrebbe un muro a 28 m dentro il campo di gioco e 18 m di
+## pavimento fuori dal muro, cioe' l'errore piu' sproporzionato di tutti,
+## perche' qui il fallback non nasconde un numero ma **costruisce la geometria**.
+## Il numero non e' scelto qui: e' quello della sonda
+## `docs/piramide/probe_arena_density.gd`, con la tabella e il motivo scritti
+## accanto alla fonte in `src/render/arena.gd`.
+##
+## Non puo' divergere: `tests/test_arena.gd` legge questa riga dal sorgente e la
+## confronta con la fonte, quindi cambiarla da sola porta la porta rossa con i
+## due numeri nel messaggio.
+const FALLBACK_RADIUS := 46.0
 ## Metri di pavimento oltre il muro, per non vedere il vuoto ai bordi.
 const FLOOR_MARGIN := 8.0
 ## Il raggio dentro cui il terreno non mette ostacoli al giocatore.
@@ -58,6 +75,14 @@ func _build() -> void:
 	_crates = _add_multimesh("Crates", CRATE_SCENE)
 	_build_crates(_crates, radius)
 
+	# L'ingranaggio di culling, per **ultimo**: `custom_aabb` sostituisce la
+	# scatola che il motore calcola dalla mesh, e con l'arena a 46 m il valore
+	# scritto a mano (+/-44 m) era **piu' piccolo del pavimento** (+/-50 m): la
+	# corona di piastrelle più esterna spariva quando usciva dalla scatola. Lo
+	# si deriva dal raggio perche' un numero scritto qui accanto a un raggio che
+	# cambia e' la stessa classe di difetto di un fallback che diverge.
+	_fit_aabbs(radius)
+
 func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3D:
 	var mi := MultiMeshInstance3D.new()
 	mi.name = node_name
@@ -73,8 +98,29 @@ func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3
 	mm.instance_count = 1
 	mi.multimesh = mm
 	mi.material_override = _flat_material()
-	mi.custom_aabb = AABB(Vector3(-44.0, -2.0, -44.0), Vector3(88.0, 14.0, 88.0))
+	# `custom_aabb` lo rimette `_fit_aabbs()` appena il raggio e' noto: qui il
+	# valore non puo' essere giusto perche' la mesh non e' ancora disposta.
+	mi.custom_aabb = AABB()
 	return mi
+
+## La scatola che il motore usa per decidere se disegnare, **derivata dal
+## raggio** invece che scritta a mano.
+##
+## Mezza diagonale del pavimento: il pavimento e' un quadrato di
+## `radius * 2 + FLOOR_MARGIN`, quindi il suo punto piu' lontano dal centro e' a
+## `side / 2 * sqrt(2)`, non a `side / 2`. Con `FLOOR_MARGIN` = 8 e raggio 46
+## quello e' 70,7 m: arrotondare a `radius + FLOOR_MARGIN` avrebbe tagliato il
+## cantone, e il cantone tagliato e' il difetto che nessuna asserzione headless
+## vede. In su c'e' il muro (`WALL_ROWS * TILE`), in giu' mezzo metro sotto il
+## pavimento per la cassa appoggiata.
+func _fit_aabbs(radius: float) -> void:
+	var side := radius * 2.0 + FLOOR_MARGIN
+	var half := side * 0.5 * sqrt(2.0)
+	var top := float(WALL_ROWS) * TILE + 1.0
+	var box := AABB(Vector3(-half, -0.5, -half), Vector3(half * 2.0, top + 0.5, half * 2.0))
+	for mi in [_floor, _wall, _crates]:
+		if mi != null:
+			(mi as MultiMeshInstance3D).custom_aabb = box
 
 func _flat_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()

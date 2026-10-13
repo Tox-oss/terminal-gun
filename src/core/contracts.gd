@@ -6,7 +6,12 @@ extends Node
 ## DATI — nel proprio `_ready()`, una volta sola:
 ##     Game.player = self
 ##     Game.horde = self
-##     Game.arena_radius = 28.0
+##     Game.arena_radius = 46.0
+##
+## Quell'ultima riga e' un **esempio di forma**, non un valore da copiare: il raggio
+## dell'arena ha una sola fonte, `src/render/arena.gd:ARENA_RADIUS`, che la registra lei
+## stessa nel proprio `_enter_tree()` prima di qualunque `_ready()` (§5.1). Il default qui
+## sotto deve **coincidere** con quello, ed e' il criterio n. 2 di m9 a dirlo.
 ##
 ## METODI — nel proprio `_ready()`, una volta sola:
 ##     Game.register_impl("nearest_enemy", self._nearest_enemy)
@@ -60,7 +65,33 @@ var horde: Node
 
 ## -arena. Raggio utile dell'arena, in metri. Dato, non calcolato: nessuno lo
 ## deve derivare dalla geometria della scena per evitare dipendenze circolari.
-var arena_radius: float = 28.0
+##
+## **m9, 2026-10-13: 28.0 -> 46.0, perche' e come.** Il numero non e' stato scelto: e'
+## uscito dalla sonda `docs/piramide/probe_arena_density.gd` del vertice, che misura lo
+## **spazio che l'orda concede** al variare del raggio invece di indovinarlo (§1.4b).
+## Sulla scena vera a regime, 200 nemici, seme 4242, DT 1/60:
+##
+##     R=28  area 2463 m2  libera 85,2%  disco libero max  9,5 m  tempo till il muro 1,4 s
+##     R=40  area 5027 m2  libera 92,8%  disco libero max 15,6 m  tempo till il muro 2,2 s
+##     R=46  area 6648 m2  libera 94,6%  disco libero max 19,1 m  tempo till il muro 2,7 s
+##
+## Il tempo till il muro e' `(R - 9,4) / 13,65 m/s`: l'orda forma un anello di ~9,4 m
+## intorno al giocatore, e R compare nel numeratore mentre quel 9,4 no. Percio' ingrandire
+## **raddoppia i due numeri che descrivono «non riesco a muovermi»** (la bolla sicura e i
+## secondi per scappare) e muove poco la percentuale di area libera, che era gia' 85,2%.
+##
+## **Quello che questo numero NON risolve**, dichiarato perche' il piano non vende numeri:
+## lo spazio libero resta **frammentato in tasche** e l'anello di ~9,4 m intorno al
+## giocatore **non si assottiglia**, perche' e' un numero di simulazione (popolazione e
+## separazione) e non di mappa.
+##
+## **Perche' il default e' qui e cosa significa.** `src/render/arena.gd:ARENA_RADIUS` e' la
+## **fonte unica** e la registra nel proprio `_enter_tree()`: questo valore e' cioe' quello
+## che c'e' **prima** che l'arena si registri, e per m9 deve essere **uguale** a quello. Non
+## e' una seconda fonte e non deve essere cambiato per ottenere un verde: e' il valore che
+## `tests/test_smoke.gd` e `tests/test_gameplay.gd` asseriscono, e il criterio n. 2 di m9
+## verifica che tutte le copie **esistenti** dicano lo stesso numero.
+var arena_radius: float = 46.0
 
 # --- Superficie di milestone 2 ----------------------------------------------------
 #

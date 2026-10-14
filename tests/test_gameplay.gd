@@ -604,6 +604,8 @@ func _process(_delta: float) -> bool:
 		# inutile, e qui non serve.
 		var costo_audio := _audio_usa_e_getta(h)
 		print("gameplay: sezione audio: %d ms" % costo_audio)
+		var costo_bonk := _audio_bonk(h)
+		print("gameplay: sezione bonk: %d ms" % costo_bonk)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -3009,6 +3011,196 @@ func _m11bis_campione() -> Dictionary:
 ## numero: la misura e' gia' stata letta prima.
 func _libera(scena: Node) -> void:
 	scena.queue_free()
+
+# ================================================================================
+# Il gemello: `bonk.wav`, il suono dell'impatto, e la capienza del suo pool
+# ================================================================================
+#
+# ## La domanda che decide il lavoro, e che non si puo' supporre
+#
+# Sul giocatore `SFX_POOL = 1` e' motivato da due numeri del gioco: `hurt` non
+# si sovrappone (`INVULN_AFTER_HIT = 0.7 s` contro 0.25 s di suono) e `levelup`
+# non si sovrappone (otto uccisioni fra una soglia e l'altra contro 0.50 s di
+# suono). Qui **non si puo' copiare quel ragionamento**: `bonk.wav` dura
+# **0.18 s** e parte a **ogni impatto**, e l'arma spara da sola.
+#
+# Quindi il numero di slot si misura: quanti bonk arrivano dentro una finestra
+# di 0.18 s? Il massimo di quel numero e' la capienza minima, e il motivo per
+# cui la capienza non si sceglie a occhio e' **il numero che esce qui sotto**.
+#
+# La finestra e' di **11 passi** a DT = 1/60 s, cioe' 0.1833 s: e' il primo
+# multiplo di DT che supera 0.18 s, e arrotondare per difto darebbe una
+# finestra troppo stretta e un massimo falsamente basso.
+
+## Quanti passi coprono `bonk.wav`. Vedi sopra: il primo multiplo di DT che
+## supera i 0.18 s del suono.
+const BONK_PASSI := 11
+## Quanti passi di gioco si misurano **per montaggio**. La misura vale quanto la
+## finestra e' piu' lunga di un periodo dell'arma: `FIRE_INTERVAL = 0.35 s` sono
+## 21 passi, e con 900 passi si guardano quasi due periodi interi.
+const BONK_MISURA_PASSI := 900
+## Quanti montaggi si misurano. `scenes/arena_main.tscn` **non** e' determinata
+## (`horde.gd::_build()` fa `randomize()` quando `seed == 0`, il difetto aperto di
+## m11-bis), quindi **un montaggio solo non e' una misura**: e' un campione. Tre
+## montaggi danno tre campioni indipendenti, ed e' la stessa regola che m11-bis
+## usa per il confronto.
+const BONK_MONTAGGI := 3
+## L'asset del suono d'impatto, confrontato sul `resource_path` del **nodo che
+## sta suonando**: un criterio che legge l'intenzione del codice invece della
+## sua opera passa anche con il file sbagliato.
+const SFX_BONK_ASSET := "res://assets/sfx/bonk.wav"
+
+func _audio_bonk(h) -> int:
+	var t0 := Time.get_ticks_msec()
+	var max_finestra := 0
+	var max_singolo := 0
+	var max_concorrenza := 0
+	var tot_suoni := 0
+	var tot_impatti := 0
+	var righe: Array[String] = []
+	var suono_presente := 0
+	for giro in BONK_MONTAGGI:
+		var c := _bonk_montaggio(h, giro)
+		if not h.check(not c.is_empty(), "bonk: il montaggio %d e' riuscito" % giro):
+			return Time.get_ticks_msec() - t0
+		max_finestra = maxi(max_finestra, int(c["max_finestra"]))
+		max_singolo = maxi(max_singolo, int(c["max_singolo"]))
+		max_concorrenza = maxi(max_concorrenza, int(c["in_uso_max"]))
+		suono_presente += int(c["suono_presente"])
+		tot_suoni += int(c["suoni"])
+		tot_impatti += int(c["impatti"])
+		righe.append("montaggio %d: %d suoni su %d impatti in %d passi, massimo per passo %d, massimo in %d passi %d, concorrenza %d"
+			% [giro, int(c["suoni"]), int(c["impatti"]), BONK_MISURA_PASSI, int(c["max_singolo"]),
+				BONK_PASSI, int(c["max_finestra"]), int(c["in_uso_max"])])
+
+	## ## 1. Il suono esce davvero
+	h.check(tot_suoni > 0,
+		"l'arma deve far suonare il bonk: in %d passi non ne e' partito nessuno"
+			% (BONK_MISURA_PASSI * BONK_MONTAGGI))
+	h.check(suono_presente > 0,
+		"il nodo del bonk deve essere fra i suoni in uso almeno una volta: e' stato in uso in %d passi su %d"
+			% [suono_presente, BONK_MISURA_PASSI * BONK_MONTAGGI])
+
+	for r in righe:
+		print("bonk: %s" % r)
+	print("bonk: totale %d suoni su %d impatti in %d passi; massimo per passo %d, massimo in %d passi (%.4f s) = %d; concorrenza massima %d"
+		% [tot_suoni, tot_impatti, BONK_MISURA_PASSI * BONK_MONTAGGI, max_singolo,
+			BONK_PASSI, BONK_PASSI * DT, max_finestra, max_concorrenza])
+	return Time.get_ticks_msec() - t0
+
+## Un montaggio della scena vera, misurato. L'ordine dei due `step()` e' quello
+## dell'albero, come in `_m11bis_campione`, e il ciclo di frame e' disabilitato:
+## due orologi non si misurano.
+##
+## ## Perche' le asserzioni stanno **qui dentro** e non sul totale dei montaggi
+##
+## `_libera()` fa `queue_free()`, che aspetta la fine del frame, e questo test
+## gira tutto dentro un solo `_process()`: quindi il montaggio precedente e'
+## ancora in albero quando il successivo si monta. Confrontando i nodi **prima
+## del primo montaggio** e **dopo l'ultimo** si leggeva un numero che sale di 45
+## per ogni montaggio accodato (`328 -> 418` misurato, e audio `24 -> 30`:
+## `2 x 45` e `2 x 3`), cioe' un difetto del **test** letto come un difetto del
+## gioco. Ogni montaggio confronta i propri due numeri, e cosi' il confronto
+## copre anche i montaggi in cui la scena precedente e' ancora viva.
+func _bonk_montaggio(h, giro: int) -> Dictionary:
+	var packed = load(ARENA_SCENE)
+	if not (packed is PackedScene):
+		return {}
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	var p = scena.get_node_or_null("Player")
+	var arma = scena.get_node_or_null("Player/Weapon")
+	if hd == null or p == null or arma == null:
+		_libera(scena)
+		return {}
+	scena.process_mode = Node.PROCESS_MODE_DISABLED
+	p.call("drive_manually")
+	hd.set_physics_process(false)
+	p.set("hp", DETERM_HP_ALTO)
+
+	var nodi0 := _conta_nodi(root)
+	var audio0 := _conta_class(root, AUDIO_CLASS)
+	# Un contatore per passo: quanti bonk sono partiti **in quel passo**. Il
+	# massimo dentro una finestra di `BONK_PASSI` passi consecutivi e' la
+	# capienza minima del pool, ed e' il numero che decide `SFX_POOL`.
+	var per_passo := PackedInt32Array()
+	var suoni := 0
+	var impatti := 0
+	var in_uso_max := 0
+	var suono_presente := 0
+	for i in BONK_MISURA_PASSI:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+		var ora := int(arma.get("sfx_emessi"))
+		per_passo.append(ora - suoni)
+		suoni = ora
+		impatti = int(arma.get("impatti"))
+		var in_uso := _audio_in_uso(arma)
+		in_uso_max = maxi(in_uso_max, in_uso.size())
+		if in_uso.has(SFX_BONK_ASSET):
+			suono_presente += 1
+
+	var max_finestra := 0
+	var max_singolo := 0
+	for i in per_passo.size():
+		max_singolo = maxi(max_singolo, per_passo[i])
+		var somma := 0
+		for k in range(i, mini(i + BONK_PASSI, per_passo.size())):
+			somma += per_passo[k]
+		max_finestra = maxi(max_finestra, somma)
+
+	var fuori := {}
+	fuori["suoni"] = suoni
+	fuori["impatti"] = impatti
+	fuori["suono_presente"] = suono_presente
+	fuori["max_singolo"] = max_singolo
+	fuori["max_finestra"] = max_finestra
+	fuori["in_uso_max"] = in_uso_max
+	fuori["nodi0"] = nodi0
+	fuori["nodi1"] = _conta_nodi(root)
+	fuori["audio0"] = audio0
+	fuori["audio1"] = _conta_class(root, AUDIO_CLASS)
+
+	## ## 1b. Ogni impatto produce un suono: il conto che chiude il ramo di riuso
+	##
+	## Questa e' l'asserzione che mancava, e l'ho trovata togliendo il ramo
+	## «riusa lo slot che sta per finire»: i suoni sono scesi da 39 a 20 per
+	## montaggio, cioe' meta' dei bonk persi, e **il criterio era verde** perche'
+	## guardava solo «il suono e' uscito almeno una volta». Un numero che basta
+	## a essere positivo non dice niente.
+	##
+	## Il confronto e' di **uguaglianza**, e il conto e' esatto: 117 suoni su 117
+	## impatti in 2700 passi, sui tre montaggi. Il perche' e' misurabile: in
+	## `--headless` `finished` non arriva dentro una sezione che non passa da
+	## `await`, quindi lo slot resta occupato per `0.18 + 0.35 = 0.53 s`, mentre
+	## due impatti arrivano a `0.385 s` di distanza. Il ramo di riuso e' quindi
+	## **quello che tiene il conto al posto di `finished`**, ed e' esattamente il
+	## ramo che questo criterio protegge.
+	##
+	## Il caso in cui l'uguaglianza non regge e' il throttle: due impatti entro
+	## `IMPACT_SFX_GAP = 0.05 s`. Non e' successo in 2700 passi su tre montaggi.
+	## Se un giorno succede, questo criterio lo dice con due numeri e non lo
+	## nasconde: un `FAIL` qui vuol dire che un impatto e' stato lasciato fuori
+	## dal throttle, non che il criterio e'too stretto.
+	h.eq(suoni, impatti,
+		"montaggio %d: ogni impatto deve produrre un suono: %d impatti, %d suoni. Se i suoni sono meno, uno slot del pool era occupato e il ramo di riuso non ha suonato"
+			% [giro, impatti, suoni])
+
+	## ## 2. Nessun nodo nasce durante il gioco, confrontato **per montaggio**
+	##
+	## E' lo stesso criterio che la sezione del giocatore ha gia' scritto e che
+	## ha i denti gia' provati: la forma che faceva nascere il nodo al momento
+	## del suono l'aveva fatto fallire con `287 -> 287-289`. Qui non deve
+	## succedere, e non succede perche' il nodo dell'arma e' nato in `_ready()`.
+	h.eq(int(fuori["nodi1"]), nodi0,
+		"montaggio %d: durante %d passi di impatto il numero di nodi sotto root non puo' cambiare: era %d, e' %d"
+			% [giro, BONK_MISURA_PASSI, nodi0, int(fuori["nodi1"])])
+	h.eq(int(fuori["audio1"]), audio0,
+		"montaggio %d: durante %d passi di impatto il numero di nodi audio sotto root non puo' cambiare: era %d, e' %d"
+			% [giro, BONK_MISURA_PASSI, audio0, int(fuori["audio1"])])
+	_libera(scena)
+	return fuori
 
 # ================================================================================
 # L'audio di -gameplay: il suono esce, e non costa un nodo

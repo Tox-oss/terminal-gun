@@ -58,6 +58,61 @@ const MUZZLE_HEIGHT := 0.9
 ## un "bonk" e l'altro, il tempo di un'orecchia.
 const IMPACT_SFX_GAP := 0.05
 
+## Quanti secondi uno slot del pool resta occupato **oltre** la lunghezza del
+## suono: la rete per il giorno in cui `finished` non arrivasse. Stesso numero
+## di `player.gd`, dichiarato qui e non letto da li': i due file non si
+## preloaded a vicenda e nessuno dei due deve il tipo dell'altro, quindi
+## nessuno dei due deve nemmeno una costante dell'altro.
+const SFX_SICUREZZA := 0.35
+
+## ## `SFX_POOL = 1`, e la capienza viene da una **misura**, non da un paragone
+##
+## Sul giocatore `SFX_POOL = 1` è motivato da due numeri del gioco: `hurt` non
+## si sovrappone (`INVULN_AFTER_HIT = 0.7 s` contro 0.25 s di suono) e `levelup`
+## non si sovrappone (otto uccisioni fra una soglia e l'altra contro 0.50 s).
+## **Qui quel ragionamento non si può copiare**: `bonk` dura **0.18 s** e parte
+## a ogni impatto, e l'arma spara da sola.
+##
+## Quindi la capienza è **misurata**, in `tests/test_gameplay.gd`, sezione
+## `_audio_bonk`: tre montaggi della scena vera, 900 passi ciascuno, e il
+## **massimo di suoni dentro una finestra di `bonk.wav`**, cioè 11 passi a
+## DT = 1/60 s (0.1833 s, il primo multiplo di DT che supera 0.18 s).
+##
+##   - 117 suoni in 2700 passi, ~39 per montaggio;
+##   - **massimo per passo: 1**;
+##   - **massimo in 11 passi (0.1833 s): 1**, uguale in tutti e tre i montaggi;
+##   - concorrenza massima fra suoni in uso: **1**.
+##
+## Il massimo è 1, quindi un nodo basta, e `45` resta `45`.
+##
+## ## Il tetto strutturale è 4, e va detto perché non è 1
+##
+## `IMPACT_SFX_GAP = 0.05 s` è il throttle di `on_impact()`: un suono ogni
+## 0.05 s, cioè al più `ceil(0.1833 / 0.05) = 4` dentro la finestra. Quindi **1
+## non è un teorema**: è il massimo osservato. Due impatti ravvicinati sono
+## possibili per costruzione — l'arma spara ogni `FIRE_INTERVAL = 0.35 s` e mira
+## al nemico più vicino in quel momento, quindi se fra due colpi il nemico più
+## vicino è cambiato e il nuovo è più vicino di 4.3 m, il secondo proiettile
+## arriva entro 0.1833 s dal primo.
+##
+## E va detto anche **cosa succede** in quel caso, perché è la parte buona: con
+## `SFX_POOL = 1` lo slot è occupato, il pool **riprende lo slot che sta per
+## finire** (`_prendi_slot`) e `play()` ricomincia il suono. Questa è
+## **esattamente** la semantica del nodo unico di prima del pool: un `play()`
+## su un nodo che suona ricomincia. Quindi nel caso raro il suono viene
+## su un nodo che suona ricomincia. Quindi nel caso raro il suono viene
+## troncato, ma veniva troncato anche prima: **non è una perdita, è il
+## comportamento che il gioco aveva**. Alzare la capienza a 2 aggiungerebbe un
+## nodo alla scena vera e romperebbe i tre criteri di `test_arena.gd`,
+## `test_gameloop.gd` e `test_ui.gd`, che sono giusti: per quello la decisione è
+## del vertice, non di questo file.
+const SFX_POOL := 1
+
+## Il nome che `scenes/player.tscn` da' allo slot 0. Lo slot 0 riusa quel nodo,
+## quindi il totale dei nodi della scena non cambia; gli slot 1 e oltre, se mai
+## ce ne fossero, prendono `Sfx1`, `Sfx2`...
+const NOME_SFX := "Sfx"
+
 # --- Stato. Tutto qui è un campo perché sono cose che i potenziamenti cambiano.
 var damage := DAMAGE
 var fire_interval := FIRE_INTERVAL
@@ -75,8 +130,27 @@ var shots := 0
 ## così questo file non deve niente a `projectile_pool.gd` e viceversa.
 var pool
 
-var _sfx: AudioStreamPlayer3D
+## Il **pool** dei nodi che suonano l'impatto, e le scadenze dei suoi slot.
+## Stessa forma del pool di `player.gd`: un `Array` di nodi e una
+## `PackedFloat32Array` di scadenze, capienza `SFX_POOL`. La scadenza di uno
+## slot e' `0.0` quando lo slot e' libero. Suonare **prende** uno slot: nessun
+## nodo nasce durante la partita, e i nodi sono gia' nel totale `20` di
+## `-gameplay` perche' `scenes/player.tscn` li porta gia'.
+var _sfx: Array[AudioStreamPlayer3D] = []
+var _sfx_scadenza := PackedFloat32Array()
 var _sfx_gap := 0.0
+## Quanti suoni ha fatto partire quest'arma, in tutto. E' il numero con cui il
+## test misura **quanti bonk arrivano ravvicinati**, che e' la domanda che
+## decide quanti nodi deve tenere il pool di `bonk`: e' anche la prova che il
+## suono e' uscito e non e' stato solo contato.
+var sfx_emessi := 0
+## Quanti impatti ha visto l'arma, **compresi quelli che il throttle
+## `IMPACT_SFX_GAP` lascia passare senza suono**. E' il denominatore del
+## confronto con `sfx_emessi`: senza questo numero un criterio che chiede
+## «il suono esce» passerebbe anche con metà dei bonk persi, ed è esattamente
+## quello che è successo quando il ramo di riuso dello slot è stato tolto per
+## misura: i suoni sono scesi da 39 a 20 per montaggio e il criterio era verde.
+var impatti := 0
 ## Chi ha creato l'arma. Senza tipo di classe: `player.gd` conosce
 ## `weapon_base.gd` solo per crearla, e nessuno dei due deve il tipo dell'altro.
 var player
@@ -86,16 +160,8 @@ func _ready() -> void:
 	pool.name = "Pool"
 	add_child(pool)
 	pool.weapon = self
-	_sfx = get_node_or_null("Sfx") as AudioStreamPlayer3D
-	if _sfx == null:
-		# La scena può non portare il nodo (la porta su un'arma sola): qui si
-		# crea, una volta sola all'avvio, e l'impatto suona comunque.
-		_sfx = AudioStreamPlayer3D.new()
-		_sfx.name = "Sfx"
-		add_child(_sfx)
-		_sfx.stream = _stream(SFX_IMPACT)
-	elif _sfx.stream == null:
-		_sfx.stream = _stream(SFX_IMPACT)
+	_sfx = _costruisci_pool()
+	_sfx_scadenza.resize(_sfx.size())
 	# Piano §5.1: i metodi si registrano con `register_impl`, mai con
 	# `Game.spawn_projectile = self._spawn_projectile` (GDScript lo rifiuta e
 	# interrompe il `_ready`, e la foglia crede di aver registrato).
@@ -136,6 +202,11 @@ func reset() -> void:
 	cooldown = 0.0
 	shots = 0
 	_sfx_gap = 0.0
+	# Gli slot del pool di `bonk` tornano a zero come gli altri numeri della
+	# partita: uno slot occupato da un suono della partita che è finita
+	# ripartirebbe occupato, e su un solo slot la partita nuova comincerebbe
+	# con il suono che le occupa lo slot.
+	chiudi_suoni()
 	if pool != null:
 		pool.reset()
 
@@ -145,6 +216,7 @@ func step(delta: float) -> void:
 	_sfx_gap -= delta
 	if cooldown <= 0.0:
 		_try_fire()
+	_chiudi_bonk_scaduti(delta)
 	if pool != null:
 		pool.step(delta)
 
@@ -188,10 +260,98 @@ func muzzle_position() -> Vector3:
 
 ## Chiamato dal pool su ogni impatto: qui è il momento del "bonk".
 func on_impact(_where: Vector3) -> void:
-	if _sfx == null or _sfx_gap > 0.0:
+	impatti += 1
+	if _sfx.is_empty() or _sfx_gap > 0.0:
 		return
 	_sfx_gap = IMPACT_SFX_GAP
-	_sfx.play()
+	_suona_bonk()
+
+## Suona l'impatto **prendendo uno slot** dal pool. Nessun nodo nasce qui: e' il
+## punto intero del pool, ed e' la differenza rispetto alla forma che creava il
+## nodo al momento del suono.
+func _suona_bonk() -> void:
+	var slot := _prendi_slot()
+	# La guardia non e' paranoia: e' il buco che un `-1` di `_prendi_slot()`
+	# aprirebbe. `_prendi_slot()` restituisce `-1` solo se il vettore delle
+	# scadenze e' vuoto (nessuno slot costruito), e quel `-1`, usato come
+	# indice, in Godot non e' «l'ultimo» ne' «nessuno»: e' un accesso fuori dal
+	# vettore. Il valore e' possibile, quindi va fermato **qui**, dove si usa.
+	if slot < 0:
+		return
+	if _sfx[slot].stream == null:
+		# L'asset manca: nessun suono, e nessuno slot occupato da un silenzio.
+		_sfx_scadenza[slot] = 0.0
+		return
+	_sfx[slot].play()
+	_sfx_scadenza[slot] = _vita(_sfx[slot])
+	sfx_emessi += 1
+
+## Quale slot prendere: il primo libero, e se non ce n'è uno quello **che sta
+## per finire prima** (la scadenza più piccola). Il ramo «nessuno libero» non
+## cresce: non c'è un `while` e non c'è un nodo creato per farne uno libero.
+func _prendi_slot() -> int:
+	var vicino := -1
+	for i in _sfx_scadenza.size():
+		if _sfx_scadenza[i] <= 0.0:
+			return i
+		if vicino < 0 or _sfx_scadenza[i] < _sfx_scadenza[vicino]:
+			vicino = i
+	return maxi(vicino, 0)
+
+## Quanto vive uno slot occupato: la lunghezza vera del suono più `SFX_SICUREZZA`.
+## Un asset assente dà solo il margine.
+func _vita(node: AudioStreamPlayer3D) -> float:
+	if node.stream == null:
+		return SFX_SICUREZZA
+	return node.stream.get_length() + SFX_SICUREZZA
+
+## `finished`: lo slot torna libero. `queue_free()` non c'è e non serve: il nodo
+## del pool **non muore mai**, quindi qui non c'è niente da liberare e niente
+## che possa lasciare un playback registrato nell'`AudioServer` — che è il
+## difetto che questo pool chiude.
+func _bonk_finito(slot: int) -> void:
+	if slot < 0 or slot >= _sfx_scadenza.size():
+		return
+	_sfx_scadenza[slot] = 0.0
+
+## La rete per `finished` che non arriva. Gira da `step()`, e non da
+## `_exit_tree()`: a `_exit_tree()` il nodo è già fuori dall'albero e `stop()`
+## fa un return anticipato.
+func _chiudi_bonk_scaduti(delta: float) -> void:
+	for i in _sfx_scadenza.size():
+		if _sfx_scadenza[i] <= 0.0:
+			continue
+		_sfx_scadenza[i] -= delta
+		if _sfx_scadenza[i] <= 0.0:
+			_sfx_scadenza[i] = 0.0
+
+## Libera subito **tutti** gli slot del pool. Non è un suono che si ferma: è il
+## tempo che il suono occupa lo slot che si rimette a zero, quindi il suono
+## **finisce di suonare** e lo slot torna libero come dopo `finished`.
+func chiudi_suoni() -> void:
+	for i in _sfx_scadenza.size():
+		_sfx_scadenza[i] = 0.0
+
+## Il pool di `bonk`: `SFX_POOL` nodi, presi dalla scena se ci sono.
+##
+## Un nodo che la scena non porta viene creato qui, in `_ready()`, e solo qui:
+## durante la partita nessun nodo nasce. Lo slot 0 è il nodo `Sfx` che
+## `scenes/player.tscn` porta già, quindi nella scena vera il pool lo riusa e
+## **il totale dei nodi non cambia**.
+func _costruisci_pool() -> Array[AudioStreamPlayer3D]:
+	var slots: Array[AudioStreamPlayer3D] = []
+	for i in SFX_POOL:
+		var nome := NOME_SFX if i == 0 else NOME_SFX + str(i)
+		var node := get_node_or_null(nome) as AudioStreamPlayer3D
+		if node == null:
+			node = AudioStreamPlayer3D.new()
+			node.name = nome
+			add_child(node)
+		if node.stream == null:
+			node.stream = _stream(SFX_IMPACT)
+		node.finished.connect(_bonk_finito.bind(i))
+		slots.append(node)
+	return slots
 
 ## Chiamato dal pool quando `Game.damage_enemy` ha risposto che il nemico è
 ## morto. È l'unica strada dell'XP: nessuna euristica sul conteggio dell'orda.

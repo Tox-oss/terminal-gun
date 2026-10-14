@@ -2284,6 +2284,48 @@ ostacoli. La consegna **non è un danno** — tutti i criteri di fisica reggono 
 prima — ma **la giustificazione non c'e' piu'**, e nel piano resta scritto che non c'e'. Il prossimo
 numero di raggio non si sceglie con quella tabella.
 
+### 1.14-ottava **Lo stato: una foglia ha finito, l'altra e' stata persa**
+
+Onda B di m11, 2026-10-14. **Le due foglie sono partite insieme e una ha lavorato, l'altra e' morta
+per un motivo che non e' del progetto.**
+
+| | esito | verificato |
+|---|---|---|
+| **`-orda`**, cucitura `population_scale` | **finita** | `PASS orda (15029)`, `GATE: 7/8`, `PERM: 15/15` |
+| **`-arena`**, vista isometrica | **persa** | `tests/test_arena.gd` lasciato **non compilante** |
+
+**Il motivo del fallimento, e va scritto perché è un fatto di governance:** il lancio è stato
+rifiutato con *«OpenCode's free tier can only be used from within OpenCode»*. Non è un rate limit e
+non è un permesso: è **quota dell'account**, e **nessuna allowlist lo può sbloccare**. Da quel momento
+**le foglie non si possono più lanciare**, e quindi il vertice non può fare il loro lavoro perché non è
+nel suo scope (`src/render/**` e `src/sim/**` non sono suoi).
+
+**La cosa che il fallimento ha insegnato, e che vale più della perdita:** le sessioni delle foglie
+**esistono anche quando il lancio fallisce**, e possono aver **scritto file**. Al primo `git status`
+dopo il fallimento c'erano **684 righe non committate in 5 file**, e `tests/test_arena.gd` non
+compilava. Quindi la regola che segue il fallimento di un lancio non è «riprovare»: è
+**`git status` prima di qualunque altra cosa**, perché un agente che muore a metà lascia lo stesso
+sporco di un agente che è andato a buon fine.
+
+**Cosa ho tenuto e cosa ho buttato, e perché.** `-orda` aveva finito e verificato: tenuto e
+committato (`682eaac`). `-arena` aveva lasciato `scenes/arena_main.tscn` (+36), `arena_camera.gd`
+(+128) e `tests/test_arena.gd` (+212), **ma il suo test non compilava**: sei parse error, fra cui
+`atan()` con due argomenti, che in Godot si chiama `atan2`. Quindi **la vista isometrica è stata
+ripristinata e non è stata consegnata**. Il motivo per cui non ho tenuto il pezzo comunque è che
+**l'inquadratura è l'unico criterio che lega la camera al resto** (tetto `0,50`, oggi `0,208`
+misurato): consegnare una rotazione isometrica **senza il criterio che la verifica** è esattamente
+il difetto che questo progetto ha chiuso tre volte, e stavolta sarebbe stato un verde che mente.
+
+**Che cosa resta, e l'ordine è mio.**
+
+1. **misurare l'apertura** con la cucitura appena consegnata: la sonda del vertice deve girare su
+   `population_scale` e dire **quanto deve scendere l'onda 1** perché il giocatore arrivi all'onda 2.
+   È la leva, e la sonda è mia e ha già il suo caso a risposta nota.
+2. **la rampa** che porta a 200 nemici, e poi il **trigger del boss a 600 s**, che è superficie di
+   contratto e la congelo in quel momento e non prima.
+3. **la vista isometrica**, che è indipendente dalle prime due e si può rifare quando le foglie
+   tornano disponibili.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

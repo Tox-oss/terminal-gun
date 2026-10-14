@@ -2162,6 +2162,64 @@ consegnati, uno che schiva **muore sull'onda 1** in **51–124 s**, e i 600 s de
 con uno schivatore che non si chiuda in angolo, che è un problema di **strumento**, e uno strumento
 è roba mia.
 
+### 1.14-quinque **Lo strumento ricostruito, e la risposta alla mappa**
+
+**Perché è stato rifatto e non aggiornato.** Il vecchio schivatore sceglieva la direzione che
+massimizzava la **distanza dal nemico più vicino**, con otto raggi. Inseguire la lontananza
+dall'orda spinge **contro il muro** — la lontananza è dalla parte opposta all'orda — e lì non si
+scappa. Per questo dava un numero **migliore** a R=60 che a R=46: **non era il raggio a decidere,
+era lo strumento che si chiudeva in angolo.** Uno strumento che dà un risultato migliore a una
+configurazione e peggiore a una più grande **non sta misurando l'arena: sta misurando se stesso**, e
+a quel punto i suoi numeri non hanno diritto di esistere.
+
+**Quello che ho cambiato, e perché è sufficiente.** Sedici raggi invece di otto, e per ogni raggio
+non si guarda il punto davanti a sé ma un punto **20,5 m avanti** (`LOOKAHEAD_S = 1.5` s a
+13,65 m/s). Il punteggio ha tre termini invece di uno: lontananza dal nemico più vicino **guardata
+avanti**, **penalità del muro** in metri (`WALL_PENALTY = 3.0` per metro sforato oltre
+`EDGE_SAFE_M = 0.8`, che è il margine che `player.gd` usa già), e **ritorno al centro** quando è
+oltre il 70% del raggio. Il termine che mancava era il secondo.
+
+**E due casi a risposta nota, senza i quali nessuna tabella qui sotto ha diritto di esistere.**
+
+| caso | risposta nota | misurato | verdetto |
+|---|---|---|---|
+| **R = 12 m**, un disco dove non si può schivare perché il muro è sempre dietro | lo strumento **DEVE morire** | **morto al 61,20 s** | **come deve: lo strumento è in piedi** |
+| **R = 46 m**, il raggio **consegnato** | il vecchio strumento aveva dato **50,98 / 108,95 / 124,18 s** | **55,33 / 121,33 / 300,00 s** | minimo a **8%**: sta misurando la stessa cosa |
+
+**La tabella, tre semi per raggio:**
+
+| R | tre semi | **MIN** | MAX |
+|---|---|---|---|
+| 12 m (riferimento) | 61,2 / 109,9 / 194,4 s | 61,20 s | 194,43 s |
+| **46 m — consegnato** | 55,3 / 121,3 / **300,0** | **55,33 s** | 300,00 s |
+| 60 m | 146,7 / 171,7 / **300,0** | **146,72 s** | 300,00 s |
+| 75 m | 156,3 / 174,2 / 189,6 s | **156,33 s** | 189,55 s |
+
+| da a | fattore sul minimo |
+|---|---|
+| 12 → 46 m | 0,90 |
+| **46 → 60 m** | **2,65** |
+| 60 → 75 m | 1,07 |
+
+**Le tre cose che ne segue, e sono decisioni, non opinioni.**
+
+1. **L'istinto dell'utente era giusto, e due volte.** Da 46 a 60 metri il caso peggiore guadagna
+   un fattore **2,65**. Ma **da 60 a 75 il fattore è 1,07**: il ginocchio è a circa 60 m, e oltre
+   non si compra niente. Una mappa più grande **serve**, ma va dimensionata sul ginocchio, non
+   allungata.
+2. **La mappa da sola non basta, e questo è il numero che decide l'ordine.** Anche al raggio 75,
+   che è **1,63 volte** quello consegnato, il caso peggiore **muore a 156,33 s**. I 600 s sono da
+   **3,8 volte** tanto. Quindi «mappa più grande» è una delle due leve, non la leva.
+3. **La leva che c'è è più grave di quanto sembri, e non la vediamo guardando il fondo.** Tutte
+   le morti cadono **sull'onda 1**, con **25 nemici vivi**, mai sulla 2. Il giocatore non arriva
+   mai al fondo della partita. Il problema non è che le onde tardive siano dure: è che **la
+   apertura ammazza**, e più gli si dà spazio meno conta.
+
+**Che cosa non è misurato qui, e va detto.** Il numero è una **soglia di fattibilità**, non un
+giudizio di giocabilità: lo schivatore è mio, guarda sedici raggi e non ha memoria, quindi è
+**peggiore** di un giocatore vero e il numero è **basso**. E il terreno e il muro **disegnati**
+restano a 46 m in tutte le righe: qui si misura lo spazio che l'orda concede, non quello che si vede.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

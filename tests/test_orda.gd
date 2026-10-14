@@ -281,7 +281,14 @@ func _run() -> void:
 	# precedente invece che in quello dichiarato.
 	_raggio_60(h, horde)
 	_touch(h, horde)
-	# m11-bis-b: il reroll di `restart_run()`. Sta qui, dopo `_touch` e **prima**
+	# m11-quarta: il morso e la taglia disegnata. Sta **dopo** `_touch` perche'
+	# la condizione del morso si accende solo con un giocatore registrato, e lo
+	# spia di `_touch` e' l'unico che questo file abbia: prima di lui nessun
+	# morso puo' partire e la sezione misurerebbe il vuoto. Sta **prima** di
+	# `_reroll` perche' quella chiama `restart_run()` e rimetterebbe a posto
+	# l'orda che qui e' stata ridotta a un nemico per specie.
+	_banda_morso(h, horde)
+	# m11-bis-b: il reroll della sezione 14. Sta qui, dopo `_touch` e **prima**
 	# di `_scena_vera`, e il posto e' dichiarato nella sezione: sulla scena vera un
 	# restart rimescolerebbe proprio il numero che il criterio n. 1 di 1.14-ter
 	# confronta fra montaggi.
@@ -3259,3 +3266,251 @@ func _sequenza(a: PackedInt32Array) -> String:
 	for v in a:
 		parti.append(str(v))
 	return "/".join(parti)
+
+# --- 16. m11-quarta: il morso e la taglia disegnata ----------------------------
+#
+# ## Il difetto segnalato dall'utente, in una riga
+#
+# Il corpo che si vede e' `SIZE_FACTOR * RADIUS[kind]` e la portata del morso
+# era `RADIUS[kind] + TOUCH_REACH`, quindi la banda di sovrapposizione **a vuoto**
+# era `(SIZE_FACTOR - 1) * RADIUS[kind]`: 1,08 m sul runner, 1,44 sul grunt, 2,40
+# sul brute e **4,56 m sul boss** — e cresceva con la specie, che e' l'opposto di
+# quello che serve. Il boss ti sta dentro e non morde.
+#
+# ## La regola, che e' del contratto e non di questa sezione
+#
+# Punto 1b di `src/core/contracts.gd`, emendato il 2026-10-14: il morso non puo'
+# cadere **piu' tardi** del contatto visibile, cioe'
+#
+#     morse_entro(k) >= taglia_disegnata(k) + taglia_disegnata_giocatore
+#
+# e la banda deve essere **zero per ogni specie**: non «non negativa», zero. Non
+# e' una soglia da tarare, e' un'identita' che si ottiene derivando la portata
+# del morso dalla taglia disegnata.
+#
+# ## Perche' il coefficiente non e' libero
+#
+# `corpo_giocatore` **e' gia'** `TOUCH_REACH = 0.45`, perche' il criterio n. 2 di
+# m8 asserisce che la taglia misurata sulla scena vera e' **uguale** a
+# `TOUCH_REACH` (lo asserisce la sezione 12, e quella asserzione non si tocca).
+# Quindi basta `morse_entro(k) = SIZE_FACTOR * RADIUS[k] + TOUCH_REACH` e la banda
+# va a zero **per costruzione**. Nessun fattore «in attesa di misura»: metterne uno
+# sarebbe mettere un numero a caso.
+#
+# ## I tre denti, e cosa ognuno esclude
+#
+#   1. **il comportamento**: un nemico che si vede addosso al giocatore **morde**.
+#      Non e' la formula riscritta: e' `src/sim/enemy.gd` che decide, in un passo,
+#      su 200 nemici veri. Se questa riga va verde per un difetto di questo file,
+#      il numero che si legge non descrive piu' il gioco e va riletto sul sorgente;
+#   2. **la banda e' zero**, non «positiva»: l'identita' e' quella e il criterio
+#      del contratto parla di zero;
+#   3. **`RADIUS x 7` non cambia il verdetto**: se il rimedio fosse stato
+#      «ingrandire `RADIUS` finche' la banda torna vicina a zero», questo dente va
+#      rosso. Esclude **per iscritto** la strada dell'ingrandimento.
+#
+# ## Il canale, e perche' qui non c'e' un `3.4`
+#
+# `SIZE_FACTOR` e' di `-arena` (`src/render/horde_renderer.gd`) e arriva nel
+# contratto come `Game.enemy_body_scale`. `-orda` **lo legge**: copiarlo sarebbe
+# una copia che mente, che e' il difetto delle sei copie di m9 e la ragione per
+# cui il vertice ha aperto il canale.
+
+## Il fattore di calibrazione del corpo **dal contratto**, non da una copia.
+func _scala_corpo() -> float:
+	var game := _game()
+	if game == null:
+		return -1.0
+	var v = game.get("enemy_body_scale")
+	if v == null:
+		return -1.0
+	return float(v)
+
+## Il default che il contratto dichiara, letto **dal sorgente**: serve a dire se
+## il valore in campo e' quello che `-arena` ha registrato o e' ancora il default
+## dichiarato. Un test che non lo distingue chiama «canale» un numero che nessuno
+## ha mai scritto.
+func _scala_corpo_dichiarata() -> float:
+	var f := FileAccess.open("res://src/core/contracts.gd", FileAccess.READ)
+	if f == null:
+		return -1.0
+	for riga in f.get_as_text().split("\n"):
+		var t := str(riga).strip_edges()
+		if t.begins_with("var enemy_body_scale"):
+			return float(t.split("=")[1].strip_edges())
+	return -1.0
+
+func _banda_morso(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var scala := _scala_corpo()
+	h.check(scala > 0.0,
+		"il contratto dichiara Game.enemy_body_scale, il fattore con cui il renderer "
+		+ "disegna il corpo del nemico")
+	var dichiarata := _scala_corpo_dichiarata()
+	# ## L'orda non ha una copia del fattore: lo legge
+	#
+	# Due righe, e sono il canale. Se `horde.body_scale` fosse un numero suo, il
+	# test passerebbe anche quando il renderer ha cambiato fattore: la banda
+	# sarebbe zero **fra due numeri sbagliati**.
+	h.eq(horde.body_scale, scala,
+		"l'orda prende il fattore del corpo dal contratto, non da una copia sua")
+	h.eq(horde.body_scale_source, "contratto",
+		"e lo dichiara: senza questa riga un fallback silenzioso passerebbe")
+	h.eq(horde.bite_range_of(ENEMY.BOSS), ENEMY.bite_range_of(ENEMY.BOSS, horde.body_scale),
+		"la portata che l'orda espone e' quella che calcola la simulazione")
+	# ## E il numero non e' scritto a mano da questa parte
+	#
+	# Un `3.4` in `src/sim/` sarebbe una copia che mente; un `SIZE_FACTOR` in
+	# `src/sim/` sarebbe il nome di un'altra foglia. Le due `grep` sono la difesa
+	# di m9 (criterio n. 2) applicata a questo canale, e guardano **solo il
+	# codice**: i commenti parlano di `SIZE_FACTOR` e devono poterlo fare, altrimenti
+	# la documentazione che spiega il canale farebbe fallire il canale.
+	if dichiarata >= 1.0:
+		for path in ["res://src/sim/enemy.gd", "res://src/sim/horde.gd"]:
+			h.eq(_occorrenze_di_codice(path, "SIZE_FACTOR"), 0,
+				"il nome SIZE_FACTOR e' di -arena e non compare in codice in %s" % path)
+			h.eq(_occorrenze_di_codice(path, str(dichiarata)), 0,
+				"il numero %s del fattore non e' scritto a mano in %s"
+					% [str(dichiarata), path])
+	else:
+		h.fail("il contratto non dichiara un fattore corpo >= 1: la difesa "
+			+ "contro la copia scritta a mano non puo' girare")
+	# ## Il corpo del giocatore: `TOUCH_REACH`, e perche' non un altro numero
+	#
+	# Il criterio n. 2 di m8 asserisce che il raggio **misurato** sulla scena vera
+	# del giocatore e' uguale a `TOUCH_REACH`, e quella asserzione e' nella sezione
+	# 12: qui dentro quindi non si rimisura un numero che gia' e' legato. Se un
+	# giorno il modello del giocatore cambia, e' quella riga che va rossa per
+	# prima, e questa ne segue il valore.
+	var corpo := ENEMY.TOUCH_REACH
+
+	var righe := ""
+	for k in ENEMY.KIND_COUNT:
+		var disegnato := scala * ENEMY.RADIUS[k]
+		var morse_entro := horde.bite_range_of(k)
+		# Il contatto **visibile**: il bordo del nemico che tocca il bordo del
+		# giocatore. E' il numero che l'occhio chiama "dentro".
+		var visibile := disegnato + corpo
+		# La banda di sovrapposizione **a vuoto**: quanti metri il nemico puo'
+		# stare dentro il giocatore senza mordere. Positiva = difetto.
+		var banda := visibile - morse_entro
+		righe += " %s=%.2f/%.2f" % [ENEMY.KIND_NAMES[k], morse_entro, banda]
+		# Dente 1: il **comportamento**, non la formula. Un nemico di questa
+		# specie a 1 mm dal contatto visibile si vede addosso al giocatore: se non
+		# morde, il nemico e' dentro di te e non fa niente, che e' esattamente la
+		# segnalazione dell'utente. Se un giorno questa riga va verde perche' il
+		# file non guarda piu' qui, il numero stampato sotto non descrive piu' il
+		# gioco e va riletto sul sorgente di `src/sim/enemy.gd`.
+		h.check(_morde_a_distanza(h, horde, k, visibile - 0.001),
+			"il %s si vede addosso al giocatore a %.2f m e deve mordere: banda di "
+				% [ENEMY.KIND_NAMES[k], visibile - 0.001]
+				+ "sovrapposizione a vuoto %.2f m, quindi finche' e' positiva il nemico "
+				% banda
+				+ "sta dentro e non morde")
+		# e NON morde quando e' fuori dal contatto visibile: altrimenti la riga di
+		# sopra passerebbe con una portata a chilometri.
+		h.check(not _morde_a_distanza(h, horde, k, visibile + 0.5),
+			"il %s NON morde a %.2f m, che e' %.2f m oltre il contatto visibile"
+				% [ENEMY.KIND_NAMES[k], visibile + 0.5, visibile + 0.5 - morse_entro])
+		# Dente 2: la banda e' **zero** per questa specie, non «non negativa».
+		h.near(banda, 0.0, 0.000001,
+			"criterio 1b: la banda del %s e' zero, non negativa: morse %.4f m contro disegnato %.4f + corpo %.4f"
+				% [ENEMY.KIND_NAMES[k], morse_entro, disegnato, corpo])
+		# Dente 3: `RADIUS x 7` non cambia il verdetto. Se il rimedio fosse stato
+		# «ingrandire RADIUS finche' la banda torna piccola», questa riga andava
+		# rossa: e' la strada che il criterio esclude per iscritto.
+		var ragione7 := ENEMY.RADIUS[k] * 7.0
+		var banda7 := (scala * ragione7 + corpo) - ENEMY.bite_range_for(ragione7, horde.body_scale)
+		h.near(banda7, 0.0, 0.000001,
+			"criterio 1b: con RADIUS x 7 (%.2f m invece di %.2f) la banda e' ancora zero: il rimedio non e' stato 'ingrandire RADIUS'"
+				% [ragione7, ENEMY.RADIUS[k]])
+
+	print("orda: m11-quarta, fattore corpo %.4f (contratto, default dichiarato %.4f%s)"
+		% [scala, dichiarata, ("" if absf(scala - dichiarata) > 0.000001
+			else ", ANCORA IL DEFAULT: -arena non lo registra")])
+	print("orda: m11-quarta, morsi entro / banda per specie (scala %.2f):%s"
+		% [scala, righe])
+	print("orda: m11-quarta: sezione intera in %d us, 8 passi di un passo, "
+		% (Time.get_ticks_usec() - t0)
+		+ "%d specie x 2 distanze" % ENEMY.KIND_COUNT)
+
+	# ## L'orda torna com'era, e non e' una cortesia
+	#
+	# La sezione ha ridotto il campo a un nemico per specie e ha scritto dentro
+	# `kinds`/`radii`. Senza questo `restart_run()` la sezione 14 ripopolerebbe a
+	# `population = 1` e confronterebbe una disposizione di un nemico con un'altra di
+	# un nemico: passerebbe, e misurerebbe niente. Quindi si rimette a posto
+	# esattamente dai tre punti del gioco, come vuole la sezione 15.
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	h.eq(horde.count, RUN.population_of(1),
+		"m11-quarta: la sezione rimette l'orda alla popolazione della curva")
+	h.eq(horde.transforms.size(), horde.count,
+		"m11-quarta: e gli array restano allineati a count")
+	# La sezione ha scritto dentro `kinds` e `radii` per costruire il nemico di
+	# prova, quindi dopo il ripristino ogni raggio deve tornare a essere quello
+	# della sua specie: se il ripristino lasciasse un raggio fuori tabella, il
+	# numero qui sotto sarebbe quello e non quello del gioco.
+	var raggi_fuori_tabella := 0
+	for i in horde.count:
+		if absf(horde.radii[i] - ENEMY.RADIUS[horde.kinds[i]]) > 0.000001:
+			raggi_fuori_tabella += 1
+	h.eq(raggi_fuori_tabella, 0,
+		"m11-quarta: dopo il ripristino ogni nemico ha il raggio della sua specie")
+
+## Mette **un** nemico di specie `kind` alla distanza `distanza` dal giocatore
+## finto e dice se in **un passo** morde.
+##
+## Un passo solo, e la ragione e' dichiarata: la condizione del morso in
+## `src/sim/enemy.gd` guarda la posizione di **inizio** del passo, quindi la
+## risposta e' esatta e non una media di trenta secondi. E il timer del morso e'
+## un array parallelo **pubblico**, quindi si carica a mano: la domanda e' «morde
+## qui», non «ha avuto tempo di caricare».
+##
+## ## Perche' la risposta si legge su `touch_bites_last` e non su `bites[0]`
+##
+## `bites[i]` e' la **decisione** del passo e `touch_bites_last` e' la
+## **consegna**: `_apply_bites` la azzera subito e rispetta il tetto a intervallo
+## `TOUCH_INTERVAL`, quindi con il tetto scarico `bites[0]` vale 0 **anche quando
+## il nemico ha morso**. Leggendo il numero sbagliato questa funzione avrebbe
+## detto «non morde» a tutte e quattro le specie e il dente sarebbe passato (o
+## fallito) per il motivo sbagliato.
+##
+## ## E perche' il nemico viene prima mandato lontano
+##
+## Perche' il tetto a intervello si scarichi. Senza quei passi la risposta sarebbe
+## «no» perche' un morso di troppo fa meno di 0.40 s, non perche' la distanza e'
+## quella giusta: un test che misura il tetto quando vuole misurare la distanza
+## e' un test che non misura niente.
+func _morde_a_distanza(h, horde: HORDE, kind: int, distanza: float) -> bool:
+	var respawn := horde.auto_respawn
+	while horde.count > 0:
+		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+	horde.population = 1
+	horde.auto_respawn = true
+	var passi := 0
+	while horde.count < 1 and passi < 60:
+		horde.step(DT)
+		passi += 1
+	if horde.count != 1:
+		horde.auto_respawn = respawn
+		return false
+	horde.kinds[0] = kind
+	horde.radii[0] = ENEMY.RADIUS[kind]
+	horde.hp[0] = ENEMY.hp_of(kind)
+	# Lontano e fermo: nessun morso possibile, e il tetto a intervallo si
+	# scarica. 40 m stanno dentro l'arena da 60 m anche spostandosi di qualche
+	# metro verso il centro.
+	horde.transforms[0] = FAKE_PLAYER + Vector3(40.0, 0.0, 0.0)
+	horde.velocities[0] = Vector3.ZERO
+	for _i in int(ceil(HORDE.TOUCH_INTERVAL / DT)) + 2:
+		horde.transforms[0] = FAKE_PLAYER + Vector3(40.0, 0.0, 0.0)
+		horde.step(DT)
+	# Adesso la posizione e il timer del morso, e un passo solo.
+	horde.velocities[0] = Vector3.ZERO
+	horde.transforms[0] = FAKE_PLAYER + Vector3(distanza, 0.0, 0.0)
+	horde.bite_timers[0] = ENEMY.touch_period_of(kind)
+	horde.step(DT)
+	var morso := horde.touch_bites_last == 1
+	horde.auto_respawn = respawn
+	return morso

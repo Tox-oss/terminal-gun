@@ -422,6 +422,54 @@ func _contract_radius() -> float:
 		return maxf(r, 6.0)
 	return maxf(arena_radius, 6.0)
 
+## ## m11-quarta: il fattore di calibrazione del corpo, **letto e non copiato**
+##
+## `SIZE_FACTOR` e' di `-arena` (`src/render/horde_renderer.gd`) e il contratto
+## lo espone come `Game.enemy_body_scale`. Qui viene **letto una volta sola**,
+## all'avvio, come gli ostacoli di m10: `-arena` lo registra in `_enter_tree()`,
+## che gira prima del `_ready()` di questo nodo, quindi non e' una corsa.
+##
+## **Perche' non una `const` e non un `3.4` scritto qui**: un numero copiato
+## mente alla prima riga cambiata di `-arena`, che e' il difetto delle sei copie
+## di m9 e la ragione per cui il vertice ha aperto questo canale.
+##
+## ## Il fallback, e perche' e' `1.0` e non il numero del renderer
+##
+## `BODY_SCALE_FALLBACK = 1.0` vuol dire **nessuna calibrazione**: e' il caso in
+## cui il contratto non c'e' (l'orda montata da sola, sotto `--script` senza
+## autoload) e quindi la simulazione non sa quanto e' grande il corpo che si
+## vede. Non si scrive qui il numero di un'altra foglia nemmeno come riserva:
+## quando il canale e' chiuso `body_scale_source` dice `fallback`, e chi legge
+## sa che la banda non e' verificabile finche' `-arena` non registra.
+var body_scale: float = BODY_SCALE_FALLBACK
+## Da dove viene il numero in campo: `contratto` oppure `fallback`. Non e' un
+## campo per il gusto di averlo: e' la riga che distingue «canale usato» da
+## «canale mai scritto da nessuno», che sono due cose diverse e sembrano uguali.
+var body_scale_source: String = "fallback"
+
+const BODY_SCALE_FALLBACK := 1.0
+
+func _load_body_scale() -> void:
+	body_scale = BODY_SCALE_FALLBACK
+	body_scale_source = "fallback"
+	var game := _contract()
+	if game == null:
+		return
+	var v = game.get("enemy_body_scale")
+	if v == null:
+		return
+	var s := float(v)
+	if s <= 0.0:
+		return
+	body_scale = s
+	body_scale_source = "contratto"
+
+## La portata del morso di una specie, **come la calcola la simulazione**. Non e'
+## una copia della formula di `enemy.gd`: e' la stessa funzione, e il test di
+## m11-quarta confronta le due cose perche' una copia, qui, mentirebbe.
+func bite_range_of(kind: int) -> float:
+	return E.bite_range_of(kind, body_scale)
+
 func _physics_process(delta: float) -> void:
 	step(delta)
 
@@ -467,6 +515,10 @@ func _build() -> void:
 	# La curva decide quanti nemici ci sono **al primo frame**: 25, non 200. Il
 	# numero e la misura da cui e' uscito stanno in `src/sim/run.gd`.
 	_sync_population()
+	# Il fattore di calibrazione del corpo, **prima** di qualunque spawn: come
+	# gli ostacoli, e per la stessa ragione — la simulazione deve sapere quanto e'
+	# grande il corpo che si vede dal primo passo, non dal secondo.
+	_load_body_scale()
 	_budget = 0.0
 	# Disposizione iniziale **a `population`**, non a `MAX_ENEMIES`.
 	_populate(population)
@@ -695,7 +747,7 @@ func step(delta: float) -> void:
 	var ha_giocatore := _has_player()
 	for i in count:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
-			kinds, arena_radius, bite_timers, bites, ha_giocatore, flow_field)
+			kinds, arena_radius, bite_timers, bites, ha_giocatore, body_scale, flow_field)
 	_apply_bites(delta)
 	_sweep_dead()
 	_wave_tick(delta)

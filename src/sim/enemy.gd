@@ -114,10 +114,18 @@ const EDGE_PUSH := 3.0
 # al secondo che il giocatore sente scende del 12%, non del 50%: meta' dei morsi
 # offerti non entrava comunque, perche' il giocatore era gia' invulnerabile.
 #
+# La tabella qui sopra e' la misura di m8, e riguarda la portata di **allora**,
+# `RADIUS[kind] + TOUCH_REACH`. Dal 2026-10-14 (m11-quarta, vedi `bite_range_of`
+# piu' in basso) la portata e' `body_scale * RADIUS[kind] + TOUCH_REACH`, quindi
+# **quelle righe non descrivono piu' il gioco**: sono la derivazione del numero
+# `TOUCH_REACH`, non la sua fotografia di oggi. Le due righe che contano il
+# numero di oggi sono la sezione 16 di `tests/test_orda.gd` (banda per specie) e la
+# sezione 12 (ingestione sulla scena vera), e vengono ristampate a ogni lancio.
+#
 # ### Perche' questo numero e' quello
 #
-# La condizione del morso e' `dist <= RADIUS[kind] + TOUCH_REACH`: la somma di
-# due raggi deve essere una distanza, e i due raggi che ci sono sono **il corpo
+# La condizione del morso e' `dist <= bite_range_of(kind, body_scale)`: la somma
+# di due raggi deve essere una distanza, e i due raggi che ci sono sono **il corpo
 # del nemico** e **il corpo del giocatore**. Il secondo non era un numero: era
 # un punto. Ed e' il punto che l'utente ha scritto di essere troppo piccolo.
 #
@@ -148,6 +156,64 @@ const EDGE_PUSH := 3.0
 # `TOUCH_INTERVAL`, ma **non** descrivono la difficolta': sulla scena vera quei
 # due numeri sono circa il doppio di quelli che il giocatore sente.
 const TOUCH_REACH := 0.45
+
+## ## m11-quarta: la portata del morso **deriva dalla taglia disegnata**
+##
+## ## Il difetto, in una riga
+##
+## Il corpo che si vede e' `SIZE_FACTOR * RADIUS[kind]` (`SIZE_FACTOR` lo
+## registra `-arena` e il contratto lo espone come `Game.enemy_body_scale`), e
+## la portata del morso era `RADIUS[kind] + TOUCH_REACH`. La banda di
+## sovrapposizione a vuoto era quindi `(SIZE_FACTOR - 1) * RADIUS[kind]`, cioe'
+## 1,08 m sul runner, 1,44 sul grunt, 2,40 sul brute e **4,56 m sul boss**: per
+## quella lunghezza il nemico e' letteralmente dentro il giocatore e non fa
+## niente, e la banda **cresceva con la specie**, che e' l'opposto di quello che
+## serve. E' la segnalazione dell'utente del 2026-10-14 (piano §1.14-nona).
+##
+## ## La regola, che e' del contratto (m8 punto 1b, emendato lo stesso giorno)
+##
+##     morse_entro(k) >= taglia_disegnata(k) + taglia_disegnata_giocatore
+##
+## e la banda deve essere **zero per ogni specie**. Non e' una soglia da tarare:
+## e' un'identita', e si ottiene **derivando** la portata dalla taglia che si
+## vede, cosi' il numero che si vede e quello che morde non possono divergere.
+##
+## ## Perche' il coefficiente NON e' libero
+##
+## `corpo_giocatore` **e' gia'** `TOUCH_REACH = 0.45`: il criterio n. 2 di m8,
+## verificato nella sezione 12 di `tests/test_orda.gd`, asserisce che il raggio
+## **misurato** sulla scena vera del giocatore e' uguale a `TOUCH_REACH`. Quindi
+## basta una riga:
+##
+##     morse_entro(k) = body_scale * RADIUS[k] + TOUCH_REACH
+##
+## e la banda va a **0,0000 per costruzione**, non per taratura. Non c'e' un
+## fattore «in attesa di misura»: metterne uno sarebbe mettere un numero a caso,
+## che e' la cosa che questo progetto vieta.
+##
+## ## Perche' `body_scale` arriva come **parametro** e non come costante
+##
+## Il fattore e' di `-arena`. Copiarlo qui dentro (o scrivere `3.4`) sarebbe una
+## copia che mente alla prima riga cambiata di quel file — la lezione delle sei
+## copie di m9, gia' pagata una volta. Quindi il fattore arriva dal contratto,
+## passa per un campo di `horde.gd` letto **una volta sola** all'avvio (come gli
+## ostacoli di m10) e viene passato qui a ogni passo: nessuna copia, nessun
+## fallback silenzioso in questo file, e chi lo registra e' `-arena`.
+##
+## ## Il numero che cambia, e il numero che non cambia
+##
+## La portata del boss passa da **2,35 m a 6,91 m** e i morsi offerti salgono:
+## il gioco diventa piu' difficile. Il danno per morso e la cadenza **non** sono
+## stati toccati: sono le due cose che m7 ha misurato e continuano a valere.
+static func bite_range_of(kind: int, body_scale: float) -> float:
+	return bite_range_for(RADIUS[clamp_kind(kind)], body_scale)
+
+## Idem per un raggio che non viene dalla tabella: serve al dente «`RADIUS x 7`
+## non cambia il verdetto» di `tests/test_orda.gd`, che vuole la banda a zero
+## anche per un raggio che nessuna specie ha. Non e' una seconda formula: e' la
+## stessa, con il ragchio in mano.
+static func bite_range_for(radius: float, body_scale: float) -> float:
+	return body_scale * radius + TOUCH_REACH
 
 ## Danno di un morso di runner, e da dove viene questo numero.
 ##
@@ -214,6 +280,12 @@ static func touch_period_of(kind: int) -> float:
 ## l'evitamento non e' un interruttore della fisica, e' una direzione in piu'
 ## quando c'e' qualcosa da evitare.
 ##
+## `body_scale` e' il fattore di calibrazione del corpo che arriva dal contratto
+## (`Game.enemy_body_scale`), letto una volta sola da `horde.gd` e passato qui a
+## ogni passo: la portata del morso e' derivata dalla taglia **disegnata**, quindi
+## il numero che si vede e quello che morde non possono divergere (vedi
+## `bite_range_of` piu' in alto).
+##
 ## `bite_timers` e `bites` sono due array paralleli in scrittura: il primo
 ## tiene da quanto tempo questa specie e' in contatto, il secondo dice "questo
 ## passo morde" (1) o no (0). **La decisione del morso e' qui dentro**, dove
@@ -227,7 +299,7 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		positions: PackedVector3Array, velocities: PackedVector3Array,
 		timers: PackedFloat32Array, kinds: PackedInt32Array,
 		arena_radius: float, bite_timers: PackedFloat32Array,
-		bites: PackedInt32Array, has_target: bool, flow = null) -> void:
+		bites: PackedInt32Array, has_target: bool, body_scale: float, flow = null) -> void:
 	var kind := clamp_kind(kinds[i])
 	var pos := positions[i]
 	var to_target := target - pos
@@ -277,7 +349,7 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 	# non morderebbe mai. E il prezzo e' dichiarato: chi entra ed esce spesso
 	# non morde affatto.
 	bites[i] = 0
-	if has_target and dist <= RADIUS[kind] + TOUCH_REACH:
+	if has_target and dist <= bite_range_of(kind, body_scale):
 		var atteso := bite_timers[i] + delta
 		if atteso >= touch_period_of(kind):
 			bites[i] = 1

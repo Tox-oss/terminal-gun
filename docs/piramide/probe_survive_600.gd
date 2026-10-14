@@ -15,8 +15,11 @@ extends SceneTree
 ##
 ## - scala 0.00: senza nemici non si puo' morire, DEVE arrivare al tetto 600 s.
 ##   Se non ci arriva, lo strumento e' rotto e nessun numero vale.
-## - scala 1.00: gioco di oggi, 82,03 s sul caso peggiore (misurato).
-##   Il minimo deve riprodurlo al secondo decimale.
+## - scala 1.00: il minimo DEVE riprodurre 44,20 s, che e' il gioco di oggi
+##   rilanciato con questa stessa sonda il 2026-10-14 dopo c171c81. Il vecchio
+##   riferimento di 82,03 s apparteneva a un gioco la cui portata del morso era
+##   un'altra, e usarlo come risposta nota avrebbe fatto sembrare rotta la sonda
+##   quando era vecchio il riferimento.
 ##
 ## ## La trappola dell'ordine (gia' pagata)
 ##
@@ -47,7 +50,9 @@ const RAGGIO := 60.0
 ## Scale: 0.00 riferimento, 0.25/0.30/0.35/0.40 zona grigia (a 300 erano tutte al tetto),
 ## 0.50 e 1.00 gia' misurate. Matrice ridotta per stare in 120 s: 8 scale x 3 semi = 24 sessioni.
 ## Se la corsa supera il timeout, si riduce ulteriormente.
-const SCALE := [0.0, 0.25, 0.30, 0.35, 0.40, 0.50, 1.00]
+const SCALE := [0.0, 0.25, 0.50, 1.00]
+
+const E := preload("res://src/sim/enemy.gd")
 
 const SEMI := [4242, 7311, 20260912]
 
@@ -67,22 +72,32 @@ func _run() -> void:
 	print("PROBE: raggio %.1f m, scena vera 27 ostacoli, arma vera." % RAGGIO)
 	print("PROBE: TMAX=%.0f s. MORTO=caduto prima del tetto, TETTO=sopravvissuto." % TMAX)
 	print("PROBE: scala 0.00 DEVE toccare il tetto (nessun nemico = non si muore).")
-	print("PROBE: scala 1.00 DEVE dare minimo 82.03 s (gioco di oggi, gia' misurato).")
+	print("PROBE: scala 1.00 DEVE dare minimo 44.20 s (gioco di oggi, rilmisurato il 2026-10-14).")
 	print("")
 
 	var risultati := PackedFloat32Array()         # minimo per scala
 	var stati := []                               # "MORTO" o "TETTO" per il minimo
+	var uccisori_scala := []                     # specie dell'ultimo morso, per seme
+	var presenze_scala := []                      # specie a portata ai morsi
+	var morsi_scala := []
 	var riferimento_ok := false
 
 	for si in SCALE.size():
 		var s: float = SCALE[si]
 		var campioni := PackedFloat32Array()
 		var campioni_stato := []
+		var uccisori := []
+		var presenze_somma := {"runner": 0, "grunt": 0, "brute": 0, "boss": 0}
+		var morsi_tot := 0
 
 		for sd in SEMI:
 			var esito := _una_sessione(int(sd), s)
 			campioni.append(esito[0])
 			campioni_stato.append(esito[1])
+			uccisori.append(esito[2])
+			morsi_tot += int(esito[4])
+			for nome in E.KIND_NAMES:
+				presenze_somma[nome] += int(esito[3][nome])
 
 		# ordina per tempo (non cambia lo stato del campione peggiore, solo l'ordine)
 		# ordinamento manuale per tenere i pari seme-stato
@@ -101,9 +116,18 @@ func _run() -> void:
 		var migliore_t: float = campioni[campioni.size() - 1]
 		risultati.append(peggiore_t)
 		stati.append(peggiore_stato)
+		uccisori_scala.append(uccisori)
+		presenze_scala.append(presenze_somma)
+		morsi_scala.append(morsi_tot)
 
 		print("PROBE: RISULTATO scala %.2f | 3 semi: %s | MIN %6.2f s [%s] | MAX %6.2f s"
 			% [s, _lista(campioni, campioni_stato), peggiore_t, peggiore_stato, migliore_t])
+		print("PROBE:   morsi totali %d in tre semi | ultimo morso, per seme: %s"
+			% [morsi_tot, _lista_uccisori(uccisori)])
+		print("PROBE:   specie a portata quando e' avvenuto un morso, somma dei tre semi: %s"
+			% _conta(presenze_somma))
+		print("PROBE:   danno potenziale per specie, somma dei tre semi: %s"
+			% _danno(presenze_somma))
 
 		if is_zero_approx(s):
 			riferimento_ok = (peggiore_stato == "TETTO")
@@ -115,7 +139,7 @@ func _run() -> void:
 				return
 
 		if is_equal_approx(s, 1.0):
-			print("PROBE: scala 1.00 (oggi): minimo %.2f s vs 82.03 s noti." % peggiore_t)
+			print("PROBE: scala 1.00 (oggi): minimo %.2f s vs 44.20 s noti." % peggiore_t)
 
 	print("")
 	print("PROBE: LETTURA FINALE")
@@ -133,6 +157,35 @@ func _run() -> void:
 	print("")
 	print("PROBE: I 600 s dell'utente sono %.2f volte il minimo a scala 1.00 (oggi)."
 		% (600.0 / maxf(risultati[SCALE.size() - 1], 0.001)))
+
+	# m11-ter-quarta: la domanda che chiude l'ipotesi. Non e' chi morde di piu' in
+	# assoluto, e' chi morde quando il giocatore cade: una specie puo' essere la piu'
+	# frequente ai morsi e non essere quella che ha finito la partita.
+	print("")
+	print("PROBE: CHI UCCIDE")
+	for si in SCALE.size():
+		var s: float = SCALE[si]
+		if stati[si] == "TETTO":
+			print("PROBE:   scala %.2f -> nessuna caduta: nessun uccisore da dichiarare." % s)
+			continue
+		var pres: Dictionary = presenze_scala[si]
+		var dominante := "-"
+		var peggiore := -1
+		for k in E.KIND_NAMES:
+			if int(pres[k]) > peggiore:
+				peggiore = int(pres[k])
+				dominante = k
+		var uccisori_ebbene := {}
+		for u in uccisori_scala[si]:
+			uccisori_ebbene[u] = int(uccisori_ebbene.get(u, 0)) + 1
+		var lista := ""
+		for k in E.KIND_NAMES:
+			if int(uccisori_ebbene.get(k, 0)) > 0:
+				if lista != "":
+					lista += ", "
+				lista += "%s %d su 3" % [k, int(uccisori_ebbene[k])]
+		print("PROBE:   scala %.2f -> uccisori: %s | specie piu' presente ai morsi: %s"
+			% [s, lista, dominante])
 	quit(0)
 
 func _lista(campioni: PackedFloat32Array, stati_c: Array) -> String:
@@ -143,7 +196,7 @@ func _lista(campioni: PackedFloat32Array, stati_c: Array) -> String:
 		out += "%.1f s[%s]" % [campioni[i], stati_c[i]]
 	return out
 
-## Ritorna [tempo_float, "MORTO"|"TETTO"]
+## Ritorna [tempo_float, "MORTO"|"TETTO", specie_che_ha_morso_l_ultima, presenze, morsi]
 func _una_sessione(seme: int, scala: float) -> Array:
 	var game := root.get_node_or_null("Game")
 	if game == null:
@@ -179,27 +232,99 @@ func _una_sessione(seme: int, scala: float) -> Array:
 	print("PROBE:   scala %.2f seme %d | nemici %3d | ostacoli %d"
 		% [scala, seme, horde.count, ostacoli.size()])
 
+	# MISURA m11-ter-quarta: chi morde. Il vertice non puo' modificare src/, quindi
+	# l'attribuzione e' osservata e non instrumentata: ad ogni calo di hp leggo chi
+	# era a portata di morso in quell'istante. Dichiarato come inferenza, non come
+	# fatto: se piu' nemici sono in portata nello stesso passo registro TUTTI e non
+	# scelgo, e l'ultimo morso e' attribuito al piu' vicino con la sua distanza.
+	var presenze := {"runner": 0, "grunt": 0, "brute": 0, "boss": 0}
+	var morsi := 0
+	var uccisore := "-"
+	var dist_ultimo := INF
+
 	var t := 0.0
 	var next_report := REPORT_EVERY
+	var hp_prec: float = player.hp
 	while t < TMAX:
 		var direzione := _direzione(horde, player, ostacoli)
 		player.step(DT, Vector3(direzione.x, 0.0, direzione.y))
 		horde.step(DT)
 		t += DT
+
+		if player.hp < hp_prec:
+			morsi += 1
+			var chi := _chi_morde(horde, _flat(player.global_position))
+			for nome in chi["in_portata"]:
+				presenze[nome] += 1
+			uccisore = chi["vicino"]
+			dist_ultimo = chi["distanza"]
+		hp_prec = player.hp
+
 		if t >= next_report:
 			print("PROBE:     | %5.0f s | hp %6.2f | vivi %3d | onda %2d | uccisi %4d"
 				% [t, player.hp, horde.count, horde.wave, horde.kills])
 			next_report += REPORT_EVERY
 		if player.hp <= 0.0:
+			print("PROBE:     MORTO a %.2f s | ultimo morso: %s a distanza %s m | %d morsi in tutto"
+				% [t, uccisore, ("%.2f" % dist_ultimo) if dist_ultimo < INF else "?", morsi])
+			print("PROBE:     a portata durante i morsi: %s"
+				% _conta(presenze))
 			if arena.get_parent() != null:
 				arena.get_parent().remove_child(arena)
 			arena.free()
-			return [t, "MORTO"]
+			return [t, "MORTO", uccisore, presenze, morsi]
 
 	if arena.get_parent() != null:
 		arena.get_parent().remove_child(arena)
 	arena.free()
-	return [t, "TETTO"]
+	return [t, "TETTO", uccisore, presenze, morsi]
+
+
+func _conta(presenze: Dictionary) -> String:
+	var out := ""
+	for k in E.KIND_NAMES:
+		if out != "":
+			out += ", "
+		out += "%s %d" % [k, presenze[k]]
+	return out
+
+
+func _danno(presenze: Dictionary) -> String:
+	var out := ""
+	for k in E.KIND_NAMES:
+		if out != "":
+			out += ", "
+		out += "%s %.2f" % [k, float(presenze[k]) * E.touch_damage_of(E.KIND_NAMES.find(k))]
+	return out
+
+
+func _lista_uccisori(uccisori: Array) -> String:
+	var out := ""
+	for i in uccisori.size():
+		if i > 0:
+			out += " / "
+		out += "%s %s" % [SEMI[i], uccisori[i]]
+	return out
+
+
+## Chi era a portata di morso del giocatore in questo istante, e chi era il piu'
+## vicino. Lettura di horde.kinds / horde.transforms e di bite_range_of, quindi la
+## portata che vede la sonda e' la stessa che usa la simulazione, non una ricostruita.
+func _chi_morde(horde, p: Vector2) -> Dictionary:
+	var ts: PackedVector3Array = horde.transforms
+	var in_portata: Array = []
+	var vicino := "-"
+	var vicino_d := INF
+	for i in horde.count:
+		var k: int = horde.kinds[i]
+		var d := p.distance_to(Vector2(ts[i].x, ts[i].z))
+		if d <= horde.bite_range_of(k):
+			var nome: String = E.KIND_NAMES[E.clamp_kind(k)]
+			in_portata.append(nome)
+			if d < vicino_d:
+				vicino_d = d
+				vicino = nome
+	return {"vicino": vicino, "in_portata": in_portata, "distanza": vicino_d}
 
 func _raggio_max(ostacoli: PackedVector3Array) -> float:
 	var m := 0.0

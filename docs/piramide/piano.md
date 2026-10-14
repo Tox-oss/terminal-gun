@@ -2578,6 +2578,49 @@ allora l'apertura ha un muro che non si aggira e **la leva non è la popolazione
 misurato** e non lo scrivo come fatto: la misura che lo chiude è **quale specie ha ucciso lo
 schivatore**, e la sonda non lo stampa ancora.
 
+### 1.14-quattordicesima **CHI UCCIDE: l'ipotesi del boss era giusta solo a bassa popolazione**
+
+La misura che chiude l'ipotesi di §1.14-dodicesima: ad ogni calo di hp la sonda legge **chi era a
+portata di morso in quell'istante**, usando `horde.kinds` e `horde.bite_range_of`, cioè la stessa
+portata che usa la simulazione e non una ricostruita. Strumento: `probe_survive_600.gd`, che ora
+stampa anche l'attribuzione.
+
+**Entrambi i casi a risposta nota reproducono**: scala 0,00 al tetto a **600,02 s**, scala 1,00 a
+**44,20 s** al centesimo. Il riferimento di 82,03 s è stato tolto dalla sonda: era il numero che ha
+fatto sembrare rotto lo strumento quando era vecchio il riferimento.
+
+**Come si legge, e cosa la misura NON dice.** La presenza a portata **non è il danno subito**: in un
+solo passo più specie possono essere in portata e io registro tutte e non scelgo. Quindi la colonna
+giusta è *danno potenziale disponibile mentre quella specie era a portata*, non *danno subito da
+quella specie*. E l'*uccisore* è un'inferenza: la specie più vicina nell'istante dell'ultimo morso,
+con la distanza stampata accanto.
+
+| scala | nemici | uccisori sui 3 semi | specie più presente ai morsi | danno potenziale per specie |
+|---|---|---|---|---|
+| 0,25 | 6 | **boss 3 su 3** | **boss** | **boss 90,9%** (713,14 su 784,91) |
+| 0,50 | 13 | runner 1, grunt 1, brute 1 | brute | boss 64,2%, brute 28,2% |
+| 1,00 | 25 | brute 2, boss 1 | brute | brute 58,6%, boss 21,4% |
+
+**L'ipotesi era giusta e insieme troppo larga, e va registrata come due fatti separati.**
+
+| affermazione | stato |
+|---|---|
+| «un boss nell'onda di apertura è un muro che non si aggira» | **confermata a 6 nemici: uccide 3 su 3 semi**, e porta il 90,9% del danno potenziale pur essendo uno su sei |
+| «la leva non è la popolazione» | **confermata e rafforzata**: passare da 6 a 25 nemici non cambia l'esito, cambia solo *chi* morde |
+| «è il boss» | **falsata come regola generale**: a 13 e 25 nemici nessuna specie uccide in modo unanime, un uccisore per seme, e il dominante passa al **brute** |
+
+**Perché la cosa cambia la decisione.** A 6 nemici il giocatore cade con **10-11 morsi in tutto**:
+100 hp divisi su una decina di morsi da 13,71 hp del boss sono ~9 hp per morso, e bastano. Tolto il
+boss dall'apertura, i morsi rimasti sono da 1,60 e 2,29 hp: un ordine di grandezza sotto. **Quindi la
+leva è la miscela di specie dell'onda 1, non la sua dimensione** — e `POP_BASE = 6` resta sospeso per
+la ragione detta in §1.14-dodicesima, cioè perché il suo numero di riferimento era troncato.
+
+**Quello che questa misura non chiude, e che va detto prima di decidere.** Levare il boss dall'onda 1
+non basta da solo: alla 121,47 s la partita è all'onda 1, ma la rampa porta a 200 nemici e un boss
+riapparirà comunque. **Non ho misurato** quanto si guadagni davvero con il boss fuori dall'apertura, e
+non scrivo `600 s` come risultato. La misura che lo chiude è la stessa sonda con la miscela
+dell'onda 1 cambiata, e la leva è di `-orda`: `wave_weights`.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

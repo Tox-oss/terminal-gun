@@ -591,6 +591,19 @@ func _process(_delta: float) -> bool:
 		# monta `scenes/arena_main.tscn` come fanno le tre precedenti e non
 		# restituisce il contratto a nessuno.
 		_m11bis_determinismo(h)
+		# L'audio di -gameplay. Va per **ultima** perche' usa il giocatore di
+		# questo file e non tocca la scena vera, ma i montaggi m11-bis non
+		# devono vedere niente di cio' che succede qui: quindi nessuna sezione
+		# dopo questa, e questa non gira dentro nessun montaggio.
+		#
+		# **Nessun `await`**: la sezione non aspetta nessun frame. Il meccanismo
+		# di `player.gd` chiude i suoni da `step()`, e `step()` qui è chiamato a
+		# mano dentro il ciclo, quindi tutto quello che questa sezione misura è
+		# già vero quando la sezione finisce. Non toccare `_process()` per
+		# questo: convertire il test a coroutine è stato un giro di refazione
+		# inutile, e qui non serve.
+		var costo_audio := _audio_usa_e_getta(h)
+		print("gameplay: sezione audio: %d ms" % costo_audio)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -2996,6 +3009,132 @@ func _m11bis_campione() -> Dictionary:
 ## numero: la misura e' gia' stata letta prima.
 func _libera(scena: Node) -> void:
 	scena.queue_free()
+
+# ================================================================================
+# L'audio di -gameplay: il suono esce, e non costa un nodo
+# ================================================================================
+#
+# ## Perche' questa sezione e' qui, e quale porta aveva gia' detto di no
+#
+# Il suono di livello teneva il proprio `AudioStreamPlayer3D` **per tutta la
+# partita**, e a ogni livello il nodo non nasceva: era gia' li'. Poi la prima
+# forma del rimedio ha cambiato la regola in «il nodo nasce quando il suono
+# parte e muore quando finisce», e con quella `tests/test_arena.gd`,
+# `tests/test_gameloop.gd` e `tests/test_ui.gd` sono andati rossi tutti e tre
+# con lo stesso numero che sale di uno (`45 -> 46`, `48 -> 49`, `47 -> 48`):
+# il nodo era nato **durante** la partita, dentro una finestra di misura.
+#
+# Quei tre criteri sono giusti e non si indeboliscono: «aprire il pannello non
+# crea un nodo» e «riempire l'orda a capienza non aggiunge un nodo» dicono una
+# cosa vera, e cioe' che **il gioco non crea nodi mentre gioca**. Il rimedio
+# giusto non e' un nodo che nasce e muore: e' un **pool** di nodi creati una
+# volta sola in `_ready()`.
+#
+# E questa sezione e' il criterio che quella cosa l'avrebbe detto prima, e che
+# sta qui perché la prossima volta la foglia che scrive il codice non debba
+# scoprirlo dalla porta di un'altra.
+
+## La classe dei nodi che suonano, per nome di **classe** e non per nome di
+## nodo: i suoni hanno piu' nomi possibili (`Sfx`, `SfxHurt`, `SfxLevelUp`
+## dalla scena, e quelli che crea `player.gd`) e cercarli per nome di nodo
+## darebbe un numero che non guarda niente. `AudioStreamPlayer3D` non discende
+## da `AudioStreamPlayer`, quindi anche la classe sbagliata darebbe zero.
+const AUDIO_CLASS := "AudioStreamPlayer3D"
+
+## L'asset che il suono di livello deve portare davvero. Si confronta il
+## `resource_path` **del nodo che sta suonando**, non il nome che il codice
+## dice di caricare: un criterio che legge l'intenzione del codice invece della
+## sua opera passa anche con il file sbagliato.
+const SFX_LEVELUP_ASSET := "res://assets/sfx/levelup.wav"
+
+## Quante volte si sale di livello e si prende un colpo dentro la finestra.
+## Quaranta e non uno: con un solo giro il criterio passerebbe anche con un
+## nodo che nasce e muore una volta sola, e il difetto vero e' proprio che il
+## nodo nasce **quando capita**, cioe' molte volte in una partita.
+const SFX_PASSI := 40
+
+func _audio_usa_e_getta(h) -> int:
+	var t0 := Time.get_ticks_msec()
+	_reset(Vector3.ZERO)
+	player.chiudi_suoni()
+	var prog = player.progression
+	var nodi_prima := _conta_nodi(root)
+	var audio_prima := _conta_class(root, AUDIO_CLASS)
+	var emessi_prima: int = int(player.sfx_emessi)
+
+	# ## 1. Il suono esce davvero, e non e' un suono muto
+	prog.add_xp(prog.xp_to_next())
+	h.eq(int(player.sfx_emessi) - emessi_prima, 1,
+		"salire di livello fa partire un suono, e uno solo")
+	var chi_suona := _audio_in_uso(player)
+	h.check(chi_suona.size() > 0,
+		"dopo un livello qualcosa sta suonando davvero: nessun nodo audio e' in uso")
+	h.check(chi_suona.has(SFX_LEVELUP_ASSET),
+		"e fra i suoni in uso c'e' l'asset del livello (in uso: %s)" % ", ".join(PackedStringArray(chi_suona)))
+
+	# ## 2. Il numero di nodi non si muove MAI, e qui e' il criterio vero
+	var nodi_min := nodi_prima
+	var nodi_max := nodi_prima
+	var audio_min := audio_prima
+	var audio_max := audio_prima
+	for i in SFX_PASSI:
+		prog.add_xp(prog.xp_to_next())
+		player.invuln = 0.0
+		player.take_damage(1.0)
+		player.step(DT)
+		var n := _conta_nodi(root)
+		nodi_min = mini(nodi_min, n)
+		nodi_max = maxi(nodi_max, n)
+		var a := _conta_class(root, AUDIO_CLASS)
+		audio_min = mini(audio_min, a)
+		audio_max = maxi(audio_max, a)
+	h.eq(nodi_min, nodi_prima,
+		"il gioco non puo' liberare un nodo nel mezzo di %d suoni" % SFX_PASSI)
+	h.eq(nodi_max, nodi_prima,
+		"il gioco non puo' creare un nodo nel mezzo di %d suoni: e' la ragione per cui test_arena, test_gameloop e test_ui sono andati rossi con 45 -> 46, 48 -> 49 e 47 -> 48"
+			% SFX_PASSI)
+	h.eq(audio_min, audio_prima,
+		"il numero di nodi audio sotto root non scende mentre i suoni girano")
+	h.eq(audio_max, audio_prima,
+		"il numero di nodi audio sotto root non sale mentre i suoni girano")
+
+	# ## 3. E i suoni sono usciti tutti, senza che il numero cresca
+	h.check(int(player.sfx_emessi) - emessi_prima >= SFX_PASSI + 1,
+		"tutti i suoni forzati devono essere usciti: sono partiti %d, ne erano stati forzati %d"
+			% [int(player.sfx_emessi) - emessi_prima, SFX_PASSI + 1])
+	player.chiudi_suoni()
+	h.eq(_conta_nodi(root), nodi_prima,
+		"chiudere i suoni non cambia il numero di nodi: il pool torna com'era, non sparisce")
+
+	print("audio: nodi sotto root %d prima, %d-%d durante %d suoni; nodi audio %d prima, %d-%d durante; suoni emessi %d"
+		% [nodi_prima, nodi_min, nodi_max, SFX_PASSI,
+			audio_prima, audio_min, audio_max,
+			int(player.sfx_emessi) - emessi_prima])
+	return Time.get_ticks_msec() - t0
+
+## Quanti nodi della classe `cls` ci sono sotto `nodo`, ricorsivamente.
+func _conta_class(nodo: Node, cls: String) -> int:
+	var totale := 1 if nodo.is_class(cls) else 0
+	for c in nodo.get_children():
+		totale += _conta_class(c, cls)
+	return totale
+
+## I `resource_path` di tutti i nodi audio **che stanno suonando davvero** sotto
+## `nodo`. Il nodo conta solo se `playing` e' vero: un nodo audio fermo e' un
+## nodo che occupa l'albero senza fare rumore, e un criterio che lo accetterebbe
+## come «suono emesso» e' un criterio che non ha guardato niente.
+##
+## Restituisce **tutti** i suoni in uso e non il primo, perche' mentre il
+## giocatore suona il livello l'arma sta anche sparando: il primo nodo
+## incontrato nell'albero e' spesso `bonk.wav`, e un criterio che guardasse
+## solo quello misurerebbe il suono dell'arma e passerebbe anche con il suono
+## di livello spento.
+func _audio_in_uso(nodo: Node, fuori: PackedStringArray = PackedStringArray()) -> PackedStringArray:
+	if nodo.is_class(AUDIO_CLASS) and bool(nodo.playing):
+		fuori.append(str(nodo.stream.resource_path))
+	for c in nodo.get_children():
+		_audio_in_uso(c, fuori)
+	return fuori
 
 func _ascii(s: String) -> bool:
 	for i in s.length():

@@ -27,6 +27,66 @@ const WEAPON_SCRIPT := preload("res://src/weapons/weapon_base.gd")
 const SFX_HURT := "res://assets/sfx/hurt.wav"
 const SFX_LEVELUP := "res://assets/sfx/levelup.wav"
 
+## ## Il suono di questo file è un **usa e getta**, e `SFX_SICUREZZA` è il numero
+## che lo governa
+##
+## Non è un nodo che vive per sempre: il nodo nasce quando il suono parte e
+## viene liberato quando il suono è finito. Il motivo è **misurato**: l'uscita
+## del motore scriveva `2 ObjectDB instances were leaked at exit` e
+## `1 resources still in use at exit`, e `--verbose` diceva che i due oggetti
+## sono un `AudioStreamPlaybackWAV` e il suo `AudioStreamWAV` di `levelup.wav`.
+## Un `AudioStreamPlayer3D` che ha suonato e non è mai stato liberato tiene il
+## playback registrato nell'`AudioServer`, e alla fine della partita il playback
+## è ancora li dentro.
+##
+## Cosa **non** funziona, misurato, e non viene ritentata qui:
+##   - `stop()` sul nodo ancora in albero: stesse due righe del motore;
+##   - `stop()` dentro `_exit_tree()`: a quel punto il nodo è **gia' fuori
+##     dall'albero** e `stop()` fa un return anticipato su `!is_inside_tree()`;
+##   - `stream = null` dentro `_exit_tree()`: provato, non chiude.
+## Il modo che chiude è **liberare il nodo mentre è ancora in albero**: quando
+## il suono è finito (`finished`) o quando il suo tempo è passato (`step()`).
+##
+## `SFX_SICUREZZA` è quanto tempo il nodo vive **oltre** la lunghezza del
+## suono. Non è un tempo di suono: è la rete per il giorno in cui `finished`
+## non arrivasse. In `--headless` `finished` **arriva** (misurato: 75-82 frame
+## di processo, ~550 ms, per `levelup.wav` che dura 0.500 s), quindi questa rete
+## non scatta li'. Esiste perché `finished` non è un contratto che questo file
+## possa dare per garantito, e un `await finished` che non si risolve
+## bloccherebbe la partita per sempre.
+const SFX_SICUREZZA := 0.35
+## I nomi dei nodi che suonano. Sono i nomi con cui `scenes/player.tscn` li
+## porta gia': il pool li **riusa**, non li duplica, quindi nella scena vera
+## questi tre nomi ci sono una volta sola e il totale dei nodi resta quello di
+## prima. Sono qui e non a lettera spagliata nel codice perche' un nome che
+## cambia e una scena che non lo cambia piu' si vedono solo al primo criterio
+## che li confronta.
+const NOME_SFX_HURT := "SfxHurt"
+const NOME_SFX_LEVELUP := "SfxLevelUp"
+
+## Quanti nodi tiene il pool di ciascun suono. Vedi sotto: uno basta, e la
+## ragione e' `INVULN_AFTER_HIT` e la soglia di `progression.gd`, non l'occhio.
+const SFX_POOL := 1
+
+## ## `SFX_POOL` e' 1 perche' i due suoni non si sovrappongono mai, e il numero
+## non e' scelto a occhio
+##
+## Sono due i modi in cui due suoni dello stesso tipo si sovrappongono:
+##
+##   - **`hurt`**: `take_damage()` mette `INVULN_AFTER_HIT = 0.7 s` a ogni colpo
+##     preso, e `hurt.wav` dura ~0.25 s. Quindi due `hurt` non possono
+##     sovrapporsi: il secondo arriva quando il primo e' gia' finito da 0.45 s.
+##   - **`levelup`**: la soglia di `progression.gd` parte da `XP_BASE = 8.0` e
+##     cresce di livello in livello, quindi due salite di livello sono separate
+##     da almeno otto uccisioni. `levelup.wav` dura 0.500 s: non c'e' una
+##     partita in cui due `levelup` suonano insieme.
+##
+## Quindi un nodo per suono basta, e un nodo in piu' sarebbe un nodo che
+## occupa l'albero per non servire a niente. Il `while` che chiude non c'e':
+## se un domani i due suoni cominciassero a sovrapporsi, il difetto si vede
+## come **un suono che ricomincia** — la semantica che aveva il nodo unico
+## storico — e non come un nodo che manca.
+
 # --- Regolazione del gioco. Sono numeri, non segreti. --------------------------
 
 ## Velocita' di corsa, in m/s.
@@ -119,8 +179,28 @@ var progression
 ## mano, cosi' lo stesso codice serve a entrambi.
 var read_keys := true
 
-var _sfx_hurt: AudioStreamPlayer3D
-var _sfx_levelup: AudioStreamPlayer3D
+## Il **pool** dei nodi che suonano, e le scadenze dei suoi slot.
+##
+## Un `Array` di nodi e una `PackedFloat32Array` di scadenze, per suono: sono i
+## due pezzi di un pool a capienza fissa, e la capienza e' `SFX_POOL`. La
+## scadenza di uno slot e' `0.0` quando lo slot e' **libero**, e i secondi
+## che mancano al `SFX_SICUREZZA` quando e' occupato.
+##
+## Nessuna delle due liste cresce mai: `_suona_usa_e_getta()` **prende** uno
+## slot, non ne crea uno. E' la differenza fra la prima forma di questo
+## meccanismo (il nodo nasceva quando il suono partiva) e questa: la prima ha
+## fatto fallire `tests/test_arena.gd`, `tests/test_gameloop.gd` e
+## `tests/test_ui.gd` con lo stesso numero che saliva di uno, perche' il gioco
+## creava un nodo **durante** la partita.
+var _sfx_hurt: Array[AudioStreamPlayer3D] = []
+var _sfx_hurt_scadenza := PackedFloat32Array()
+var _sfx_levelup: Array[AudioStreamPlayer3D] = []
+var _sfx_levelup_scadenza := PackedFloat32Array()
+## Quanti suoni questo giocatore ha fatto partire, in tutto. Il test ci fa caso
+## per una ragione sola: **un meccanismo che libera il nodo puo' passare anche
+## con un gioco che non suona niente**, quindi questo numero è la prova che il
+## suono è uscito davvero e non è stato soltanto dimenticato.
+var sfx_emessi := 0
 var _camera: Camera3D
 var _cam_basis := Basis.IDENTITY
 ## `died` e' gia' stato emesso per questa vita. Si azzera in `reset_run()` e non
@@ -168,8 +248,10 @@ func _ready() -> void:
 	#
 	## Perche' qui e non in `_enter_tree()` (piano sez. 5.1): la regola dice
 	# `_enter_tree()` per chi ha **figli che leggono il dato nel proprio avvio**.
-	# Qui i figli sono `Model`, `Weapon` e i due `AudioStreamPlayer3D`, e nessuno
-	# dei quattro legge `Game.progression`: l'HUD, che e' l'unico lettore, e' un
+	# Qui i figli sono `Model` e `Weapon`: i due suoni del giocatore sono usa e
+	# getta e nascono solo quando suonano (vedi `SFX_SICUREZZA`), quindi non
+	# sono figli stabili. Nessuno dei due legge `Game.progression`: l'HUD, che
+	# e' l'unico lettore, e' un
 	# fratello del giocatore dentro `scenes/arena_main.tscn` e lo legge da
 	# `_process`, non dal suo `_ready()`. Inoltre l'oggetto non esiste ancora prima
 	# di questa riga: registrarlo in `_enter_tree()` pubblicherebbe `null` e il
@@ -202,8 +284,14 @@ func _ready() -> void:
 	# `player.gd` e `weapon_base.gd` non si preloaded a vicenda.
 	weapon.player = self
 
-	_sfx_hurt = _sound(get_node_or_null("SfxHurt"), SFX_HURT)
-	_sfx_levelup = _sound(get_node_or_null("SfxLevelUp"), SFX_LEVELUP)
+	# I due suoni sono un **pool** di nodi, e i nodi sono quelli che porta
+	# gia' `scenes/player.tscn`: il pool li riusa, non li aggiunge. Il numero
+	# di nodi della scena vera resta quindi quello di prima, e nessun nodo
+	# nasce durante la partita — che e' il difetto che aveva la forma precedente.
+	_sfx_hurt = _costruisci_pool(SFX_HURT, NOME_SFX_HURT)
+	_sfx_hurt_scadenza.resize(_sfx_hurt.size())
+	_sfx_levelup = _costruisci_pool(SFX_LEVELUP, NOME_SFX_LEVELUP)
+	_sfx_levelup_scadenza.resize(_sfx_levelup.size())
 
 ## Disattiva il pilotaggio automatico: da qui in avanti il movimento lo guida
 ## `step(delta, input)`. Lo usa il test, che non ha una tastiera.
@@ -262,6 +350,16 @@ func reset_run() -> void:
 		progression.reset()
 	if weapon != null:
 		weapon.reset()
+	# I due suoni vengono chiusi **alla fine**, e il posto e' dichiarato: uno slot
+	# occupato da un suono della partita che e' appena finita resta occupato se
+	# nessuno lo rimette a zero, e il restart allora riparte con uno slot che non
+	# e' suo. Sta **dopo** `progression.reset()` perche' quella non emette
+	# `leveled_up` e quindi non puo' riaprire uno slot che qui chiudo.
+	#
+	# Non e' `stop()`: e' `chiudi_suoni()`, cioe' il tempo che il suono occupa lo
+	# slot che si rimette a zero. Il suono **finisce di suonare** — non e' un
+	# silenzio — e lo slot torna libero come tornerebbe dopo `finished`.
+	chiudi_suoni()
 
 ## Il restart **completo**: io e -orda, in quest'ordine. Prima il giocatore e poi
 ## l'orda, cosi' nell'istante in cui la partita torna `playing` nessuno e' a zero
@@ -332,6 +430,7 @@ func step(delta: float, input_dir: Vector3 = Vector3.ZERO, dash: bool = false) -
 		_start_dash(input_dir)
 	var wish := world_direction(input_dir)
 	_move(delta, wish)
+	_chiudi_suoni_scaduti(delta)
 	if weapon != null:
 		weapon.step(delta)
 
@@ -434,8 +533,7 @@ func take_damage(amount: float) -> bool:
 		return false
 	hp = maxf(hp - amount, 0.0)
 	invuln = INVULN_AFTER_HIT
-	if _sfx_hurt != null:
-		_sfx_hurt.play()
+	_suona_hurt()
 	hurt.emit(amount, hp)
 	if hp <= 0.0 and not _dead_signalled:
 		_dead_signalled = true
@@ -633,17 +731,130 @@ func _camera_basis() -> Basis:
 	return _cam_basis
 
 func _on_leveled_up(new_level: int) -> void:
-	if _sfx_levelup != null:
-		_sfx_levelup.play()
+	_suona_levelup()
 	leveled_up.emit(new_level)
 
-func _sound(existing, path: String) -> AudioStreamPlayer3D:
-	var node: AudioStreamPlayer3D = existing as AudioStreamPlayer3D
-	if node == null:
-		node = AudioStreamPlayer3D.new()
-		node.name = path.get_file().get_basename()
-		add_child(node)
-	if node.stream == null and ResourceLoader.exists(path):
-		var res = load(path)
-		node.stream = res as AudioStream
-	return node
+## I due suoni e il loro pool. `SFX_SICUREZZA` in testa al file spiega perche'
+## il nodo torna nel pool e cosa non funziona; `SFX_POOL` spiega perche' il
+## pool e' piccolo. Qui c'e' solo il come.
+func _suona_hurt() -> void:
+	_suona_dal_pool(_sfx_hurt, _sfx_hurt_scadenza, SFX_HURT)
+
+func _suona_levelup() -> void:
+	_suona_dal_pool(_sfx_levelup, _sfx_levelup_scadenza, SFX_LEVELUP)
+
+## Il pool di `nome`: `SFX_POOL` nodi, presi dalla scena se ci sono.
+##
+## Un nodo che la scena non porta viene creato qui, in `_ready()`, e solo qui:
+## durante la partita nessun nodo nasce. Il nome dello slot 0 e' il nome della
+## scena (`SfxHurt`, `SfxLevelUp`), quindi nella scena vera il pool riusa i nodi
+## che ci sono gia' e **il totale dei nodi non cambia**; senza scena — porta su
+## uno script solo, o test — lo slot viene creato, che e' una volta sola.
+func _costruisci_pool(path: String, nome: String) -> Array[AudioStreamPlayer3D]:
+	var slots: Array[AudioStreamPlayer3D] = []
+	for i in SFX_POOL:
+		var node := get_node_or_null(nome if i == 0 else nome + str(i)) as AudioStreamPlayer3D
+		if node == null:
+			node = AudioStreamPlayer3D.new()
+			node.name = nome if i == 0 else nome + str(i)
+			add_child(node)
+		if node.stream == null:
+			node.stream = _stream(path)
+		node.finished.connect(_suono_finito.bind(nome, i))
+		slots.append(node)
+	return slots
+
+## Suona prendendo **uno slot** dal pool. Nessun nodo nasce qui: questo e' il
+## punto intero del pool.
+func _suona_dal_pool(pool: Array[AudioStreamPlayer3D], scadenze: PackedFloat32Array, path: String) -> void:
+	if pool.is_empty():
+		return
+	var slot := _prendi_slot(scadenze)
+	if pool[slot].stream == null:
+		# L'asset manca proprio ora: nessun suono, e nessun nodo che occupa
+		# l'albero per un silenzio.
+		scadenze[slot] = 0.0
+		return
+	pool[slot].play()
+	scadenze[slot] = _vita(pool[slot])
+	sfx_emessi += 1
+
+## Quale slot prendere: il primo libero, e se non ce n'e' uno quello **che
+## sta per finire prima**. Il `minimo` e' la scadenza piu' piccola, cioe' il
+## suono con meno vita davanti: riprendere quello e' la semantica che aveva il
+## nodo unico storico, dove un `play()` su un nodo che suona ricomincia.
+##
+## Il ramo «nessuno libero» e' un ramo che **non cresce**: non c'e' un `while`
+## che cerca uno slot e non c'e' un nodo che si crea per farne uno libero. Il
+## pool e' chiuso e questo e' il suo unico modo di cedere.
+func _prendi_slot(scadenze: PackedFloat32Array) -> int:
+	var vicino := -1
+	for i in scadenze.size():
+		if scadenze[i] <= 0.0:
+			return i
+		if vicino < 0 or scadenze[i] < scadenze[vicino]:
+			vicino = i
+	return maxi(vicino, 0)
+
+## Quanto vive uno slot occupato: la lunghezza vera del suono piu' il margone
+## `SFX_SICUREZZA`. Un asset assente dà `SFX_SICUREZZA` e niente di piu'.
+func _vita(node: AudioStreamPlayer3D) -> float:
+	if node.stream == null:
+		return SFX_SICUREZZA
+	return node.stream.get_length() + SFX_SICUREZZA
+
+## `finished`: il suono e' arrivato in fondo, lo slot torna libero. L'identita'
+## e' confrontata perche' il segnale puo' arrivare da uno slot che non e' piu'
+## quello che si crede: chiudere lo slot sbagliato taglierebbe un suono che
+## qualcuno sta ancora ascoltando.
+func _suono_finito(nome: String, slot: int) -> void:
+	_scadenza_di(nome)[slot] = 0.0
+
+## La rete per `finished` che non arriva. Gira da `step()`, cioè **mentre il
+## nodo e' ancora in albero**: e' l'unico momento in cui liberare lo slot chiude
+## il playback, perche' a `_exit_tree()` il nodo e' gia' fuori e `stop()` fa un
+## return anticipato.
+##
+## **Nessuna lista costruita qui**: il ciclo scorre una `PackedFloat32Array`
+## gia' fatta, e un valore è un valore, quindi non viene allocato niente nel
+## passo di simulazione. La versione che costruiva un `[a, b]` a ogni frame
+## era una allocazione per frame e l'ho tolta.
+func _chiudi_suoni_scaduti(delta: float) -> void:
+	_scadi(_sfx_hurt_scadenza, delta)
+	_scadi(_sfx_levelup_scadenza, delta)
+
+func _scadi(scadenze: PackedFloat32Array, delta: float) -> void:
+	for i in scadenze.size():
+		if scadenze[i] <= 0.0:
+			continue
+		scadenze[i] -= delta
+		if scadenze[i] <= 0.0:
+			scadenze[i] = 0.0
+
+## Libera subito **tutti** gli slot dei due pool.
+##
+## Non è un suono che si ferma: è il tempo che il suono occupa lo slot che
+## viene rimesso a zero, quindi il suono **finisce di suonare** e lo slot torna
+## libero come dopo `finished`. E' pubblico perche' il test debba poter mettere
+## il giocatore nella condizione nota «nessuno slot occupato» prima di aprire
+## una finestra di conteggio nodi, ed e' anche quello che `reset_run()` chiude.
+func chiudi_suoni() -> void:
+	_azzera(_sfx_hurt_scadenza)
+	_azzera(_sfx_levelup_scadenza)
+
+func _azzera(scadenze: PackedFloat32Array) -> void:
+	for i in scadenze.size():
+		scadenze[i] = 0.0
+
+## Le scadenze del pool `nome`, in un solo posto: `nome` arriva da un segnale e
+## non puo' essere un riferimento a se' stesso.
+func _scadenza_di(nome: String) -> PackedFloat32Array:
+	return _sfx_hurt_scadenza if nome == NOME_SFX_HURT else _sfx_levelup_scadenza
+
+## L'asset, o `null` se il file non c'e'. Un test non deve morire perche' manca
+## un asset, e un suono che non c'e' non e' un errore da urlare a ogni frame.
+static func _stream(path: String) -> AudioStream:
+	if not ResourceLoader.exists(path):
+		return null
+	var res = load(path)
+	return res as AudioStream

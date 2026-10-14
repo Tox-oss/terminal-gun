@@ -87,6 +87,16 @@ const WALL_PENALTY := 3.0
 ## difetto dello strumento vecchio.
 const CENTRE_PULL := 0.70
 
+## Metri di distacco che lo schivatore vuole tenere da un disco di ostacolo, e la
+## penalita' con cui lo paga se ci finisce dentro. **Questa riga e' il rimedio alla
+## seconda volta che lo strumento misurava se stesso**: il punteggio guardava il muro
+## e i nemici e **ignorava gli ostacoli**, quindi alla consegna del raggio 60 i dischi
+## sono cresciuti da 2,99 a 3,90 m e lo schivatore si e' fatto fermare piu' spesso
+## senza che nessuno lo sapesse. Un punteggio che non vede un ostacolo non puo' dire
+## quanto e' grande un disco.
+const EDGE_OSTACOLO := 2.5
+const OSTACOLO_PENALITA := 4.0
+
 ## I raggi su cui la stessa schivatrice viene misurata, **piu' i due casi a risposta
 ## nota**. L'ordine mette prima il riferimento: se il riferimento passa, gli altri
 ## numeri si possono guardare; se fallisce, gli altri non si guardano.
@@ -206,8 +216,15 @@ func _una_sessione(R: float, seme: int) -> float:
 
 	var t := 0.0
 	var next_report := REPORT_EVERY
+	# Gli ostacoli sono un **dato**, non una parte del raggio: vengono da
+	# `arena.gd` e sono gli stessi per tutti i semi. Li leggo una volta e li passo
+	# allo schivatore, che senza non sta misurando l'arena ma sta misurando quanto
+	# e' bravo a non finire dentro un disco.
+	var ostacoli: PackedVector3Array = game.obstacles
+	print("PROBE:   R %5.1f, ostacoli in contratto: %d, raggio massimo %.2f m"
+		% [R, ostacoli.size(), _raggio_max(ostacoli)])
 	while t < TMAX:
-		var direzione := _direzione(horde, player, R)
+		var direzione := _direzione(horde, player, R, ostacoli)
 		player.step(DT, Vector3(direzione.x, 0.0, direzione.y))
 		horde.step(DT)
 		t += DT
@@ -230,7 +247,7 @@ func _una_sessione(R: float, seme: int) -> float:
 ## Il termine che manca allo strumento vecchio e' il **muro**. inseguire la
 ## lontananza dal nemico spinge verso il bordo, e al bordo non si scappa: e' il
 ## motivo per cui il numero vecchio non era monotono.
-func _direzione(horde, player, R: float) -> Vector2:
+func _direzione(horde, player, R: float, ostacoli: PackedVector3Array) -> Vector2:
 	var p := _flat(player.global_position)
 	var guarda := LOOKAHEAD_S * 13.65
 	var limite := maxf(R - EDGE_SAFE_M, 0.0)
@@ -251,6 +268,17 @@ func _direzione(horde, player, R: float) -> Vector2:
 		if sforo > 0.0:
 			punteggio -= WALL_PENALTY * sforo
 
+		# 2b. gli ostacoli. Il contratto li registra come
+		#     `Vector3(centro_x, RAGGIO, centro_z)`: il raggio sta in `y` e non
+		#     e' un'altezza. Stessa forma del muro, stessa penalita' in metri, e
+		#     quindi le due cose si sommano e si confrontano.
+		for k in ostacoli.size():
+			var c := Vector2(ostacoli[k].x, ostacoli[k].z)
+			var rg: float = ostacoli[k].y
+			var dentro := c.distance_to(q) - rg - EDGE_OSTACOLO
+			if dentro < 0.0:
+				punteggio -= OSTACOLO_PENALITA * (-dentro)
+
 		# 3. il ritorno al centro, che serve a sciogliere l'angolo: quando e' gia'
 		#    oltre la frazione dichiarata, ogni metro guadagnato verso il centro
 		#    vale meta' metro di punteggio. Il fattore 0,5 e' dichiarato perche' il
@@ -262,6 +290,14 @@ func _direzione(horde, player, R: float) -> Vector2:
 			miglior_punteggio = punteggio
 			meglio = d
 	return meglio
+
+## Il disco di ostacolo piu' grosso, per stamparlo. Il raggio sta in `y` e non e'
+## un'altezza: e' la stessa forma del contratto, letta al contrario.
+func _raggio_max(ostacoli: PackedVector3Array) -> float:
+	var m := 0.0
+	for k in ostacoli.size():
+		m = maxf(m, ostacoli[k].y)
+	return m
 
 ## Distanza dal nemico piu' vicino: scansione lineare sul record, non sulla griglia.
 ## Sono 200 nemici e la sonda gira fino a 43 000 volte: la griglia costerebbe di

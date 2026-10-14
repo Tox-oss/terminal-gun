@@ -2249,20 +2249,40 @@ raggi con uno schivatore che si chiudeva in angolo; questa e' uno schivatore che
 ostacoli. Due volte lo stesso errore, in due forme diverse, e in entrambe la cosa che l'aveva
 scoperto era una riga di codice che avevo scritto io.
 
-**Che cosa resta vero, e che cosa va sospeso.**
+**La misura che scioglie il nodo, fatta dopo:** ho reso lo schivatore **cieco agli ostacoli
+diventa vedente**, aggiungendo al punteggio la stessa penalità del muro per i 27 dischi, con
+`EDGE_OSTACOLO = 2.5 m` e `OSTACOLO_PENALITA = 4.0` dichiarati. Il riferimento a 12 m resta la prova
+che lo strumento è in piedi: **morto al 24,02 s**.
+
+| R | prima (cieco agli ostacoli) | **dopo (vedente)** | fattore sul passo prima |
+|---|---|---|---|
+| 12 m (riferimento) | 22,25 s | **24,02 s** | — |
+| 46 m | 106,20 s | **75,25 s** | 3,13 |
+| **60 m (consegna)** | 79,23 s | **82,03 s** | **1,09** |
+| 75 m | 67,47 s | **123,13 s** | **1,50** |
+
+**La tabella torna monotona, e il ginocchio non è dove l'avevo scritto.** Il passo più grosso non è
+46 → 60 (**1,09**, quasi nullo) ma **60 → 75** (**1,50**). Quindi:
 
 | fatto | stato |
 |---|---|
 | i criteri di m10 reggono a 60 m: **0** nemici dentro un ostacolo, campo ricostruito **0** volte, **0/4800** spawn dentro un disco | **vero, misurato** |
-| `node_count` **45** con tetto 120, costo per passo 2,741 ms | **vero, misurato** |
-| il gioco consegnato e' **migliore** di prima per lo schivatore: **79,23 s** contro i **55,33 s** di prima | **vero, ma per il fattore sbagliato** |
-| **il ginocchio e' a 60 m** | **SOSPESO**: la tabella si e' invertita dopo la consegna e non ho ancora una misura che separi raggio e ostacoli |
-| **600 s sono da 5,65 volte** il caso peggiore al raggio consegnato | **vero**, e il divario e' **minore** di quando l'ho scritto |
+| `node_count` **45** con tetto 120, costo per passo **2,741 ms** | **vero, misurato** |
+| **una mappa piu' grande aiuta, e aiuta monotonamente** | **vero, e adesso con uno strumento che vede gli ostacoli** |
+| **il ginocchio e' a 60 m** | **FALSO**: il passo forte e' 60 → 75, fattore **1,50** |
+| **60 m e' il raggio giusto** | **non dimostrato**: la misura dice che **75 m e' migliore** (123,13 s contro 82,03 s) |
+| **600 s sono da 7,97 volte** il caso peggiore al raggio consegnato | **vero** |
 
-**La misura che scioglie il nodo, e non l'ho ancora fatta:** tenere gli ostacoli **costanti** e
-variare solo il raggio, poi tenerli **scalati** e variare solo il raggio. Due righe, due numeri, e
-si sa quale delle due leve pesa quanto. Finche' non esiste, la scelta fra 46 e 60 **non è
-giustificata**, e nel piano resta scritto che **non lo è**.
+**E la cosa che tiene insieme tutto, e che resta la più importante:** anche al raggio **75**, che è
+**1,63 volte** il consegnato, il caso peggiore **muore a 123,13 s**, e i 600 s sono da **4,9 volte**
+tanto. Tutte le morti restano **sull'onda 1** con 25 nemici. Quindi **la mappa non e' il vincolo**:
+e' una delle due leve, e non e' quella che chiude i 600 secondi.
+
+**Quello che va scritto senza addolcirlo:** ho consegnato un raggio giustificato da una tabella che
+poi si e' rivelata sbagliata due volte, perche' lo strumento non vedeva il muro e poi non vedeva gli
+ostacoli. La consegna **non è un danno** — tutti i criteri di fisica reggono e il gioco e' migliore di
+prima — ma **la giustificazione non c'e' piu'**, e nel piano resta scritto che non c'e'. Il prossimo
+numero di raggio non si sceglie con quella tabella.
 
 ### Le onde della milestone 3
 

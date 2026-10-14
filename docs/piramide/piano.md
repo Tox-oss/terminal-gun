@@ -819,6 +819,46 @@ criterio che non può fallire non è un criterio.**
 
 `GATE: 8/8` misurato dal vertice dopo il lavoro. `PERM: 15/15`.
 
+### Il leak chiuso alla fonte: `19e4d07`, e la frase di sopra va aggiornata
+
+Il 2026-10-15 `GATE: 5/8` e il rimedio è stato riscritto. **La forma che chiudeva il leak aveva un
+costo che nessuno del gruppo vedeva**, e la misura l'ha fatto vedere al vertice.
+
+**Il prima.** `player.gd` creava un `AudioStreamPlayer3D` per suono e lo liberava a `finished`. Il
+leak spariva, `test_ui` passava, e il gioco **nasceva un nodo a ogni suono**. Tre porte sono andate
+rosse insieme, tutte per un nodo in più: `node_count 45 -> 46` in `test_arena`, `48 -> 49` in
+`test_gameloop`, `47 -> 48` in `test_ui`. **Nessuno dei tre criteri aveva torto**: non era il pannello
+che creava nodi e non era l'orda, era il suono nato dentro la finestra di misura.
+
+| quello che poteva succedere | quello che è successo |
+|---|---|
+| indebolire i tre criteri per far passare il numero | **vietato**: tre file di altre due foglie, non toccati |
+| dire che la forma era giusta | **non lo era**, e il progetto l'ha detto prima che lo facessi |
+
+**Il dopo, e la misura che lo chiude.** Pool a capienza fissa, `SFX_POOL = 1` slot per suono, costruito
+in `_ready()`; suonare **prende** uno slot e non crea un nodo. I nodi sono **quelli che
+`scenes/player.tscn` aveva già**: il pool li riusa, quindi **`45` resta `45`**, `48 -> 48`,
+`47 -> 47`, e i tre file non si aprono.
+
+**La prova che conta è fuori dal gate:**
+
+```
+$ godot --headless --path . --quit-after 300
+```
+
+**Uscita pulita**: nessun `ObjectDB instances were leaked`, nessuna `resources still in use`. Il leak
+di `levelup.wav` è chiuso **alla fonte**, e questa è la misura che sostituisce quella che il test
+poteva dare.
+
+**Quindi la frase «il verde valeva meno di quanto sembrava» era vera fino a ieri e adesso è falsa.**
+Restano due cose, dichiarate: la rete di scarico in `tests/test_ui.gd` **non è ancora toglibile**,
+perché copre un artefatto del banco di prova (l'ultimo livello sale e la scena muore nello stesso
+frame, quindi non passa nessun mix) e non un difetto del gioco; e il **gemello `bonk.wav`**
+(`src/weapons/weapon_base.gd:194`) è ancora un nodo fisso, oggi innocuo perché non crea nodi durante
+la partita, ma **non è stato misurato**.
+
+`GATE: 8/8` · `PERM: 15/15`.
+
 ### Il debito del leak, chiuso come **debito** e non come rimedio
 
 **Decisione dell'utente il 2026-10-13: «debito».** Perché il leak è un messaggio **all'uscita**,

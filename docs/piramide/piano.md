@@ -2397,6 +2397,59 @@ forma** la congelo prima dell'onda, come la superficie di m3, m6 e m10. **Ma le 
 possono più lanciare** (§1.14-ottava: quota dell'account), quindi questa voce **resta aperta** e
 non è un lavoro che il vertice possa fare da solo: `src/sim/**` e `src/render/**` non sono suoi.
 
+**La forma esatta, che `-orda` ha ricavata e che chiude la discussione.** La banda **non è un
+numero che sfugge**: è esattamente
+
+```
+banda(k) = (SIZE_FACTOR - 1) * RADIUS[kind]  =  2,4 * RADIUS[kind]
+```
+
+| specie | `RADIUS` | banda di oggi |
+|---|---|---|
+| runner | 0,45 m | **1,08 m** |
+| grunt | 0,60 m | **1,44 m** |
+| brute | 1,00 m | **2,40 m** |
+| boss | 1,90 m | **4,56 m** |
+
+Quindi **chiuderla non richiede nessun numero nuovo**: richiede che la simulazione applichi **lo
+stesso** fattore che il renderer usa per disegnare. E **il coefficiente non è libero**:
+`corpo_giocatore` **è già** `TOUCH_REACH = 0.45`, perché il criterio n. 2 di m8 asserisce che la
+taglia misurata sulla scena vera è **uguale** a `TOUCH_REACH`. Quindi basta
+
+```
+morse_entro(k) = SIZE_FACTOR * RADIUS[kind] + TOUCH_REACH
+```
+
+e la banda diventa **zero per costruzione**, non per taratura. **Non serve nessun fattore «in attesa
+di misura»**: metterne uno sarebbe mettere un numero a caso, che è la cosa che questo progetto vieta.
+
+**Quello che va misurato è un'altra cosa, e non è il coefficiente: è la difficoltà.** Il morso del
+boss passa da **2,35 m a 6,91 m** e i morsi offerti salgono parecchio. Sono due misure diverse, e la
+sonda serve per la seconda.
+
+#### Il terzo raggio, che nessuno aveva contato
+
+`-orda` ne ha trovato uno che non era nel mio conto: **`src/weapons/projectile_pool.gd:89`,
+`const ENEMY_RADIUS := 0.55`**. Un raggio nemico scritto a mano, in un file di `-gameplay`. Quindi il
+difetto che l'utente ha segnalato **non è solo dei morsi**: un proiettile colpisce un corpo che
+vede a **1,53-6,46 m** con un raggio di **0,55 m**, quindi anche dall'altra parte il colpo arriva da
+lontano. **Tre proprietari, un concetto solo**: `RADIUS[kind]` (collisione, `-orda`),
+`SIZE_FACTOR` (calibrazione visiva, `-arena`), `ENEMY_RADIUS` (mira del proiettile, `-gameplay`).
+
+#### Le due decisioni del vertice, prese il 2026-10-14
+
+| decisione | cosa | perché |
+|---|---|---|
+| **`SIZE_FACTOR` scende sul contratto** come `Game.enemy_body_scale`, con `-arena` che la registra in `_enter_tree()` e `-orda` che la legge | segue **esattamente** il precedente di `arena_radius`, che è già in quel file | senza il canale la simulazione dovrebbe **copiare** il numero di un'altra foglia, e una copia mente |
+| **`SIZE_FACTOR` resta di `-arena`** e il contratto non lo «corregge» a 1 | il punto 4 lo autorizza **esplicitamente**: il fattore di calibrazione esiste perché si possano riscalare tutti i corpi **senza toccare la simulazione** | portarlo a 1 **violerebbe** una superficie congelata di proposito e perderebbe la leggibilità di m8 |
+| **il punto 1 del contratto è stato emendato** | diceva *«non è la distanza di morso»*, ed è quella clausola a produrre il difetto | la causa era **mia**, del 13, e la correggo perché è nel mio file |
+
+**Stato della soluzione, senza addolcirlo:** il rimedio è **una riga di formula** in
+`src/sim/enemy.gd` e la banda va a **0,0000 per tutte e quattro le specie, per costruzione**. Ma
+**non è ancora scritta**, perché le foglie in questa sessione hanno avuto `shell` negato e non
+potevano verificare: una riga non eseguita è una riga che non esiste. E il **terzo raggio**
+(`ENEMY_RADIUS`) è ancora lì, quindi metà del difetto — il lato dei proiettili — **resta aperto**.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

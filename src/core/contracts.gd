@@ -122,6 +122,40 @@ var horde: Node
 ## verifica che tutte le copie **esistenti** dicano lo stesso numero.
 var arena_radius: float = 60.0
 
+## ## m11, 2026-10-14: il fattore di calibrazione del corpo entra nel contratto.
+##
+## **Il problema, e la sua forma esatta.** La banda di sovrapposizione a vuoto non e' un numero
+## che sfugge: e' esattamente `(SIZE_FACTOR - 1) * RADIUS[kind]`, cioe' **2,4 volte `RADIUS[kind]`**
+## — 1,08 m sul runner, 1,44 sul grunt, 2,40 sul brute, **4,56 sul boss**, e cresce con la specie.
+## Quindi **chiuderla non richiede nessun numero nuovo**: richiede che la simulazione applichi **lo
+## stesso** fattore che il renderer usa per disegnare. E il coefficiente **non e' libero**:
+## `corpo_giocatore` e' gia' `TOUCH_REACH = 0.45`, perche' il criterio n. 2 di m8 asserisce che la
+## taglia misurata sulla scena vera e' **uguale** a `TOUCH_REACH`. Quindi
+## `morse_entro(k) = SIZE_FACTOR * RADIUS[k] + TOUCH_REACH` e basta, e la banda diventa **zero per
+## costruzione**, non per taratura.
+##
+## **Perche' allora questo numero entra qui.** `SIZE_FACTOR` e' dichiarato in
+## `src/render/horde_renderer.gd`, che e' di `-arena`, e il punto 4 sopra lo autorizza
+## esplicitamente. Ma **senza questo canale non si puo' derivare niente**: la simulazione non sa
+## quanto e' grande il corpo che si vede, quindi per morre alla distanza giusta dovrebbe
+## **copiare** il numero di un'altra foglia, e una copia mente — che e' il difetto delle sei copie
+## di m9, gia' pagato una volta.
+##
+## **La forma segue il precedente di `arena_radius`**, che e' gia' in questo file: la **fonte** e'
+## `src/render/arena.gd`, che la registra nel proprio `_enter_tree()`; il contratto ne espone il
+## valore; **`-orda` e `-ui` lo leggono** e non lo possiedono. Nessuna copia, nessun fallback
+## silenzioso, e chi lo registra e' `-arena`.
+var enemy_body_scale: float = 3.4
+
+## **Terzo raggio scritto a mano, e va chiuso con gli altri due.** `-orda` mi ha segnalato
+## `src/weapons/projectile_pool.gd:89`, `const ENEMY_RADIUS := 0.55`: un raggio nemico in un file
+## di `-gameplay`, cioe' un **terzo** proprietario dello stesso concetto. Il difetto che l'utente ha
+## segnalato non e' solo dei morsi: e' che **un proiettile colpisce un corpo 1,53-6,46 m con un
+## raggio di 0,55 m**, quindi anche dall'altra parte il colpo arriva da lontano. La richiesta
+## dell'utente e' *«le dimensioni dell'hitbox combacino con le grandezze mie e dei nemici»*, e
+## quella comprende **entrambi** i lati. Finche' quel `0.55` non deriva dalla stessa taglia, il
+## difetto e' spostato e non chiuso.
+
 ## -arena (m10). Gli ostacoli del mondo: **dischi sul piano XZ**.
 ##
 ##     un elemento = Vector3(centro_x, RAGGIO, centro_z)
@@ -335,8 +369,23 @@ func verify_m2_surface() -> Array[String]:
 # Semantica, in cinque punti. Ogni altro comportamento resta di -orda e di -arena:
 #
 #   1. `radii[i]` e' il **raggio del corpo** del nemico `i`, in metri, preso da
-#      `RADIUS[kind]`. Non e' la distanza di morso e non e' un raggio di
-#      collisione generico: e' la taglia che devi **vedere**;
+#      `RADIUS[kind]`. Non e' un raggio di collisione generico: e' la taglia che
+#      devi **vedere**;
+#   1b. **EMENDATO 2026-10-14, per la segnalazione dell'utente.** La versione
+#      precedente di questo punto diceva anche *«non e' la distanza di morso»*, e
+#      **quella clausola e' la causa del difetto segnalato**: separando la
+#      taglia che si vede dalla taglia che morde, un nemico puo' stare **dentro
+#      il giocatore** senza mordere. Misurato: col `SIZE_FACTOR = 3.4` la banda di
+#      sovrapposizione a vuoto e' **1,08 m** sul runner, **1,44** sul grunt, **2,40**
+#      sul brute e **4,56 m sul boss**, e la banda **cresce con la specie**, che e'
+#      l'opposto di quello che serve. Il piano e' in sez. 1.14-nona.
+#      **Ora la regola e' l'inverso, ed e' strutturale:** il morso deve cadere
+#      **non piu' tardi** del contatto visibile, quindi
+#          morse_entro(k) >= taglia_disegnata(k) + taglia_disegnata_giocatore
+#      e la banda di sovrapposizione a vuoto deve essere **zero per ogni
+#      specie**. Non e' una soglia da tarare: e' un'identita' che si ottiene
+#      **derivando la portata del morso dalla taglia disegnata**, cosi' il numero
+#      che si vede e quello che morde non possono divergere per costruzione.
 #   2. `radii.size() == horde.count`, allineata a `transforms`, `colors` e
 #      `kinds`: l'indice `i` e' lo stesso nemico in tutti e quattro gli array.
 #      Un array parallelo che non allinea e' il difetto che `tests/test_orda.gd`

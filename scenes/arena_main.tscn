@@ -88,29 +88,34 @@ transform = Transform3D(0.825336, -0.363849, -0.431815, 0, 0.764842, -0.644218, 
 light_color = Color(1, 0.964706, 0.890196, 1)
 light_energy = 1.05
 shadow_enabled = true
-; ## LE OMBRE: 90 -> 120, il debito lasciato aperto da m9 (chiuso qui da -arena)
+; ## LE OMBRE: 90 -> 120 -> 148, il debito lasciato aperto da m9 e poi
+; ## ricalcolato da m11 quando il raggio e' passato da 46 m a 60 m
 ;
 ; `directional_shadow_max_distance` e' la distanza **dalla camera** oltre la quale
-; le ombre non sono piu' disegnate. Il valore di prima era **90** e l'arena ha
+; le ombre non sono piu' disegnate. Il valore di prima era **90** e l'arena aveva
 ; **92 m di diametro**, quindi la meta' piu' lontana del campo di gioco era
 ; letteralmente senza ombra: il difetto non si vedeva perche' la scena si
-; guardava al centro.
+; guardava al centro. m9 l'aveva portato a 120 con l'arena a 46 m.
 ;
 ; Il numero non e' scelto, e' **derivato dalla camera vera**
-; (`src/render/arena_camera.gd`): la camera sta a `anchor + (0, 34, 24)` e
-; l'ancora e' tagliata a `ARENA_RADIUS - EDGE_MARGIN = 40 m` dal centro. Il punto
+; (`src/render/arena_camera.gd`): la camera sta a `anchor + (0, HEIGHT, BACK)` e
+; l'ancora e' tagliata a `ARENA_RADIUS - EDGE_MARGIN = 54 m` dal centro. Il punto
 ; piu' lontano e' quello del bordo diametralmente opposto all'ancora:
 ;
-;     orizzontale  64 m (ancora a 40 m dalla parte della camera)
-;                 + 46 m (dal centro al bordo opposto)  = 110 m
+;     orizzontale  78 m (ancora a 54 m dalla parte della camera)
+;                 + 60 m (dal centro al bordo opposto)  = 138 m
 ;     verticale   34 m
-;     distanza    sqrt(110^2 + 34^2) = 115,1 m
+;     distanza    sqrt(138^2 + 34^2) = 142,1 m     (era 115,1 m a 46 m)
 ;
-; 90 tagliava tutto cio' che sta oltre 90 m dalla camera, cioe' meta' arena.
-; **120** copre il caso peggiore con ~4% di margine dichiarato. Non e' un numero
-; estetico: e' il massimo che la camera vera puo' raggiungere, piu' un margine
-; piccolo e scritto. `tests/test_arena.gd` lo rilegge e lo confronta.
-directional_shadow_max_distance = 120.0
+; 120 tagliava tutto cio' che sta oltre 120 m dalla camera, cioe' **meta' arena**,
+; esattamente il difetto che il numero di prima aveva. **148** copre il caso
+; peggiore con lo stesso ~4% di margine dichiarato che aveva il 120 (148/142,1 =
+; 1,041, contro 120/115,1 = 1,042): non e' un numero estetico e non e' il 120
+; moltiplicato per 60/46, e' il massimo che la camera vera puo' raggiungere, piu'
+; un margine piccolo e scritto. `tests/test_arena.gd` lo rilegge e lo confronta,
+; e dichiara anche il **tetto**: `SHADOW_MARGIN = 1,25` volte il minimo
+; necessario, perche' un tetto che regge anche 10 km non dice niente.
+directional_shadow_max_distance = 148.0
 
 [node name="Ground" type="Node3D" parent="."]
 script = ExtResource("2_ground")

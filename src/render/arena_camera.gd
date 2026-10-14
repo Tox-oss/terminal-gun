@@ -32,12 +32,13 @@ const ARENA_FLOOR := 0.0
 ## legge `Game.arena_radius`, e quel valore lo scrive `src/render/arena.gd`, che
 ## e' la **fonte unica** (piano 1.12-bis, copia 1 di 6).
 ##
-## Perche' il fallback vale 46.0 e non 28.0: un fallback che dicesse il numero
-## vecchio mentirebbe proprio nel caso in cui nessuno lo guarda, cioe' quando
-## l'arena non e' ancora registrata, e la camera taglierebbe il bersaglio a 28 m
-## su un'arena di 46. Il numero non e' qui scelto: e' quello che la sonda
-## `docs/piramide/probe_arena_density.gd` ha prodotto, e la tabella con il motivo
-## e' scritta accanto alla fonte, in `src/render/arena.gd`.
+## Perche' il fallback vale 60.0 e non il numero vecchio: un fallback che
+## dicesse il numero sostituito mentirebbe proprio nel caso in cui nessuno lo
+## guarda, cioe' quando l'arena non e' ancora registrata, e la camera taglierebbe
+## il bersaglio a 46 m su un'arena di 60. Il numero non e' qui scelto: e' quello
+## che la sonda `docs/piramide/probe_survive.gd` ha prodotto (piano 1.14-quinque,
+## fattore 2,65 sul caso peggiore fra 46 e 60 m, ginocchio a 60 m), e la tabella
+## con il motivo e' scritta accanto alla fonte, in `src/render/arena.gd`.
 ##
 ## ## Perche' non puo' DIVERGERE, che e' il punto del criterio n. 2
 ##
@@ -46,7 +47,7 @@ const ARENA_FLOOR := 0.0
 ## confronta con la fonte: se qualcuno la cambia da sola, la porta va rossa con
 ## i due numeri nel messaggio. Un fallback che puo' divergere e' una sesta
 ## copia, ed una sesta copia mente alla prima riga cambiata.
-const FALLBACK_RADIUS := 46.0
+const FALLBACK_RADIUS := 60.0
 
 var _contract_cache: Node = null
 var _placed: bool = false

@@ -10,12 +10,15 @@ extends SceneTree
 ##      chiamati a mano dal test arrivano al doppio, con la semantica giusta
 ##      (indice, `-1` = nessun bersaglio, `true` = ucciso);
 ##   1. il player si muove di un delta noto con un input noto, e resta clampato
-##      dentro `Game.arena_radius`. **m9**: il raggio non e' piu' 28 m ma 46, e
-##      «non uscire» non basta piu' come prova: su un disco 2,7 volte piu' grande
-##      la sezione dice anche **dove** il muro ferma il giocatore — a 45,2 m dal
-##      centro sull'asse, sugli stessi 45,2 m in diagonale, con `x` e `z` entrambi
-##      a 31,97 m. Un clamp **quadrato** si tradirebbe li' (arriverebbe a 63,9 m,
-##      cioe' 17,9 m oltre il muro);
+##      dentro `Game.arena_radius`. **m9**: il raggio era 28 m e il 2026-10-14 il
+##      vertice l'ha portato a **60 m** (da 46: il ginocchio della curva di
+##      `docs/piramide/probe_survive.gd`, caso peggiore 55,33 s -> 146,72 s, fattore
+##      2,65). «non uscire» non basta piu' come prova: su un disco 4,6 volte piu'
+##      grande in area la sezione dice anche **dove** il muro ferma il giocatore —
+##      a 59,2 m dal centro sull'asse (60,0 meno `ARENA_MARGIN` 0,8), sugli stessi
+##      59,2 m in diagonale, con `x` e `z` entrambi a 41,86 m. Un clamp
+##      **quadrato** si tradirebbe li' (arriverebbe a 83,72 m, cioe' 23,72 m oltre
+##      il muro);
 ##   2. l'arma spara da sola: entro 60 frame c'e' un proiettile in volo, e la
 ##      sua direzione e' entro 5 gradi dalla direzione del nemico piu' vicino;
 ##   3. un proiettile che attraversa un nemico gli applica il danno **una e una
@@ -63,13 +66,14 @@ extends SceneTree
 ##      giocatore sulla scena vera — `hp` torna a `max_hp`, l'onda torna a 1,
 ##      nessun nodo duplicato, e **un passo di simulazione non rilegge
 ##      `game_over`**. E il giocatore può morire di nuovo dopo il restart.
-##  16. **m9, criterio n. 1**: il raggio dell'arena è **46 m** e quel numero è
-##      un **letterale scritto qui** (`RAGGIO_ARENA`), non letto dalla fonte: «il
-##      raggio vale 46 m» è un perno e un perno può esistere solo scritto. Il
-##      criterio opposto — le copie del raggio non divergono fra loro — sta in
-##      `tests/test_arena.gd`, che è di `-arena`: li' si confrontano le copie e
-##      non si sa se il numero sia quello giusto. Le due domande non si dicono, e
-##      per questo stanno in due file.
+##  16. **m9, criterio n. 1**: il raggio dell'arena è **60 m** e quel numero è
+##      un **letterale scritto qui** (`RAGGIO_ARENA`), cioè una **copia
+##      dichiarata** della fonte unica `src/core/contracts.gd:arena_radius`
+##      (60.0, riga 116), non una lettura: «il raggio vale 60 m» è un perno e un
+##      perno può esistere solo scritto. Il criterio opposto — le copie del raggio
+##      non divergono fra loro — sta in `tests/test_arena.gd`, che è di `-arena`:
+##      li' si confrontano le copie e non si sa se il numero sia quello giusto. Le
+##      due domande non si dicono, e per questo stanno in due file.
 ##  17. **m10, criterio n. 6**, che è **un criterio solo con due metà**: il
 ##      giocatore è **solido** e i proiettili **passano**. Le due metà si
 ##      provano per conto separato e sullo **stesso disco**, perché il progetto
@@ -140,29 +144,67 @@ const BOSS_RESIST := 0.90
 ## su chi muore per primo.
 const TOUGH := 100000.0
 
-# --- m9: il raggio dell'arena, scritto qui e non letto dalla fonte ----------------
+# --- m9: il raggio dell'arena, scritto qui e come copia dichiarata -------------
 #
-# Il 46 e' un **letterale**, e resta un letterale per un motivo preciso: «il raggio
-# dell'arena vale 46 m» e' un **perno**. Se lo leggessi dal contratto — o da
+# ## Che numero e' questo, e di chi e'
+#
+# `RAGGIO_ARENA` e' una **copia dichiarata** di `src/core/contracts.gd:116`
+# (`var arena_radius: float = 60.0`), che a sua volta e' il default della fonte
+# unica `src/render/arena.gd:ARENA_RADIUS` (60.0), registrato nel proprio
+# `_enter_tree()`. Non e' un terzo proprietario: e' il numero con cui il perno
+# confronta quello che il contratto consegna a runtime.
+#
+# Il 60 e' un **letterale**, e resta un letterale per un motivo preciso: «il raggio
+# dell'arena vale 60 m» e' un **perno**. Se lo leggessi dal contratto — o da
 # `src/render/arena.gd`, che e' la copia che vince — questa asserzione non
 # potrebbe piu' fallire: qualcuno cambierebbe il numero, il test lo leggerebbe
 # junto e passerebbe insieme a lui. Un perno si puo' fare solo con un valore
-# scritto.
+# scritto (piano §1.12-bis). Il tipo della prova **non cambia**: resta un numero
+# fisso con cui confrontare, non una lettura che segue il valore.
 #
 # Il criterio **opposto** — «le copie del raggio non divergono fra loro» — non e'
 # questo, e non puo' essere questo: sta in `tests/test_arena.gd`, che e' di
 # `-arena`, perche' li' si confrontano le copie e quel file non ha modo di sapere
 # se il numero che confronta e' quello giusto. Sono due domande diverse, con due
 # file diversi che possono dare due risposte diverse, ed e' per questo che qui il
-# numero resta scritto a mano invece di essere letto (piano §1.12-bis).
+# numero resta scritto a mano invece di essere letto.
 #
-## Il **perche'** 46 e non 40 e' la tabella di densita' di piano §1.12: a 200
-## nemici il disco libero piu' grande passa da 9,5 m (R=28) a 19,1 m (R=46),
-# mentre la percentuale di area libera resta quasi quella (85,2% -> 94,6%). Il
-## guadagno e' lineare nel raggio e non nell'area, perche' l'orda forma un
-## anello di ~9,4 m intorno al giocatore e il muro e' la sola cosa che si
-# allontana: e il 40, con 3,5 m di anello in piu', non compra niente.
-const RAGGIO_ARENA := 46.0
+# ## Il cambio del 2026-10-14, e cosa vuol dire per una copia
+#
+# Il vertice ha portato il raggio da **46,0 a 60,0 m** senza avvisare nessuno: le
+# foglie hanno scoperto il numero dal gate, e due copie erano ancora a 46,0. Il
+# numero nuovo e' giusto — `docs/piramide/probe_survive.gd`, piano
+# §1.14-quinque: il caso peggiore di uno schivatore passa da 55,33 s a 146,72 s
+# (fattore 2,65), e a 75 m sarebbe 156,33 s (fattore 1,07), quindi il ginocchio
+# e' a 60. Ma il difetto non e' il numero: e' che **una copia puo' invecchiare**,
+# e questa e' una copia. Percio' la sequenza che vale da qui in poi e' quella
+# dichiarata sopra: il vertice cambia la fonte, **avvisa**, e le foglie rispecchiano.
+# Il FAIL della porta e' l'avviso che non c'e' stato, e questa riga e' l'unica
+# cosa che puo' accorgersene.
+#
+# ## I numeri che da 60,0 derivano, ricalcolati tutti insieme
+#
+#   muro sull'asse             60,0 - 0,8 (`ARENA_MARGIN`)  = 59,20 m
+#   `x` e `z` in diagonale     59,20 / sqrt(2)              = 41,86 m
+#   clamp quadrato             59,20 * sqrt(2)              = 83,72 m
+#     ... oltre il muro                                       23,72 m
+#   tempo a 7 m/s              59,20 / 7                    =  8,46 s
+#   area rispetto a R=28       (60/28)^2 = 6648/2463        =  4,6 volte
+#   finestra di 2 m sul raggio 2/28 = 7,1%   2/60 = 3,3%
+#
+# Ogni altro numero di questo file che dipende dal raggio e' **ricalcolato** li'
+# dove e' usato, con la formula dichiarata accanto: una copia di un derivato e'
+# una copia che mente. La tabella qui sotto e' l'unica cosa che resta col numero
+# di prima, ed e' dichiarata come cronologia perche' e' una misura di m9, non un
+# atteso di questo file.
+#
+## La tabella di m9 come **cronologia**, non come atteso: il perche' 46 e non 40
+## era la tabella di densita' di piano §1.12: a 200 nemici il disco libero piu'
+## grande passava da 9,5 m (R=28) a 19,1 m (R=46), con l'area libera quasi la
+## stessa (85,2% -> 94,6%): il guadagno e' lineare nel raggio e non nell'area,
+## perche' l'orda forma un anello di ~9,4 m intorno al giocatore e il muro e' la
+## sola cosa che si allontana, e il 40 non compra niente.
+const RAGGIO_ARENA := 60.0
 
 # --- m5: la camera REALE, e i numeri che la costruiscono ------------------------
 #
@@ -559,9 +601,10 @@ func _setup(h) -> void:
 	game = root.get_node_or_null("Game")
 	if not h.check(game != null, "l'autoload Game manca: nessun test delle foglie puo' partire"):
 		return
-	# IL PERNO di m9. Il numero e' scritto qui (`RAGGIO_ARENA`, in testa al file)
-	# e non letto da `src/render/arena.gd`: leggerlo renderebbe questa riga
-	# incapace di fallire, perche' seguirebbe il numero invece di sorvegliarlo.
+	# IL PERNO di m9. Il numero e' scritto qui (`RAGGIO_ARENA`, in testa al file),
+	# che e' una **copia dichiarata** di `src/core/contracts.gd:116`, e non letto da
+	# `src/render/arena.gd`: leggerlo renderebbe questa riga incapace di fallire,
+	# perche' seguirebbe il numero invece di sorvegliarlo.
 	# La domanda «le copie divergono?» e' un'altra, ed e' in `tests/test_arena.gd`.
 	h.near(game.arena_radius, RAGGIO_ARENA, 0.001, "arena_radius di default")
 
@@ -583,10 +626,10 @@ func _setup(h) -> void:
 	horde.add(Vector3(9.0, 0.9, -10.0), TOUGH)
 	# I due 26.0 e 5.0 qui sotto sono **raggi di interrogazione**, non copie del
 	# raggio dell'arena: e' la distanza entro cui si cerca un bersaglio, e nessuna
-	# delle due ha a che fare con `arena_radius` (che a m9 e' 46). Sono due numeri
+	# delle due ha a che fare con `arena_radius` (che ora e' 60). Sono due numeri
 	# diversi e si vedono diversi: il primo trova i due nemici a 10 m e 13,5 m, il
 	# secondo non trova nessuno perche' 5 m < 10 m, quindi il contratto onora il
-	# raggio che riceve. Sul disco da 46 m coprono il 57% e l'11% del raggio:
+	# raggio che riceve. Sul disco da 60 m coprono il 43% e l'8% del raggio:
 	# nessuno dei due e' diventato triviale per la crescita dell'arena, perche' la
 	# distanza dei nemici qui dentro e' scritta a mano e non e' mai stata legata
 	# al raggio.
@@ -711,19 +754,23 @@ func _movement(h) -> void:
 	# ## m9: il muro MISURATO, e non solo rispettato
 	#
 	# Il blocco sopra dice una cosa sola: **non si esce**. Non dice *dove* ci si
-	# ferma, e su un disco 2,7 volte piu' grande quella frase da sola dice ancora
-	# meno di prima. Due agguagli, dichiarati perche' un test che non li dichiara
-	# fa sembrare forte un asserzione che e' debole:
+	# ferma, e su un disco 4,6 volte piu' grande in area quella frase da sola dice
+	# ancora meno di prima. Due agguagli, dichiarati perche' un test che non li
+	# dichiara fa sembrare forte un asserzione che e' debole. Tutte le distanze
+	# qui sotto sono **ricalcolate** sul raggio nuovo (60,0) e sul margine letto
+	# dal gioco (0,8): la base e' sempre `raggio - margine`, e da li' tutto.
 	#
 	#   - `far <= radius + 0.001` ha **0,8 m di margine**, perche' il clamp ferma
 	#     il giocatore *dentro* il raggio: quella riga, da sola, cade solo se il
-	#     muro sparisce del tutto (a 46 m, due secondi a 7 m/s porterebbero a
-	#     59 m, tredici oltre il muro). Resta vera, ma da sola non dimostra che
-	#     il bordo sia raggiungibile: e su un raggio 2,7 volte piu' grande la
-	#     differenza fra «clamp a 45,2 m» e «clamp a 3 m» e' la stessa in
-	#     assoluto e molto piu' piccola in percentuale.
+	#     muro sparisce del tutto (a 60 m, due secondi a 7 m/s da `raggio - 1`
+	#     porterebbero a 73 m, tredici oltre il muro). Resta vera, ma da sola
+	#     non dimostra che il bordo sia raggiungibile: e su un raggio 2,1 volte
+	#     piu' grande (60 contro 28) la differenza fra «clamp a 59,2 m» e «clamp
+	#     a 3 m» e' la stessa in assoluto e molto piu' piccola in percentuale.
 	#   - `far >= radius - 2.0` invece si e' **irrigata**: la finestra e' di 2 m
-	#     sia a 28 che a 46, ma sul raggio e' il 7,1% di prima e il 4,3% di adesso.
+	#     sia a 28 che a 60, ma sul raggio e' il 7,1% di prima e il 3,3% di adesso
+	#     (2/28 e 2/60). La finestra resta di 2 m: cambiarne il numero perche' il
+	#     raggio e' cambiato sarebbe spostare un tetto per far entrare una cifra.
 	#
 	# E qui la precisazione che serve a non leggere il file a pezzi: le due
 	# asserzioni che usano il raggio in questa sezione sono **sul giocatore**, non
@@ -739,9 +786,13 @@ func _movement(h) -> void:
 	# raggio. Il perno resta il raggio, che e' il letterale in testa al file.
 	var margine := _margine_muro(h)
 
-	# (a) Dal centro verso +x, dieci secondi. A 7 m/s il muro di un'arena da 46 m
-	#     e' a 6,46 s: i 600 frame arrivano, e i due secondi finali servono a
-	#     vedere che il giocatore **resta** fermo li' invece di scivolare fuori.
+	# (a) Dal centro verso +x, dieci secondi. A 7 m/s il muro di un'arena da 60 m
+	#     e' a 8,46 s (59,2 m di corsa effettiva, per il margine di 0,8): i 600
+	#     frame arrivano e ne restano ~1,5 per vedere che il giocatore **resta**
+	#     fermo li' invece di scivolare fuori. I 600 frame **non** si toccano: il
+	#     numero che decide e' che `lontano` arrivi al muro, e con 600 arriva;
+	#     accorciarli per far quadrare la frase sarebbe spostare un tetto per far
+	#     entrare una cifra.
 	var lontano := _corri_al_muro(Vector3(1.0, 0.0, 0.0), 600)
 	h.near(lontano, radius - margine, 0.05,
 		"sull'asse il muro ferma il giocatore a un margine esatto dal raggio: %.3f contro %.3f m (raggio %.1f - margine %.2f)"
@@ -755,9 +806,12 @@ func _movement(h) -> void:
 
 	# (b) In diagonale, dove un clamp **quadrato** si tradirebbe da solo: il muro
 	#     e' un disco. Sul raggio nuovo la prova e' piu' forte, non piu' debole:
-	#     un clamp per assi fermerebbe a 45,2 m su `x` **e** su `z`, cioe' a
-	#     63,9 m dal centro, 17,9 m oltre il muro (a 28 m la stessa prova sarebbe
-	#     stata 11,6 m oltre).
+	#     un clamp per assi fermerebbe a 59,2 m su `x` **e** su `z`, cioe' a
+	#     83,72 m dal centro, 23,72 m oltre il muro. La formula e' sempre
+	#     `(raggio - margine) * sqrt(2) - raggio`, e ricalcolata anche sul
+	#     confronto: a 28 m dà 10,47 m oltre il muro. Il 11,6 m che stava qui
+	#     prima era calcolato **senza** margine e non combaciava con il 17,9 m che
+	#     invece lo aveva: due numeri della stessa frase, due formule diverse.
 	#     La diagonale passa da `world_direction` e non e' scritta a mano: senza
 	#     camera `+z` di input e' `-z` di mondo (sezione 11), e un vettore
 	#     riscritto qui farebbe cadere questa riga per il verso sbagliato, che e'
@@ -777,7 +831,13 @@ func _movement(h) -> void:
 		"e su entrambi gli assi insieme: fermo a (%.2f, 0.00, %.2f) contro (%.2f, 0.00, %.2f)"
 		% [player.position.x, player.position.z, atteso_diag.x, atteso_diag.z])
 
-	print("m9 muro: raggio %.1f m (perno scritto: %.1f m), il giocatore si ferma a %.3f m sull'asse e a %.3f m in diagonale, cioe' (%.3f, 0.00, %.3f): margine %.2f m letto da -gameplay"
+	# I due numeri del raggio sono **due numeri diversi** e percio' ci sono entrambi:
+	# quello letto dal contratto a runtime e il perno scritto in testa al file. Dopo
+	# il cambio del 2026-10-14 valgono entrambi 60,0 m, e il fatto che la riga qui
+	# sopra sia passata e' appunto quello che questa stampa dice: la copia e la
+	# fonte dicono la stessa cosa. Il 46,0 m di ieri non compare perche' e' un
+	# numero **passato**, non un secondo valore del perno.
+	print("m9 muro: raggio %.1f m letto dal contratto, perno scritto %.1f m (copia dichiarata di src/core/contracts.gd:116): combaciano. Il giocatore si ferma a %.3f m sull'asse e a %.3f m in diagonale, cioe' (%.3f, 0.00, %.3f): margine %.2f m letto da -gameplay"
 		% [radius, RAGGIO_ARENA, lontano, lontano_d, player.position.x, player.position.z, margine])
 
 # --- 2. L'arma spara da solo ---------------------------------------------------
@@ -2126,7 +2186,13 @@ func _arrivo_radius(h) -> float:
 #   - fermata finale a **20,650 m** dal centro invece dei **2,600 m** attesi
 #     (raggio 2,00 + margine 0,60): e' passato oltre il disco di 18 m e si e'
 #     fermato sul muro dell'arena, che a 34,65 m dal centro del disco e' a 46 m
-#     dall'origine;
+#     dall'origine. **Cronicizzato, non riportato**: 46 m e' il raggio che c'era
+	#     il 2026-10-13, quando la misura e' stata presa; da allora il raggio e'
+	#     60 m (`RAGGIO_ARENA`) e la stessa prova darebbe un numero diverso. Le
+	#     cifre restano quelle che uscirono dal difetto e non sono state
+	#     ricalcolate, perche' ricalcolarle avrebbe significato inventare una
+	#     misura che nessuno ha preso: il dente resta un **record** di cosa e'
+	#     successo, non un atteso di oggi;
 #   - spinto dentro il disco, rimesso fuori a **1,0068 m** invece dei 2,600: cioe'
 #     **dentro**, che e' il caso che il ripiego sul centro esatto doveva
 #     risolvere e che senza clamp non risolve nessuno.
@@ -2508,8 +2574,8 @@ func _corri_al_muro(ingresso: Vector3, max_frames: int) -> float:
 ## proprieta' del mondo che questo test deve sorvegliare; il margine e'
 ## **regolazione**, cioe' un numero che qualcuno puo' ritoccare domani, e una
 ## seconda copia qui dentro sarebbe un numero che mente nel giorno in cui lo
-## ritoccano — il test direbbe «il muro e' a 45,2 m» anche se il muro si fosse
-## spostato a 44. L'atteso si **compone**: raggio letto dal contratto meno
+## ritoccano — il test direbbe «il muro e' a 59,2 m» anche se il muro si fosse
+## spostato a 58. L'atteso si **compone**: raggio letto dal contratto meno
 ## margine letto dal gioco.
 func _margine_muro(h) -> float:
 	var v = _script_const(player, "ARENA_MARGIN")

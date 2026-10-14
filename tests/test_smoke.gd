@@ -82,12 +82,21 @@ func _autoload_is_registered(h) -> void:
 	if not h.check(game != null, "l'autoload Game non e' stato istanziato: i test delle altre foglie non possono usarlo"):
 		return
 	h.eq(game.get_script().resource_path, CONTRACTS_PATH, "Game deve essere src/core/contracts.gd")
-	## Il 46.0 qui è un PERNO e resta scritto a mano (piano §1.12-bis, m9).
+	## Il 60.0 qui e' un PERNO e resta scritto a mano (piano §1.12-bis, m9).
 	## Non leggerlo dal contratto ne' da arena.gd: letto dalla fonte non puo'
 	## piu' fallire, e un test che non puo' fallire non e' un test (§11.11).
 	## Il criterio diverso — "le copie del raggio non divergono" — sta in
 	## tests/test_arena.gd, perche' e' di -arena e puo' solo confrontarle fra loro.
-	h.near(game.arena_radius, 46.0, 0.0001, "arena_radius di default")
+	##
+	## Questa riga e' una COPIA, non la sorgente. Il proprietario del numero e'
+	## il vertice, su src/core/contracts.gd; portato da 46.0 a 60.0 su misura
+	## (docs/piramide/probe_survive.gd, piano sez. 1.14-quinque: il caso peggiore
+	## di uno schivatore passa da 55.33 s a 146.72 s, fattore 2.65; a 75 m
+	## sarebbe 156.33 s, fattore 1.07, e il ginocchio e' a 60 m). Chi cambia la
+	## sorgente cambia anche qui nello stesso colpo: una copia lasciata sul
+	## vecchio valore non diventa un rosso in piu', diventa una prova che dice
+	## PASS mentre conferma un numero morto.
+	h.near(game.arena_radius, 60.0, 0.0001, "arena_radius di default")
 	h.check(game.player == null, "player deve partire da null: nessuna foglia e' ancora registrata")
 	h.check(game.horde == null, "horde deve partire da null: nessuna foglia e' ancora registrata")
 
@@ -102,7 +111,11 @@ func _autoload_is_registered(h) -> void:
 ## false non è un uccisione: sono valori che non possono creare un falso bersaglio.
 func _stubs_are_neutral(h) -> void:
 	var probe = CONTRACTS.new()
-	h.near(probe.arena_radius, 46.0, 0.0001, "arena_radius di default su un'istanza nuova")
+	## Stessa copia del perno sopra, portata da 46.0 a 60.0: e' il default
+	## dichiarato nella classe, non un valore che questa sezione tocchi. Due
+	## copie nello stesso file vanno aggiornate insieme, o il test si mette a
+	## contraddire da solo.
+	h.near(probe.arena_radius, 60.0, 0.0001, "arena_radius di default su un'istanza nuova")
 
 	var nearest := probe.nearest_enemy(Vector3(5.0, 0.0, 5.0), 10.0)
 	h.eq(nearest, -1, "nearest_enemy non registrato deve dare -1 (nessun nemico), non crashare")
@@ -160,6 +173,9 @@ func _leaves_can_register(h) -> void:
 	# Dati: assegnazione diretta dei campi pubblici.
 	game.player = marker
 	game.horde = leaf
+	# 12.0 NON e' una copia del raggio di default: e' un valore di prova
+	# volutamente diverso, perche' qui si verifica che il campo e' scrivibile
+	# e non che valga 60.0. Cambiare il default non tocca questa riga.
 	game.arena_radius = 12.0
 	h.check(game.player == marker, "registrazione dati: Game.player = self")
 	h.check(game.horde == leaf, "registrazione dati: Game.horde = self")
@@ -177,6 +193,9 @@ func _leaves_can_register(h) -> void:
 	h.check(game.has_impl("player_position"), "register_impl deve registrare l'API")
 
 	# Le risposte devono arrivare dall'implementazione, con i tipi del contratto.
+	# Il 100.0 e' il raggio di RICERCA passato a nearest_enemy, non il raggio
+	# dell'arena: FakeLeaf lo ignora e risponde sempre enemy_index, quindi qui
+	# non e' derivato dal default e non lo segue quando il default cambia.
 	leaf.calls = 0
 	h.eq(game.nearest_enemy(Vector3.ZERO, 100.0), leaf.enemy_index,
 		"registrazione metodi: Game.nearest_enemy deve restituire l'indice dell'impl di -orda")

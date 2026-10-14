@@ -7,8 +7,8 @@ extends Node3D
 ## rigenero e non li modifico, li solo uso come mesh.
 ##
 ## Il pavimento e' una MultiMesh e non un `GridMap` o 900 nodi: la regola "un
-## nodo per cosa'" del progetto vale anche per il terreno, e a 46 m di raggio
-## (100 m di lato, 2500 piastrelle) un pavimento a nodi da solo mangerebbe il
+## nodo per cosa'" del progetto vale anche per il terreno, e a 60 m di raggio
+## (128 m di lato, 4096 piastrelle) un pavimento a nodi da solo mangerebbe il
 ## budget del criterio n. 3 da solo.
 
 const FLOOR_SCENE := "res://assets/models/ground_tile.glb"
@@ -62,18 +62,18 @@ const CRATE_SEED := 20240502
 ## scrive `src/render/arena.gd`, che e' la **fonte unica** del numero (piano
 ## 1.12-bis, copia 5 di 6).
 ##
-## Perche' 46.0 e non 28.0: un terreno costruito con il fallback vecchio su
-## un'arena di 46 avrebbe un muro a 28 m dentro il campo di gioco e 18 m di
-## pavimento fuori dal muro, cioe' l'errore piu' sproporzionato di tutti,
+## Perche' 60.0 e non il numero sostituito: un terreno costruito con il fallback
+## vecchio su un'arena di 60 avrebbe un muro a 46 m dentro il campo di gioco e
+## 14 m di pavimento fuori dal muro, cioe' l'errore piu' sproporzionato di tutti,
 ## perche' qui il fallback non nasconde un numero ma **costruisce la geometria**.
 ## Il numero non e' scelto qui: e' quello della sonda
-## `docs/piramide/probe_arena_density.gd`, con la tabella e il motivo scritti
-## accanto alla fonte in `src/render/arena.gd`.
+## `docs/piramide/probe_survive.gd` (piano 1.14-quinque), con la tabella e il
+## motivo scritti accanto alla fonte in `src/render/arena.gd`.
 ##
 ## Non puo' divergere: `tests/test_arena.gd` legge questa riga dal sorgente e la
 ## confronta con la fonte, quindi cambiarla da sola porta la porta rossa con i
 ## due numeri nel messaggio.
-const FALLBACK_RADIUS := 46.0
+const FALLBACK_RADIUS := 60.0
 ## Metri di pavimento oltre il muro, per non vedere il vuoto ai bordi.
 const FLOOR_MARGIN := 8.0
 ## Il raggio dentro cui il terreno non mette ostacoli al giocatore.
@@ -117,11 +117,12 @@ func _build() -> void:
 	_build_crates(_crates, radius)
 
 	# L'ingranaggio di culling, per **ultimo**: `custom_aabb` sostituisce la
-	# scatola che il motore calcola dalla mesh, e con l'arena a 46 m il valore
-	# scritto a mano (+/-44 m) era **piu' piccolo del pavimento** (+/-50 m): la
-	# corona di piastrelle più esterna spariva quando usciva dalla scatola. Lo
-	# si deriva dal raggio perche' un numero scritto qui accanto a un raggio che
-	# cambia e' la stessa classe di difetto di un fallback che diverge.
+	# scatola che il motore calcola dalla mesh, e il valore scritto a mano nel
+	# 2026-10-13 (+/-50 m all'arena da 46 m) era **piu' piccolo del pavimento**
+	# (+/-70,7 m): la corona di piastrelle piu' esterna spariva quando usciva
+	# dalla scatola. Lo si deriva dal raggio perche' un numero scritto qui
+	# accanto a un raggio che cambia e' la stessa classe di difetto di un
+	# fallback che diverge.
 	_fit_aabbs(radius)
 
 func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3D:
@@ -149,11 +150,11 @@ func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3
 ##
 ## Mezza diagonale del pavimento: il pavimento e' un quadrato di
 ## `radius * 2 + FLOOR_MARGIN`, quindi il suo punto piu' lontano dal centro e' a
-## `side / 2 * sqrt(2)`, non a `side / 2`. Con `FLOOR_MARGIN` = 8 e raggio 46
-## quello e' 70,7 m: arrotondare a `radius + FLOOR_MARGIN` avrebbe tagliato il
-## cantone, e il cantone tagliato e' il difetto che nessuna asserzione headless
-## vede. In su c'e' il muro (`WALL_ROWS * TILE`), in giu' mezzo metro sotto il
-## pavimento per la cassa appoggiata.
+## `side / 2 * sqrt(2)`, non a `side / 2`. Con `FLOOR_MARGIN` = 8 m e raggio 60
+## quello e' 90,5 m (era 70,7 m a 46 m): arrotondare a `radius + FLOOR_MARGIN`
+## avrebbe tagliato il cantone, e il cantone tagliato e' il difetto che nessuna
+## asserzione headless vede. In su c'e' il muro (`WALL_ROWS * TILE`), in giu'
+## mezzo metro sotto il pavimento per la cassa appoggiata.
 func _fit_aabbs(radius: float) -> void:
 	var side := radius * 2.0 + FLOOR_MARGIN
 	var half := side * 0.5 * sqrt(2.0)

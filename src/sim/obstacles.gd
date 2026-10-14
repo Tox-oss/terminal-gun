@@ -45,7 +45,11 @@ extends RefCounted
 ## Con i numeri qui sotto il minimo e' **12,0 m** fra due ostacoli di anelli
 ## diversi (distanza radiale fra un anello e il successivo) e **15,1 m** sullo
 ## stesso anello (corda minima, anello interno, 6 ostacoli): il passaggio utile
-## e' quindi di **6,0 m**, cioe' 1,6 volte la sagoma del boss.
+## e' quindi di **6,0 m**, cioe' 1,6 volte la sagoma del boss. Sono i numeri di
+## **m9**, a R = 46,0 m; a **R = 60,0 m** (m11) le stesse frazioni danno **15,6 m**
+## fra anelli e **19,8 m** di corda, e il passaggio utile misurato e' **7,81 m**,
+## cioe' **2,06** volte la sagoma del boss. La garanzia quindi non si stringe:
+## si allarga, e la tabella qui sotto lo dice con i numeri.
 ##
 ## Nessun anello si chiude su se stesso perche' le corde sono tutte molto piu'
 ## grandi di `2 * raggio`: il campo libero resta **connesso**, e questa e' la
@@ -55,11 +59,35 @@ extends RefCounted
 const OBSTACLE_COUNT := 27
 ## Raggio di ogni disco, come **frazione** del raggio dell'arena. Non un numero
 ## in metri perche' un numero in metri qui dentro sarebbe una copia del raggio
-## dell'arena scritta a mano, cioe' la classe di difetto di §1.12-bis. A
-## `ARENA_RADIUS = 46.0` questo vale **2,99 m**, dichiarato come ~3,0 m.
+## dell'arena scritta a mano, cioe' la classe di difetto di §1.12-bis. Il
+## **dopo** e' a `ARENA_RADIUS = 60.0` (m11) e vale **3,90 m**; il **prima**, a
+## `46.0` (m9), valeva **2,99 m**, dichiarato come ~3,0 m.
+##
+## ## m11: la frazione non e' un numero che a 60 m si e' dimenticato: e' la
+## ## scelta che rende la misura sotto leggibile
+##
+## Il raggio e' una frazione **per costruzione**, quindi al raggio nuovo la
+## copertura areale non cambia (27 dischi di 0,065 R su un disco di R: **11,4%**
+## a 46 m come a 60 m) e quello che cambia e' la **misura in metri**:
+##
+## | numero | a 46,0 m (prima) | a 60,0 m (dopo) |
+## |---|---|---|
+## | raggio del disco | 2,99 m | **3,90 m** |
+## | anelli | 15,18 / 27,14 / 39,10 m | **19,80 / 35,40 / 51,00 m** |
+## | dischi piu' vicini | 11,97 m | **15,61 m** |
+## | passaggio utile | 5,99 m (**1,58x** il boss) | **7,81 m** (**2,06x** il boss) |
+##
+## La quarta riga e' la risposta alla domanda che m11 ha posto — «a 60 m i
+## dischi sono relativamente piu' fitti?» — e la risposta e' **no**: il
+## passaggio utile, cioe' la pista che il nemico deve attraversare, **cresce**
+## da 5,99 a 7,81 m e il suo rapporto con la sagoma del boss sale da 1,58 a
+## 2,06. I dischi non si spostano e non si stringono: si allargano con l'arena e
+## lasciano fra loro un corridoio piu' largo. Per questo questo file non cambia
+## nessuna costante in m11, e la misura e' rimessa in `tests/test_orda.gd`.
 const RADIUS_FRACTION := 0.065
 ## Raggio dei tre anelli, sempre come frazione del raggio dell'arena.
-## A 46,0 m sono **15,18 / 27,14 / 39,10 m**.
+## A 60,0 m sono **19,80 / 35,40 / 51,00 m** (a 46,0 m erano 15,18 / 27,14 /
+## 39,10 m).
 const RING_RADII := [0.33, 0.59, 0.85]
 ## Quanti ostacoli su ciascun anello: 6 + 9 + 12 = `OBSTACLE_COUNT`.
 const RING_COUNTS := [6, 9, 12]

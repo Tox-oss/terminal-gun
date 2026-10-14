@@ -4,7 +4,7 @@ extends Node3D
 ##
 ## ## Le due cose che arena registra
 ##
-##     Game.arena_radius = 46.0        # m9, e' la fonte unica del raggio
+##     Game.arena_radius = 60.0        # m9, e' la fonte unica del raggio
 ##     Game.obstacles     = [...]      # m10, i dischi su cui si scontra
 ##
 ## Sono due **dati**, quindi assegnazione diretta, una volta sola all'avvio (piano
@@ -31,15 +31,15 @@ extends Node3D
 ## allineate da `tests/test_arena.gd` (criterio n. 2, sulla **deriva**: se una
 ## delle copie si discosta da questa, la porta va rossa).
 ##
-## ## PERCHE' 46.0: il numero non e' stato scelto, e' stato **misurato**
+## ## LA STORIA DEL NUMERO, IN DUE TEMPI, E PERCHE' 60.0
+##
+## ### Il numero di prima: 46.0, scelto da m9 con la sonda della DENSITA'
 ##
 ## Sonda `docs/piramide/probe_arena_density.gd` del vertice (piano 1.12): mette
 ## l'orda a regime e chiede **quanto spazio l'orda concede**, non quanto ne
 ## sembra. "Spazio libero" e' definito col numero che morde: un punto e' libero
 ## se dista da ogni nemico piu' di `RADIUS[kind] + TOUCH_REACH`. Griglia 0,5 m,
 ## DT 1/60, seme 4242, 900 passi di assestamento col giocatore fermo al centro.
-## Sul terreno e sul muro a 28 m: la sonda misura lo spazio che l'orda concede,
-## non quello che si vede.
 ##
 ##     popolazione    R=28            R=34            R=40            R=46
 ##     1 nemico       99,9%  14,5 m   99,9%  17,7 m  100,0% 20,9 m  100,0% 24,0 m
@@ -59,14 +59,40 @@ extends Node3D
 ## per scappare passano da 1,4 a 2,7. Passare da 40 a 46 e' mettere quegli
 ## stessi secondi davanti a un numero che si ricorda.
 ##
-## **Quello che questo numero NON risolve**, dichiarato perche' nessuno ricreda
-## fra sei mesi che 46 sia stato scelto a occhio: lo spazio libero resta
-## **frammentato in tasche** e l'anello di ~9,4 m intorno al giocatore **non si
-## assottiglia**, perche' e' un numero di **simulazione** (popolazione e
-## separazione, `SEPARATION_CHECKS = 6`) e non di mappa. Raddoppiare l'arena non
-## scioglie l'orda: e' per questo che 46 e' un numero di simulazione e non una
-## correzione di mappa.
-const ARENA_RADIUS := 46.0
+## ### Il numero di oggi: 60.0, scelto da m11 con la sonda della SOPRAVVIVENZA
+##
+## La sonda di m9 chiedeva «quanto spazio c'e'». L'utente ha chiesto **due volte**
+## una mappa piu' grande, e la domanda giusta non e' quella: e' «quanto tempo ci si
+## resta dentro». Sonda `docs/piramide/probe_survive.gd` del vertice (piano
+## 1.14-quinque), sedici raggi, puntamento a 20,5 m avanti, penalita' del muro in
+## metri e ritorno al centro oltre il 70%: tre semi per raggio, e **due casi a
+## risposta nota** senza i quali la tabella non avrebbe diritto di esistere.
+##
+##     R=12 m (riferimento)  lo strumento DEVE morire     -> morto a   61,20 s
+##     R=46 m (consegnato)   il caso peggiore di 1.12     ->           55,33 s
+##     R=60 m (oggi)         il ginocchio della curva     ->          146,72 s
+##     R=75 m                oltre il ginocchio           ->          156,33 s
+##
+##     da a          fattore sul caso peggiore
+##     12 -> 46 m              0,90
+##     46 -> 60 m             **2,65**
+##     60 -> 75 m              1,07
+##
+## **Perche' 60 e non 75**: il ginocchio e' a circa 60 m. Da 46 a 60 il caso
+## peggiore guadagna **2,65 volte** — l'istinto dell'utente era giusto, e due
+## volte. Da 60 a 75 il fattore e' **1,07**: oltre il ginocchio non si compra
+## niente, si paga solo spazio. Quindi la mappa va **dimensionata sul ginocchio**,
+## non allungata.
+##
+## **Quello che questo numero NON risolve, dichiarato perche' nessuno ricreda fra
+## sei mesi che 60 sia stato scelto a occhio**: (1) anche al raggio 75, che e'
+## 1,63 volte quello di prima, il caso peggiore muore a 156,33 s, cioe' **la
+## mappa da sola non basta** e il fattore mancante e' un altro; (2) **tutte le
+## morti cadono sull'onda 1**, con 25 nemici vivi: non e' che le onde tardive
+## siano dure, e' che l'apertura ammazza. Quei due numeri sono di `-orda` e del
+## vertice, non sono di questo file: qui il raggio e' **la mappa**, e la mappa e' stata
+## portata sul ginocchio che le misure indicano.
+const ARENA_RADIUS := 60.0
 
 ## ## LA GEOMETRIA DEGLI OSTACOLI: i numeri sono di `-orda`, e qui vengono LETTI
 ##
@@ -79,9 +105,13 @@ const ARENA_RADIUS := 46.0
 ##     -arena possiede la FORMA e LEGGE quei numeri, non li ricopia
 ##
 ## Quindi qui sotto **non c'e' un numero scritto**: c'e' il posto dove il numero va
-## a essere letto, e `OBSTACLE_LAYOUT` ne e' il risultato — 27 dischi di raggio
-## 2,99 m su tre anelli a 15,18 / 27,14 / 39,10 m, con quei numeri che sono di
-## `-orda` e cambiano senza che questo file lo sappia. Scriverli qui sarebbe la
+## a essere letto, e `OBSTACLE_LAYOUT` ne e' il risultato — 27 dischi su tre
+## anelli, che cambiano **insieme** al raggio perche' `src/sim/obstacles.gd`
+## li dichiara come frazioni (`RADIUS_FRACTION = 0,065`, `RING_RADII = 0,33 /
+## 0,59 / 0,85`) e non in metri. I numeri che erano stampati qui nel 2026-10-13
+## (raggio 2,99 m su anelli a 15,18 / 27,14 / 39,10 m) erano misurati **con
+## l'arena a 46 m**; a 60 m il produttore dà 3,90 m su anelli a 19,80 / 35,40 /
+## 51,00 m, e `tests/test_arena.gd` li stampa ogni volta. Scriverli qui sarebbe la
 ## sesta copia di un numero che m9 ha gia' chiuso una volta (sei copie di `28.0`,
 ## nessuna porta rossa): due copie di un raggio che divergono sono il difetto, e
 ## la copia mente alla prima riga cambiata.

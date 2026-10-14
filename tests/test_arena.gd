@@ -94,17 +94,19 @@ const DRIVE_STALL_STEPS := 30
 ## Quanta capienza fissa ha la MultiMesh dei nemici: se l'orda ne chiede di
 ## piu', il renderer deve fermarsi qui e non crescere.
 const ENEMY_CAPACITY := 256
-## Il raggio che m9 ha deciso, e che il vertice ha misurato prima di sceglierlo
-## (piano 1.12, sonda `docs/piramide/probe_arena_density.gd`).
+## Il raggio che m9 decise e che m11 ha cambiato. Il vertice ha misurato **prima**
+## di sceglierlo, e due volte con due sonde diverse (piano 1.12,
+## `docs/piramide/probe_arena_density.gd`, e piano 1.14-quinque,
+## `docs/piramide/probe_survive.gd`).
 ##
 ## **Questa riga non e' una copia del raggio.** Le copie del numero sono le sei
 ## di 1.12-bis, e la sesta era proprio questa: un valore scritto qui che il
 ## terreno, il muro e la camera confrontavano con la fonte. Da m9 il test
 ## **legge la fonte** (`_source_radius()`) e non porta il numero con se', e le
 ## righe che restano qui sono due compiti diversi:
-##   - `DECIDED_RADIUS` e' il **criterio n. 1**: il raggio e' 46 m, e il numero
-##     che l'ha prodotto (la tabella e il motivo) e' scritto accanto alla fonte,
-##     in `src/render/arena.gd`. Se qualcuno cambiasse la fonte e non qui, la
+##   - `DECIDED_RADIUS` e' il **criterio n. 1**: il raggio e' quello deciso, e il
+##     numero che l'ha prodotto (la tabella e il motivo) e' scritto accanto alla
+##     fonte, in `src/render/arena.gd`. Se qualcuno cambiasse la fonte e non qui, la
 ##     porta va rossa: il raggio e' una scelta dichiarata, non un dettaglio.
 ##   - `RADIUS_TOLERANCE` e' la tolleranza dei confronti numerici sotto, e non un
 ##     raggio.
@@ -115,7 +117,18 @@ const ENEMY_CAPACITY := 256
 ## `tests/test_orda.gd` col default del contratto, che qui a sua volta e'
 ## confrontato con la fonte: la catena e' chiusa e la copia e' guardata una volta
 ## sola, dalla foglia che ne e' proprietaria).
-const DECIDED_RADIUS := 46.0
+const DECIDED_RADIUS := 60.0
+## Il raggio **sostituito** da m11: 46,0 m. Non e' una copia viva e non viene
+## confrontato con nessuno — e' il numero che `_m11_raggio` mette **accanto** al
+## nuovo nelle stampe, perche' un cambio di raggio che si vede solo nel numero di
+## dopo non e' una misura: e' un annuncio.
+##
+## Le due sonde che lo hanno prodotto, i loro tre semi per raggio e i due casi a
+## risposta nota sono scritti accanto alla fonte, in `src/render/arena.gd`
+## (`ARENA_RADIUS`). In una riga: 46 m -> 55,33 s di sopravvivenza nel caso
+## peggiore, 60 m -> **146,72 s** (fattore **2,65**), 75 m -> 156,33 s (fattore
+## 1,07): il ginocchio e' a 60 m e il numero e' quello.
+const PREVIOUS_RADIUS := 46.0
 ## Tolleranza dei confronti fra copie del raggio. `float` a 32 bit passato per
 ## una `Basis`: l'errore relativo e' dell'ordine di 1e-7, quindi 1e-4 e' tre
 ## ordini di grandezza sopra quel rumore e **ben** sotto la divergenza che
@@ -140,6 +153,16 @@ var _t0: int = 0
 ## racconta un numero che nessuno ha misurato.
 var _crate_count: int = 0
 var _crate_diff: int = -1
+## I tre numeri che `_camera_al_bordo` ha **misurato** sulla scena vera, non
+## calcolati: rapporto nel quadro, direzione peggiore e distanza di vista. Li
+## tiene perche' la sezione di m11 deve poter confrontare la **misura** con la
+## formula che usa per il raggio di prima: e' quello confronto che autorizza a
+## stampare un numero che non e' piu' misurabile (a 46 m non c'e' piu' una scena).
+## `-1.0` quando la sezione non e' girata, cosi' la stampa non racconta un numero
+## che nessuno ha misurato.
+var _frame_worst: float = -1.0
+var _frame_deg: float = -1.0
+var _frame_view: float = -1.0
 
 
 ## Niente qui dentro. Il corpo del test gira al **primo frame**, non in
@@ -190,6 +213,10 @@ func _run() -> void:
 	_terrain(h, arena)
 	_milestone_10(h, arena, game)
 	_camera(h, arena)
+	# m11: il raggio e' passato da 46,0 m a 60,0 m. Sta **dopo** `_camera` perche'
+	# confronta la formula dell'inquadratura con la misura fatta li' dentro: senza
+	# la misura, il numero di 46 m sarebbe una ricorrenza e non una verifica.
+	_m11_raggio(h, arena)
 	_hud(h, arena, game)
 	# Per ultima: e' l'unica sezione che cambia lo stato dell'orda e della
 	# regolazione dell'arma, e non deve trovarsi in mezzo a quelle che contano i
@@ -205,7 +232,7 @@ func _run() -> void:
 	_milestone_8(h, arena)
 
 	_cleanup(arena)
-	print("test_arena: tutto il file in %d ms; la porta dà 120 s a questo test (m11-bis ha costato la cifra stampata nella sua riga)" % (Time.get_ticks_msec() - _t0))
+	print("test_arena: tutto il file in %d ms; la porta dà 120 s a questo test e ne resta %d, e m11-bis e m11 hanno costato le cifre stampate nelle loro righe" % [Time.get_ticks_msec() - _t0, 120000 - (Time.get_ticks_msec() - _t0)])
 	quit(h.finish("test_arena"))
 
 # --- 1. Che cosa registra arena, da solo ---------------------------------------
@@ -308,12 +335,11 @@ func _copie_del_raggio(h) -> void:
 	# Criterio n. 1: il raggio e' quello deciso dal vertice, e il numero che l'ha
 	# prodotto e' scritto accanto alla fonte. Qui il confronto e' con un numero
 	# **scritto**, non letto: e' l'unica riga del file che tiene memoria del
-	# numero scelto, ed e' quello che distingue "il raggio e' 46" da "il raggio e'
-	# quello che c'era scritto".
+	# numero scelto, ed e' quello che distingue il raggio deciso da quello che c'era scritto.
 	h.near(fonte, DECIDED_RADIUS, RADIUS_TOLERANCE,
-		"criterio n. 1 di m9: il raggio nella fonte deve essere quello deciso (%.1f m); "
-		% DECIDED_RADIUS
-		+ "il numero che l'ha prodotto e la tabella sono scritti in src/render/arena.gd")
+		"criterio n. 1 di m9: il raggio nella fonte deve essere quello deciso (%.1f m), non quello sostituito da m11 (%.1f m); "
+		% [DECIDED_RADIUS, PREVIOUS_RADIUS])
+		
 
 	# Le copie, una per una, con il numero accanto al nome: un FAIL deve dire
 	# *quale* copia mente e *di quanto*.
@@ -333,6 +359,8 @@ func _copie_del_raggio(h) -> void:
 			"criterio n. 2 di m9: %s deve dire lo stesso numero della fonte src/render/arena.gd, non %.3f"
 				% [nome, valore])
 
+	print("test_arena: m11 raggio: %.1f m (fonte di m9, deciso allora, 55.33 s nel caso peggiore) -> %.1f m (fonte e deciso oggi, 146.72 s, fattore 2.65; a 75 m si avrebbe 156.33 s, fattore 1.07: il ginocchio e' a 60 m)"
+		% [PREVIOUS_RADIUS, DECIDED_RADIUS])
 	print("test_arena: m9 raggio: fonte %.3f m, deciso %.3f m; copie allineate: %s"
 		% [fonte, DECIDED_RADIUS, ", ".join(lette)])
 
@@ -845,9 +873,9 @@ func _kill_all_quiet(horde) -> int:
 ## l'arena non e' chiusa e si vede il vuoto.
 ##
 ## Il raggio qui e' **quello che il terreno ha costruito**, letto da lui, e non il
-## numero del test: se i due divergessero, il terreno avrebbe costruito un muro a
-## 28 m dentro un'arena di 46 e questa sezione passerebbe lo stesso, perche' il
-## confronto sarebbe fra due numeri che il test ha scritti entrambi.
+## numero del test: se i due divergessero, il terreno avrebbe costruito un muro
+## al raggio vecchio dentro l'arena di oggi e questa sezione passerebbe lo stesso,
+## perche' il confronto sarebbe fra due numeri che il test ha scritti entrambi.
 func _terrain(h, arena: Node3D) -> void:
 	var ground = arena.get_node("Ground")
 	var raggio: float = ground.arena_radius()
@@ -865,8 +893,8 @@ func _terrain(h, arena: Node3D) -> void:
 	# E il terreno deve essere stato costruito con il raggio **del contratto**, non
 	# con il suo fallback: il fallback e' dichiarato per il caso in cui il
 	# contratto non c'e', e su questa scena il contratto c'e'. Se il terreno
-	# prendesse il fallback qui, avrebbe costruito un muro di 46 m dentro
-	# qualunque arena e nessuna delle asserzioni qui sopra se ne accorgerebbero.
+	# prendesse il fallback qui, avrebbe costruito un muro al raggio di prima
+	# dentro l'arena di oggi e nessuna delle asserzioni qui sopra se ne accorgerebbero.
 	h.near(raggio, _source_radius(), RADIUS_TOLERANCE,
 		"il terreno deve essere stato costruito con il raggio della fonte (%.1f m), non con il fallback: costruito con %.1f m"
 			% [_source_radius(), raggio])
@@ -1120,7 +1148,7 @@ func _ombre(h, arena: Node3D) -> void:
 	# ombre sono un costo che nessuno ha misurato.
 	h.check(impostato <= peggiore * SHADOW_MARGIN,
 		"directional_shadow_max_distance non deve essere sproporzionato: %.1f m contro il minimo necessario di %.1f m" % [impostato, peggiore])
-	print("test_arena: m9 ombre: directional_shadow_max_distance=%.1f m, il punto piu' lontano dalla camera e' a %.1f m (era 90.0 m: meta' arena senza ombra)"
+	print("test_arena: m9 ombre: directional_shadow_max_distance=%.1f m, il punto piu' lontano dalla camera e' a %.1f m (era 90.0 m all'arena da 28 m, 120.0 m a quella da 46 m: meta' arena senza ombra ogni volta che il raggio cresceva e il numero no)"
 		% [impostato, peggiore])
 
 ## ## I DENTI DI -arena: la funzione che disegna il disco, chiamata con un input
@@ -1210,8 +1238,9 @@ func _camera(h, arena: Node3D) -> void:
 
 ## ## Il criterio n. 3 di m9: al bordo il giocatore e' ANCORA IN QUADRO
 ##
-## L'arena e' passata da 56 m a 92 m di diametro e la camera e' rimasta a 34 m
-## di altezza e 24 m dietro. Il rischio dichiarato dal vertice era che il
+## L'arena e' passata da 56 m a 92 m di diametro con m9 e poi a 120 m con m11,
+## e la camera e' rimasta a 34 m di altezza e 24 m dietro. Il rischio dichiarato dal
+## vertice era che il
 ## giocatore, al limite del clamp, **uscisse dall'inquadratura**. Il numero che
 ## decide la domanda e' uno solo e non e' il raggio: e' di quanto il giocatore
 ## puo' stare **fuori dal punto guardato** quando e' al muro, cioe'
@@ -1242,6 +1271,18 @@ func _camera(h, arena: Node3D) -> void:
 ## una direzione sola scelta a occhio: il caso peggiore si sposta con i numeri
 ## della camera, e un test che ne avesse fissata una continuerebbe a passare
 ## mentre il gioco cambia.
+##
+## ## m11: PERCHE' QUESTO NUMERO **NON** PEGGIORA PASSANDO A 60 m
+##
+## Il raggio si cancella: il giocatore si ferma a `R - ARENA_MARGIN` e il punto
+## guardato a `R - EDGE_MARGIN`, quindi i 5,2 m di scarto sono gli stessi a ogni
+## raggio, e la distanza di vista pure (la camera nasce dall'ancora con un offset
+## costante di HEIGHT e BACK). Il numero a 46 m e quello a 60 m coincidono **per
+## costruzione**, e `_m11_raggio` lo verifica per entrambi e lo confronta con la
+## misura di questa sezione: 0,208 a 46 m, 0,208 a 60 m. E' la ragione per cui la
+## camera **non e' stata toccata** e il tetto **non e' stato spostato**: il rimedio
+## che il piano prevede (allontanare la camera) sarebbe stato un numero cambiato
+## per coprire un numero che non era peggiorato.
 
 ## Direzioni in cui il giocatore viene portato al limite del clamp: quattro assi
 ## e quattro diagonali, in gradi.
@@ -1300,6 +1341,10 @@ func _camera_al_bordo(h, arena: Node3D, cam) -> void:
 		righe.append("%d deg %.3f%s" % [int(grado), rapporto, "" if dentro else " FUORI"])
 	player.global_position = posizione_salvata
 	cam.track(player.global_position, 1.0)
+
+	_frame_worst = peggiore
+	_frame_deg = peggiore_grado
+	_frame_view = peggiore_distanza
 
 	# ## IL CRITERIO: al limite del clamp il giocatore e' dentro al frustum
 	h.check(fuori == 0,
@@ -1409,7 +1454,8 @@ func _limite_di_uscita(offset: float, semi_h_gradi: float) -> float:
 ## ## COME E' STATO DERIVATO (misura prima del numero)
 ##
 ## Sweep delle otto direzioni di `_camera_al_bordo`, scena vera, camera vera
-## (34 m di altezza, 24 m dietro, `fov` 62, `KEEP_HEIGHT`), arena a 46 m:
+## (34 m di altezza, 24 m dietro, `fov` 62, `KEEP_HEIGHT`), arena a **46 m** nel
+## 2026-10-13:
 ##
 ##     il giocatore al muro e' a 45,2 m dal centro (46 - ARENA_MARGIN 0,8)
 ##     la camera spinge il punto guardato a 40,0 m (46 - EDGE_MARGIN 6,0)
@@ -1420,13 +1466,21 @@ func _limite_di_uscita(offset: float, semi_h_gradi: float) -> float:
 ##     semi-angolo orizzontale 31,0 gradi  ->  tan = 0,6009
 ##     MISURATO: 5,2 / (41,6 x 0,6009) = 0,208 della semi-larghezza
 ##
+## **m11: a 60 m il numero e' lo stesso, 0,208**, perche' l'offset al muro e'
+## `EDGE_MARGIN - ARENA_MARGIN` = 5,2 m a ogni raggio e il raggio si cancella
+## nella differenza. Rimisurato sulla scena vera a 60 m: clamp a 59,2 m (60 - 0,8),
+## ancora a 54,0 m (60 - 6,0), distanza di vista **41,6 m** e rapporto **0,208**,
+## peggiore su 0 gradi. Le due righe sotto sono le stesse di prima e non cambiano:
+## il tetto e' un numero deciso, non una scommessa sul codice.
+##
 ## e la stampa dice anche che, cosi', il giocatore uscirebbe dall'inquadratura
 ## solo se la camera scendesse sotto gli **8,7 m** di distanza di visione: cioe'
 ## il booleano `is_position_in_frustum`, da solo, non avrebbe denti (nessuno
 ## ricala la camera di quattro volte di proposito). Per questo il criterio ha due
 ## righe: il booleano che il vertice ha chiesto, e il margine sotto.
 ##
-## **Perche' 0,50 e non il massimo misurato (0,208)**: un tetto poggiato sul
+## **Perche' 0,50 e non il massimo misurato (0,208, a 46 m come a 60 m)**: un
+## tetto poggiato sul
 ## massimo cadrebbe alla prima flessione di un pixel e direbbe piu' del gioco di
 ## quanto il gioco sappia fare. 0,50 mette il giocatore dentro la **meta'
 ## centrale** del quadro, che e' la richiesta di progetto ("non basta che ci sia,
@@ -1441,11 +1495,256 @@ func _limite_di_uscita(offset: float, semi_h_gradi: float) -> float:
 ## In headless il viewport e' **64x64**, aspetto **1,000**, e non i 1280x720 di
 ## `project.godot`: l'aspetto non viene da un monitor. Percio' il semi-angolo
 ## orizzontale e' 31 gradi, non i 46,9 di un 16:9, e il rapporto misurato
-## (0,208) e' il **caso peggiore**: con la finestra vera a 1,778 di aspetto lo
-## stesso giocatore sta a 0,117. La misura e' quindi conservativa per costruzione,
-## e non un artefatto da correggere: e' il caso in cui il criterio e' piu' facile
-## da violare.
+## (0,208 a 46 m e a 60 m) e' il **caso peggiore**: con la finestra vera a 1,778 di
+## aspetto lo stesso giocatore sta a 0,117. La misura e' quindi conservativa per
+## costruzione, e non un artefatto da correggere: e' il caso in cui il criterio e' piu'
+## facile da violare.
 const FRAME_LIMIT := 0.50
+
+# --- 5b. m11: il raggio e' passato da 46,0 m a 60,0 m, e i numeri sono qui ------
+#
+# ## PERCHE' UNA SEZIONE E NON UN NUMERO CAMBIATO
+#
+# Un cambio di raggio non si verifica guardando il raggio: il raggio lo
+# confronta gia' il criterio n. 1 e il criterio n. 2. Qui si verifica **tutto
+# quello che il raggio si porta dietro** — pavimento, muro, ombre, inquadratura,
+# nodi — e ogni numero viene stampato **accanto al suo numero di prima**, calcolato
+# con lo stesso codice. Il criterio di m9 stampava `46.000` come «fonte»,
+# `46.000` come «deciso» e le copie allineate: quello stile, con un numero in
+# piu', e' il riferimento per un cambio di questo peso.
+#
+# ## LA REGOLA, E PERCHE' «100 m vanno bene anche a 60 m» non e' una regola
+#
+# Il pavimento e' un quadrato di `2 * R + FLOOR_MARGIN` e il muro chiude
+# `TAU * R`: entrambe le misure sono **derivate dal raggio**, non scelte. La
+# regola e' «coprire il disco piu' un margine», e sotto e' dichiarata anche la
+# dentatura: se il raggio sale e il pavimento resta com'era, il gioco si vede
+# oltre il muro e questa sezione va rossa.
+#
+# ## L'INQUADRATURA: UN INVARIANTE CHE DEVE ESSERE VISTO
+#
+# Il rapporto fra la posizione del giocatore e il centro dell'inquadratura, al
+# limite del clamp, e' `offset / (distanza di vista * tan(semi-angolo))`, e
+# l'`offset` e' `EDGE_MARGIN - ARENA_MARGIN` = 6,0 - 0,8 = **5,2 m**: la camera
+# spinge il punto guardato a `R - EDGE_MARGIN` mentre il giocatore si ferma a
+# `R - ARENA_MARGIN`, quindi il **raggio si cancella nella differenza**. Per
+# questo il numero a 60 m e' lo stesso di quello a 46 m e la camera **non e'
+# stata toccata**: spostarla avrebbe reso peggiore un numero che non peggiorava.
+# Un invariante che non si vede e' un invariante che il prossimo rompe senza
+# accorgersene, quindi qui e' stampato due volte e confrontato con la misura.
+
+# ## I DENTI DI QUESTA SEZIONE: PROVATI E RIMOSSI
+#
+# Le due asserzioni con cui finisce (pavimento che copre il disco piu' il margine,
+# muro che chiude la circonferenza del raggio di oggi) sono state provate il
+# 2026-10-14 moltiplicando per 1,5 il raggio che questa sezione confronta con la
+# scena — cioe' facendo finta che il raggio fosse salito e il terreno no. Le due
+# sono cadute **una per una**, con i numeri accanto: pavimento 128,0 m misurati
+# contro 188,0 m richiesti, muro 378 piastrelle contro 566 richieste. Uscita 1. Il
+# blocco e' stato rimosso e non e' in questo file (verificato con `grep`), quindi
+# quelle due righe portano davvero la geometria e non un costrutto di questa sezione.
+
+## Il raggio di prima e quello di oggi. `PREVIOUS_RADIUS` e' il numero sostituito
+## e non viene confrontato con nessuno: serve a stampare la coppia.
+func _m11_raggio(h, arena: Node3D) -> void:
+	var t0 := Time.get_ticks_usec()
+	var vecchio := PREVIOUS_RADIUS
+	var nuovo := _source_radius()
+
+	# I numeri di cui ho bisogno sono **letti dai sorgenti**, mai ricopiati: e' la
+	# tecnica che questo file usa gia' per `HEIGHT`/`BACK`/`EDGE_MARGIN`.
+	var tile := _const_of(GROUND_SCRIPT, "TILE")
+	var margine_pav := _const_of(GROUND_SCRIPT, "FLOOR_MARGIN")
+	var file_muro := _const_of(GROUND_SCRIPT, "WALL_ROWS")
+	var edge := _const_of(CAMERA_SCRIPT, "EDGE_MARGIN")
+	var altezza := _const_of(CAMERA_SCRIPT, "HEIGHT")
+	var dietro := _const_of(CAMERA_SCRIPT, "BACK")
+	var look_h := _const_of(CAMERA_SCRIPT, "LOOK_HEIGHT")
+	var suolo := _const_of(CAMERA_SCRIPT, "ARENA_FLOOR")
+	if not h.check(tile > 0.0 and margine_pav >= 0.0 and file_muro > 0.0,
+			"m11: per ricalcolare la geometria servono TILE, FLOOR_MARGIN e WALL_ROWS di src/render/arena_ground.gd: letti %.3f, %.3f, %.3f"
+				% [tile, margine_pav, file_muro]):
+		return
+
+	var player = arena.get_node_or_null("Player")
+	var margine_giocatore: float = _costante_di(player, "ARENA_MARGIN")
+	if not h.check(edge > 0.0 and altezza > 0.0 and dietro > 0.0 and look_h >= 0.0
+			and suolo >= 0.0 and float(margine_giocatore) > 0.0,
+			"m11: per l'inquadratura servono EDGE_MARGIN, HEIGHT, BACK, LOOK_HEIGHT e ARENA_FLOOR di src/render/arena_camera.gd e ARENA_MARGIN di src/player/player.gd: letti %.3f, %.3f, %.3f, %.3f, %.3f, %.3f"
+				% [edge, altezza, dietro, look_h, suolo, float(margine_giocatore)]):
+		return
+	var marg := float(margine_giocatore)
+
+	# ## 5b.1 IL TERRENO: la regola e i due numeri, uno per lato
+	#
+	# `x` e' il numero di piastrelle per lato, `y` il totale del pavimento.
+	var pav_vecchio := _pavimento_per(vecchio, tile, margine_pav)
+	var pav_nuovo := _pavimento_per(nuovo, tile, margine_pav)
+	# `x` e' il numero di segmenti che chiudono la circonferenza, `y` le
+	# piastrelle in totale (segmenti per file di muro).
+	var muro_vecchio := _muro_per(vecchio, tile, int(file_muro))
+	var muro_nuovo := _muro_per(nuovo, tile, int(file_muro))
+
+	var ground = arena.get_node_or_null("Ground")
+	if h.check(ground != null, "m11: la scena vera non ha il nodo Ground"):
+		var misurato: float = ground.floor_covered_side()
+		# Il pavimento deve coprire il disco **piu' il margine dichiarato**, non
+		# solo il diametro: e' questa la riga che resta rossa se il raggio sale e
+		# il pavimento resta quello di prima (100,0 m su un disco di 128,0 m, e si
+		# vede il vuoto oltre il muro).
+		h.check(misurato >= nuovo * 2.0 + margine_pav - 0.001,
+			"m11: il pavimento deve coprire il disco piu' il margine: %.1f m di lato per un raggio di %.1f m con FLOOR_MARGIN %.1f m, ne copre %.1f m. Il pavimento del raggio di prima misurava %.1f m"
+				% [nuovo * 2.0 + margine_pav, nuovo, margine_pav, misurato, _lato_pavimento(PREVIOUS_RADIUS, tile, margine_pav)])
+		# E il muro deve essere stato ricostruito sul raggio di oggi: contare le
+		# piastrelle e' l'unico modo di vederlo in headless (il buffer del
+		# `MultiMesh` non si rilegge, cfr. la nota in `horde_renderer.gd`).
+		h.check(ground.wall_instances() >= muro_nuovo.y,
+			"m11: il muro deve chiudere la circonferenza di %.1f m: servono %d piastrelle e ce ne sono %d, cioe' quelle del raggio di prima (che ne chiedeva %d su %.1f m)"
+				% [TAU * nuovo, muro_nuovo.y, ground.wall_instances(), muro_vecchio.y, TAU * vecchio])
+		print("test_arena: m11 terreno: pavimento %d piastrelle (%.1f m di lato) a %.1f m -> %d piastrelle (%.1f m di lato) a %.1f m; muro %d piastrelle (%.1f m di piastrelle) su %.1f m di circonferenza -> %d piastrelle (%.1f m) su %.1f m"
+			% [pav_vecchio.y, pav_vecchio.x * tile, vecchio, pav_nuovo.y, pav_nuovo.x * tile, nuovo,
+				muro_vecchio.y, float(muro_vecchio.y) * tile, TAU * vecchio,
+				muro_nuovo.y, float(muro_nuovo.y) * tile, TAU * nuovo])
+	print("test_arena: m11 terreno misurato sulla scena vera: %d piastrelle di pavimento (%.1f m di lato) e %d di muro (%.1f m su %.1f di circonferenza) a %.1f m di raggio"
+		% [ground.floor_instances(), ground.floor_covered_side(), ground.wall_instances(),
+			ground.wall_coverage(), TAU * nuovo, nuovo])
+
+	# ## 5b.2 LE OMBRE: il punto piu' lontano si allontana, il numero no
+	#
+	# La catena e' la stessa di `_ombre`, che asserisce: ancora a
+	# `R - EDGE_MARGIN`, camera a `ancora + (0, HEIGHT, BACK)`, e il punto peggiore
+	# e' il muro diametralmente opposto all'ancora. Qui la catena viene calcolata
+	# **per entrambi i raggi**, cosi' la stampa dice quanto il numero e' cresciuto
+	# e dice che il tetto dichiarato («meta' arena senza ombra») e' stato
+	# ricalcolato invece che moltiplicato per 60/46.
+	var pegg_vecchio := _distanza_ombre(vecchio, edge, altezza, dietro)
+	var pegg_nuovo := _distanza_ombre(nuovo, edge, altezza, dietro)
+	var sole = arena.get_node_or_null("Sun")
+	var impostato: float = sole.directional_shadow_max_distance if sole != null else -1.0
+	print("test_arena: m11 ombre: il punto piu' lontano dalla camera e' a %.1f m a %.1f m di raggio e a %.1f m a %.1f m, contro %.1f m impostati: il tetto dichiarato e' meta' arena senza ombra, quindi il numero e' stato ricalcolato e non moltiplicato per 60/46 (%.2f)"
+		% [pegg_vecchio, vecchio, pegg_nuovo, nuovo, impostato, nuovo / maxf(vecchio, 0.001)])
+
+	# ## 5b.3 L'INQUADRATURA: il numero di prima accanto al numero di oggi
+	#
+	# Il numero calcolato sul raggio di oggi deve combaciare con quello **misurato**
+	# da `_camera_al_bordo` sulla scena vera: e' il confronto che autorizza a usare
+	# la stessa formula sul raggio di prima, dove la scena non esiste piu'.
+	var cam = arena.get_node_or_null("Camera")
+	if not h.check(cam != null, "m11: la scena vera non ha il nodo Camera"):
+		return
+	var semi := _semi_angoli(cam, _aspecto(cam))
+	var cal_vecchio := _in_quadro(vecchio, marg, edge, altezza, dietro, look_h, suolo, semi)
+	var cal_nuovo := _in_quadro(nuovo, marg, edge, altezza, dietro, look_h, suolo, semi)
+
+	h.near(cal_nuovo.x, _frame_worst, 0.001,
+		"m11: il rapporto in quadro calcolato per %.1f m deve combaciare con quello MISURATO sulla scena vera: calcolato %.4f, misurato %.4f. Se i due non combaciano, il numero stampato per il raggio di prima e' una ricorrenza e non una verifica"
+			% [nuovo, cal_nuovo.x, _frame_worst])
+	h.check(cal_vecchio.x <= FRAME_LIMIT,
+		"m11: al raggio di %.1f m il giocatore al muro era %.3f della semi-larghezza, contro il tetto %.2f: il numero non e' peggiorato e la camera non va toccata"
+			% [vecchio, cal_vecchio.x, FRAME_LIMIT])
+	h.check(cal_nuovo.x <= FRAME_LIMIT,
+		"m11: al raggio di %.1f m il giocatore al muro e' %.3f della semi-larghezza, contro il tetto %.2f: se e' oltre, il rimedio e' allontanare la camera e dichiarare di quanto, non spostare il tetto"
+			% [nuovo, cal_nuovo.x, FRAME_LIMIT])
+
+	print("test_arena: m11 inquadratura: a %.1f m il giocatore al muro era %.3f della semi-larghezza (peggiore su %d gradi, a %.1f m di distanza di vista), tetto %.2f"
+		% [vecchio, cal_vecchio.x, int(cal_vecchio.z), cal_vecchio.y, FRAME_LIMIT])
+	print("test_arena: m11 inquadratura: a %.1f m e' %.3f, MISURATO %.3f sulla scena vera: invariante perche' l'offset al muro e' EDGE_MARGIN - ARENA_MARGIN = %.1f - %.1f = %.1f m e il raggio si cancella nella differenza, quindi la camera NON e' stata toccata e resta %.1f m di distanza di vista e %.1f m sotto i quali si uscirebbe dal quadro"
+		% [nuovo, cal_nuovo.x, _frame_worst, edge, marg, maxf(edge - marg, 0.0),
+			cal_nuovo.y, _limite_di_uscita(maxf(edge - marg, 0.0), semi.y)])
+
+	# ## 5b.4 I NODI: un raggio maggiore non deve costare un nodo
+	var nodi := _count_nodes(arena)
+	h.check(nodi < NODE_BUDGET,
+		"m11: node_count deve restare sotto %d con l'arena a %.1f m: e' %d" % [NODE_BUDGET, nuovo, nodi])
+	print("test_arena: m11 nodi: node_count=%d a %.1f m di raggio, tetto %d invariato: il raggio maggiore non costa un nodo (pavimento, muro e ostacoli sono istanze di MultiMesh, non nodi) e gli ostacoli sono sempre %d dischi su una sola MultiMeshInstance3D"
+		% [nodi, nuovo, NODE_BUDGET, OBST.OBSTACLE_COUNT])
+
+	print("test_arena: m11 raggio misurato: %.1f m -> %.1f m; la sezione ha costato %.1f ms (il file intero e' stampato in fondo)"
+		% [vecchio, nuovo, float(Time.get_ticks_usec() - t0) / 1000.0])
+
+## Le piastrelle per lato (`x`) e in tutto (`y`) del quadrato che copre il disco
+## piu' `margine`, con lo stesso arrotondamento in eccesso di
+## `arena_ground.gd`: un pavimento un pelo piu' largo costa quattro piastrelle, un
+## pavimento piu' stretto costa il buco nero.
+func _pavimento_per(raggio: float, tile: float, margine: float) -> Vector2i:
+	var per_lato := int(ceil((raggio * 2.0 + margine) / tile))
+	return Vector2i(per_lato, per_lato * per_lato)
+
+## Il lato che il pavimento copre davvero: `ceil(lato / TILE) * TILE`.
+func _lato_pavimento(raggio: float, tile: float, margine: float) -> float:
+	return float(_pavimento_per(raggio, tile, margine).x) * tile
+
+## I segmenti che chiudono la circonferenza (`x`) e le piastrelle in totale
+## (`y`), uno per piastrella e `file` file di altezza, arrotondando in eccesso
+## come `arena_ground.gd`: il muro deve chiudere davvero, senza buchi e senza
+## sporgenze.
+func _muro_per(raggio: float, tile: float, file: int) -> Vector2i:
+	var segmenti := maxi(8, int(ceil(TAU * raggio / tile)))
+	return Vector2i(segmenti, segmenti * file)
+
+## Il punto del muro piu' lontano dalla camera, in metri. Stessa catena di
+## `_ombre`: in orizzontale l'ancora sta a `R - EDGE_MARGIN` dalla parte della
+## camera e il muro opposto a `R` dalla parte opposta, in verticale la camera e'
+## a `HEIGHT`. Il raggio compare **due volte** e `EDGE_MARGIN` una: e' per questo
+## che il numero cresce piu' che linearmente e non puo' essere moltiplicato.
+func _distanza_ombre(raggio: float, edge: float, altezza: float, dietro: float) -> float:
+	return sqrt(pow(dietro + raggio - edge + raggio, 2.0) + pow(altezza, 2.0))
+
+## Il rapporto in quadro al limite del clamp per un raggio **qualsiasi**, senza
+## mettere in scena un'arena: la stessa camera (`HEIGHT`, `BACK`, `LOOK_HEIGHT`,
+## `EDGE_MARGIN`), lo stesso clamp e lo stesso `look_at` di `track()`, applicati
+## alle stesse otto direzioni di `BORDO_DIREZIONI`. Restituisce
+## `x` = rapporto peggiore, `y` = distanza di vista a quel punto, `z` = gradi.
+##
+## Serve al raggio di **prima**, dove non c'e' piu' una scena da montare: e il
+## confronto fra questo numero e la misura fatta sul raggio di oggi e' l'unica
+## cosa che gli dà diritto di esistere.
+func _in_quadro(raggio: float, margine: float, edge: float, altezza: float, dietro: float,
+		look_height: float, suolo: float, semi: Vector2) -> Vector3:
+	var limite := maxf(raggio - margine, 0.5)
+	var interno := maxf(raggio - edge, 0.0)
+	var tv := tan(deg_to_rad(semi.x))
+	var th := tan(deg_to_rad(semi.y))
+	var peggiore := 0.0
+	var distanza := 0.0
+	var grado := 0.0
+	for g in BORDO_DIREZIONI:
+		var a := deg_to_rad(float(g))
+		var p := Vector3(cos(a) * limite, 0.0, sin(a) * limite)
+		# Lo stesso clamp di `_clamped()`: il punto guardato spinto dentro.
+		var flat := Vector2(p.x, p.z)
+		var ancora := Vector3(flat.x, suolo, flat.y)
+		if flat.length() > interno:
+			ancora = Vector3(flat.normalized().x * interno, suolo, flat.normalized().y * interno)
+		var camera := ancora + Vector3(0.0, altezza, dietro)
+		# Lo stesso `look_at`: `z` dalla camera al bersaglio, `x` in su, `y` residua.
+		var zz := (camera - (ancora + Vector3.UP * look_height)).normalized()
+		var xx := Vector3.UP.cross(zz).normalized()
+		var yy := zz.cross(xx)
+		var rel := p - camera
+		var locale := Vector3(rel.dot(xx), rel.dot(yy), rel.dot(zz))
+		var depth := maxf(-locale.z, 0.001)
+		var rapporto := maxf(absf(locale.x / depth) / th, absf(locale.y / depth) / tv)
+		if rapporto > peggiore:
+			peggiore = rapporto
+			distanza = depth
+			grado = float(g)
+	return Vector3(peggiore, distanza, grado)
+
+## Una costante numerica dalla mappa delle costanti di uno script gia' vivo, o
+## `-1.0`. Serve per i numeri di ** altre foglie** che questo test usa senza
+## copiarli: se il nome sparisce, il valore e' `-1.0` e la sezione che lo
+## aspettava lo dice invece di continuare con `0.0`.
+func _costante_di(node, chiave: String) -> float:
+	if node == null:
+		return -1.0
+	var scr = node.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return -1.0
+	var v = scr.get_script_constant_map().get(chiave)
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return -1.0
 
 # --- 6. L'HUD ------------------------------------------------------------------
 
@@ -1839,7 +2138,9 @@ func _knockback_of_kind(h, horde, player, weapon, pool, kind: int) -> Dictionary
 ## puo' depositare il nemico a 45 m dal centro, `ACQUIRE_RADIUS` dell'arma e'
 ## 26 m, quindi l'arma **non ha un bersaglio da mirare** e il colpo non parte
 ## mai: il boss (inseguimento 1,7 m/s) non arrivava addosso al giocatore dentro
-## la finestra di 240 frame e la sezione ha detto FAIL.
+## la finestra di 240 frame e la sezione ha detto FAIL. Con l'arena a **60 m** il
+## caso e' identico e peggiore (spawn possibile fino a 59 m dal centro): percio'
+## questa correzione **non e' stata rimossa** e il numero non sale.
 ##
 ## La correzione non e' allungare la finestra (sarebbe allargare un tetto per far
 ## passare) e non e' muovere il nemico (sarebbe scrivere un record a mano):
@@ -2119,6 +2420,23 @@ const SWEEP_STEP := 10
 ##   2. **9 nemici in una cella** -> `worst_bucket` 9: sopra il tetto 8, e
 ##      `grid_overflowed()` resta ancora falso -> e' il numero che dimostra che il
 ##      tetto sta guardando la densita' e non la saturazione del secchiello.
+## ## 5.9 `GRID_CEILING = 8` IL 2026-10-14, E PERCHE' **RESTA** A 60 m
+##
+## Il raggio e' passato a **60 m** (piano 1.14-quinque) e la densita' e' scesa
+## ancora: il disco e' 1,70 volte piu' grande di quello da 46 m con gli stessi
+## 200 nemici. I due numeri, entrambi misurati:
+##
+##     disposizione iniziale, 46 m    picco 4
+##     disposizione iniziale, 60 m    picco 3
+##     a regime con 200 addensati, 60 m   picco 20 (su 32 slot, nessun traboccamento)
+##
+## Il tetto **non scende** e la ragione non e' che sia giusto cosi': e' che la
+## misura su cui e' stato derivato (sweep di 24 semi a `population` = 200, che
+## questa sezione stampa: min 2, mediana 3, **max 4**) non e' cambiata nella sua
+## parte che conta, e `4 + 4 = 8`. Abbassarlo perche' la mediana e' scesa sarebbe
+## spostare un tetto per far passare una misura che e' **scesa**: l'esatto
+## opposto di quello che il criterio chiede. E il picco di 20 a regime resta
+## molto sotto i 32 slot di `BUCKET_SLOTS`, quindi nessun traboccamento.
 const GRID_CEILING := 8
 
 ## Quante posizioni devono cambiare fra due semi **diversi**: il criterio n. 2 di

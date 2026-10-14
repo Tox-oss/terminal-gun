@@ -21,19 +21,43 @@ extends SceneTree
 ##
 ## ## m9: il raggio dell'arena è in sei copie, e due di queste sono mie
 ##
-## La fonte del raggio è `src/render/arena.gd:ARENA_RADIUS` (**46.0**), il numero
-## è uscito dalla sonda `docs/piramide/probe_arena_density.gd` (piano §1.12) e le
-## altre cinque copie sono fallback dichiarati o default (la tabella è in
-## §1.12-bis). Di questa foglia:
+## La fonte del raggio è `src/render/arena.gd:ARENA_RADIUS` (**60.0** dal 2026-10-14,
+## era **46.0** dal 2026-10-13), il numero di oggi è uscito dalla sonda
+## `docs/piramide/probe_survive.gd` (piano §1.14-quinque) e le altre cinque copie
+## sono fallback dichiarati o default (la tabella è in §1.12-bis). Di questa foglia:
 ##
 ##   - `src/sim/horde.gd` è la copia n. 3: un **fallback dichiarato**, che vale
 ##     solo quando il contratto non c'è ancora. La sezione 13 lo asserisce
-##     leggendo **dal sorgente** e confrontandolo col default del contratto;
+##     leggendo **dal sorgente** e confrontandolo col default del contratto. Con
+##     il passaggio a 60 m questa sezione è quella che è andata **rossa** per
+##     prima: il contratto diceva già 60,0 m e il fallback diceva ancora 46,0 m.
 ##   - il **campionamento delle query** di questo file campionava un quadrato
 ##     `±28` scritto a mano. Non asseriva il raggio, quindi **non è diventata
 ##     rossa** quando l'arena è passata a 46: campionava metà del disco, il
 ##     benchmark restava verde e la copertura si era dimezzata in silenzio. È la
 ##     classe di difetto di §3.6-bis, e la sezione 7 lo chiude.
+##
+## ## m11: perché 46,0 -> 60,0, e cosa misura il raggio nuovo
+##
+## Il **prima** e il **dopo** nella stessa frase, perché un raggio non è una
+## costante di stile: è la geometria su cui converge tutta la simulazione, e
+## quattro numeri ne discendono per costruzione, non per scelta.
+##
+##   - **prima 46,0 m** (m9): dalla sonda `probe_arena_density.gd` (piano §1.12) —
+##     a 200 nemici lo spazio libero passava dall'85,2% al 94,6% e la bolla sicura
+##     più grande da 9,5 a 19,1 m;
+##   - **dopo 60,0 m** (m11): dalla sonda `probe_survive.gd` (piano
+##     §1.14-quinque), che misura la **sopravvivenza** di uno schivatore al variare
+##     del raggio, tre semi per raggio e con due casi a risposta nota (a R = 12 m,
+##     dove non si può schivare, lo strumento **deve** morire: è morto a 61,20 s).
+##     Caso peggiore **55,33 s a 46 m** contro **146,72 s a 60 m**, fattore
+##     **2,65**; da 60 a 75 m il fattore è **1,07**, quindi il ginocchio è a circa
+##     60 m e oltre non si compra niente.
+##
+## Nessuna costante di `src/sim/` è cambiata per il passaggio: è cambiata la
+## geometria. Le quattro cose che ne derivano sono **rimisurate nello stesso
+## lancio, a 46,0 m e a 60,0 m, dalla stessa funzione** (sezione 13e-bis): la
+## griglia del campo, i dischi, la griglia dei vicini e il costo per passo.
 ##
 ## ## LA MISURA DEL PRIMA, e perche' questo file la porta in testa
 ##
@@ -111,22 +135,34 @@ const OBST = preload("res://src/sim/obstacles.gd")
 ##
 ## ### La geometria (`src/sim/obstacles.gd`)
 ##
-## | numero | valore | da dove viene |
-## |---|---|---|
-## | ostacoli | **27** dischi, tutti uguali | 6 + 9 + 12 su tre anelli: abbastanza da mettere un muro davanti a chi arriva da fuori, non abbastanza da chiudere un anello |
-## | raggio del disco | **2,99 m** (0,065 x R) | `2,99 m` e' **1,6 volte** la sagoma del boss (1,90 m): un disco piu' piccolo del nemico piu' grosso si aggira senza sembrare un muro |
-## | anelli | **15,18 / 27,14 / 39,10 m** | il piu' interno lascia **12,19 m** liberi al centro, e `MIN_SPAWN_GAP` e' 12,0: nessuno spawn del contratto puo' quindi nascere dentro un ostacolo |
-## | distanza minima fra due dischi | **12,0 m** (fra anelli diversi) | il passaggio utile e' **6,0 m**, cioe' 1,6 volte il diametro del boss (3,8 m): nessuna fessura in cui un nemico possa incastrarsi |
-## | area coperta | **11,5%** del disco | con gli ostacoli l'area libera scende dal 94,6% di m9 all'88,5%: si sente, e non è un labirinto |
+## Il **prima** e il **dopo** nelle stesse righe, e la ragione per cui la
+## tabella ha quattro colonne invece di tre: in m11 il raggio e' passato da 46,0
+## a 60,0 m e **nessuna costante di questo file e' cambiata** (vedi sotto).
+##
+## | numero | a 46,0 m (m9/m10) | a 60,0 m (m11) | da dove viene |
+## |---|---|---|---|
+## | ostacoli | **27** dischi, tutti uguali | **27**, invariati | 6 + 9 + 12 su tre anelli: abbastanza da mettere un muro davanti a chi arriva da fuori, non abbastanza da chiudere un anello. Il **numero non e' stato ritoccato** e la riga dell'area dice perche' |
+## | raggio del disco | **2,99 m** | **3,90 m** | `0,065 x R`, cioe' una **frazione**: il disco cresce con l'arena da solo. Era 1,6 volte la sagoma del boss (1,90 m), e' ora 2,1 volte: un disco piu' piccolo del nemico piu' grosso si aggira senza sembrare un muro, e questo resta vero |
+## | anelli | **15,18 / 27,14 / 39,10 m** | **19,80 / 35,40 / 51,00 m** | frazioni 0,33 / 0,59 / 0,85 di R. Il piu' interno lascia **19,80 m** liberi al centro, e `MIN_SPAWN_GAP` e' 12,0: nessuno spawn del contratto puo' quindi nascere dentro un ostacolo, come a 46 m |
+## | dischi piu' vicini | **11,97 m** | **15,61 m** | misurati con `OBST.min_separation`, non progettati: sono la distanza fra due centri su due anelli diversi |
+## | passaggio utile | **5,99 m** = 1,58x il boss | **7,81 m** = **2,06x** il boss | `distanza minima - 2 x raggio`: e' la **pista** che il nemico deve attraversare, e a 60 m **cresce**. I dischi non diventano piu' fitti: si allargano con l'arena e lasciano fra loro un corridoio piu' largo, quindi le costanti di questo file restano quelle di m10 |
+## | area coperta | **11,4%** del disco | **11,4%** | `27 x 0,065^2` non dipende da R: la copertura areale e' la stessa ai due raggi (la tabella di m10 scriveva 11,5%, stesso numero con un arrotondamento diverso), ed e' per questo che **numero e frazione non vanno ritoccati** per allungare il raggio |
 ##
 ## ### Il campo (`src/sim/flow_field.gd`)
 ##
-## | numero | valore | da dove viene |
-## |---|---|---|
-## | cella | **2,0 m** | la griglia dei vicini e' 4,0 m: quella elenca chi c'e', questa dice da che parte andare, e due domande diverse non si pagano con la stessa risoluzione |
-## | griglia | **55 x 55 = 3.025 celle** | `arena_radius + 8 m` di margello, cosi' un nemico spinto fuori dal bordo dal knockback resta guidato |
-## | gonfiatura | raggio + corpo del **boss** + 0,35 m + 0,71 m | il nemico piu' grosso deve poter stare dove il campo gli dice di stare |
-## | ricostruzione | solo se il bersaglio si e' muove di **6,0 m** | da fermo (che e' il caso in cui il gioco si vorrebbe vincere) il campo costa **zero**: misurato in sezione 13 |
+## | numero | a 46,0 m (m9/m10) | a 60,0 m (m11) | da dove viene |
+## |---|---|---|---|
+## | cella | **2,0 m** | **2,0 m** | la griglia dei vicini e' 4,0 m: quella elenca chi c'e', questa dice da che parte andare, e due domande diverse non si pagano con la stessa risoluzione |
+## | griglia | **55 x 55 = 3.025 celle**, 53,2 KB | **69 x 69 = 4.761 celle**, **83,7 KB** | `arena_radius + 8 m` di margello a celle da 2 m, quindi **1,57 volte** le celle e **+30,5 KB**. Sono 18 byte per cella (`blocked` e `fuori` un byte, `cost`, `dir_x`, `dir_z`, `queue` quattro), presi **una volta sola** dentro `build()` e mai piu': la memoria cresce col raggio, il costo per passo no (vedi sotto) |
+## | gonfiatura | **6,65 m** | **7,56 m** | raggio del disco + corpo del **boss** (1,90 m) + 0,35 m di margine + 0,71 m di meta' diagonale della cella |
+## | celle bloccate | **584** su 3.025 (19,3%) | **800** su 4.761 (16,8%) | la frazione **scende**: i dischi ingrandiscono, ma il disco dell'arena ingrandisce di piu' |
+## | ricostruzione | solo se il bersaglio si e' muove di **6,0 m** | idem, non e' cambiata | da fermo (che e' il caso in cui il gioco si vorrebbe vincere) il campo costa **zero**: misurato in sezione 13b e rimisurato in 13e-bis |
+##
+## **Nessuna riga di `src/sim/flow_field.gd` e' cambiata in m11**, e il file non e'
+## di questa foglia: la griglia e' gia' dimensionata sul raggio che riceve
+## (`build(obs, arena_radius, ...)`), quindi al raggio nuovo e' il codice di
+## sempre che produce il numero nuovo. Quello che resta **misurato** e' il
+## costo, perche' una BFS su 4.761 celle costa piu' di una su 3.025.
 ##
 ## ### La frazione che deve aggirare, e **su che cosa e' misurata**
 ##
@@ -149,20 +185,21 @@ const OBST = preload("res://src/sim/obstacles.gd")
 ## I due numeri vengono stampati **entrambi** a ogni lanzo (sezione 13b), e la
 ## banda e' scritta sul primo, dichiarando quale dei due e'.
 ##
-## | numero misurato | valore | da dove viene |
-## |---|---|---|
-## | retta interrotta, **tutto il percorso** | **14,1%** (6787 su 48 000) | il numero che governa la banda `M10_DEVIA_MIN/MAX` |
-## | retta interrotta, **solo finestra di regime** | **3,4%** (1216 su 36 000) | il numero di prima: quanto lontano l'orda, non quanto devia |
+## | numero misurato | a 46,0 m (m10) | a 60,0 m (m11) | da dove viene |
+## |---|---|---|---|
+## | retta interrotta, **tutto il percorso** | **14,1%** (6787 su 48 000) | **13,0%** (6223 su 48 000) | il numero che governa la banda `M10_DEVIA_MIN/MAX`: resta dentro, e la banda non e' stata mossa |
+## | retta interrotta, **solo finestra di regime** | **3,4%** (1216 su 36 000) | **2,1%** (769 su 36 000) | il numero di prima era quanto lontano l'orda, non quanto devia; a 60 m scende perche' nella finestra di regime l'orda e' meno addensata (arrivare al centro da 60 m ci mette piu' tempo) |
 ##
-## **Il 14,1% e' piu' alto dell'11,5% di area coperta, ed e' giusto**: la domanda
+## **Il 13,0% e' piu' alto dell'11,4% di area coperta, ed e' giusto**: la domanda
 ## non e' «quanto disco c'e'» ma «quante rette ci passano dentro», e una retta
-## sposta un disco di 2,99 m su una fascia di 5,24 m gonfiata del corpo del boss.
+## sposta un disco di 3,90 m su una fascia di 6,15 m gonfiata del corpo del boss
+## (2,99 m e 5,24 m a 46 m: la stessa domanda, numeri diversi).
 ## Il rapporto fra le due domande e' il rapporto fra l'area di un disco e la
 ## lunghezza del corridoio che quello disco chiude: la copertura areale non puo'
 ## essere il tetto della banda, e non lo e'.
 ##
 ## La banda resta **5% - 60%**, e i numeri non sono stati abbassati per far passare:
-## il 14,1% sta a 2,8 volte il pavimento e a 4,2 volte dal tetto, quindi una
+## il 13,0% sta a 2,6 volte il pavimento e a 4,6 volte dal tetto, quindi una
 ## geometria che coprasse il doppio o che si azzerasse del tutto andrebbe rossa.
 ## Sotto il 5% la milestone e' invisibile (l'orda attraversa i dischi come se non
 ## ci fossero); sopra il 60% l'orda si muove a ondate e il gioco diventa un
@@ -180,8 +217,8 @@ const SEME_CAPACITY := 20260912
 ## non e' registrato in questo processo.
 const FOCUS := Vector3.ZERO
 ## Un punto in cui non c'e' e non puo' esserci nessun nemico. Non e' una copia
-## del raggio: e' un punto **fuori dal campo**, a circa 20 raggi di distanza con
-## l'arena da 46 m, e resta fuori qualunque arena che possa stare qui dentro.
+## del raggio: e' un punto **fuori dal campo**, a circa 15 raggi di distanza con
+## l'arena da 60 m, e resta fuori qualunque arena che possa stare qui dentro.
 const LONTANO := Vector3(900.0, 0.0, 900.0)
 
 ## Oggetto del pool: serve solo per contare, non ha comportamento.
@@ -238,6 +275,11 @@ func _run() -> void:
 	_incastrati(h, horde)
 	_denti_del_criterio(h, horde)
 	_spawn_sicuro(h, horde)
+	# m11: il raggio 46 -> 60. Sta qui perche' rimette a posto contratto,
+	# geometria, campo e seme prima che `_touch` misuri il morso: `_misura_morso`
+	# non ripopola da zero e troverebbe l'orda nel raggio lasciato dalla sezione
+	# precedente invece che in quello dichiarato.
+	_raggio_60(h, horde)
 	_touch(h, horde)
 	# m11-bis-b: il reroll di `restart_run()`. Sta qui, dopo `_touch` e **prima**
 	# di `_scena_vera`, e il posto e' dichiarato nella sezione: sulla scena vera un
@@ -321,12 +363,28 @@ const PLAYER_HP_REFERENCE := 100.0
 ## cui la simulazione converge**. Nessuna delle due estremita' della banda si e'
 ## mossa da sola, e vanno guardate insieme perche' il rapporto e' un quoziente.
 ##
-## | banda | m7 (1.2, R=28) | m8 (0.45, R=28) | **m9 (0.45, R=46)** | perche' |
-## |---|---|---|---|---|
-## | cadenza misurata | 1.07-1.57 morsi/s | 0.60-1.17 | **0.50-1.07** | 3-5 corpi a portata invece di 5-20; poi l'anello su un disco 2,7 volte piu' largo |
-## | danno al secondo | 3.3-8.5 hp/s | 3.42-11.19 | **2.39-14.37** | le due estremita' vanno in **direzioni opposte** |
-## | sopravvivenza massima | 16.5 s | 29.2 s | **41.8 s** | segue la cadenza dell'onda piccola |
-## | rapporto danno pieno/piccolo | 2.56 | 3.27 | **6.01** | vedi sotto: non e' l'orda piena che e' cresciuta |
+## **E una terza volta in m11**, quando il raggio e' passato da **46 a 60**
+## (piano §1.14-quinque). Di nuovo nessuna riga di `src/sim/`: e' la stessa
+## forma del passaggio di m9, ed e' per questo che la colonna si aggiunge invece
+## di sostituire una costante.
+##
+## | banda | m7 (1.2, R=28) | m8 (0.45, R=28) | m9 (0.45, R=46) | **m11 (0.45, R=60)** | perche' |
+## |---|---|---|---|---|---|
+## | cadenza misurata | 1.07-1.57 morsi/s | 0.60-1.17 | 0.50-1.07 | **0.57-1.03** | 3-5 corpi a portata invece di 5-20; poi l'anello su un disco 2,7 volte piu' largo |
+## | danno al secondo | 3.3-8.5 hp/s | 3.42-11.19 | 2.39-14.37 | **3.37-14.17** | le due estremita' vanno in **direzioni opposte** |
+## | sopravvivenza massima | 16.5 s | 29.2 s | 41.8 s | **29.7 s** | segue la cadenza dell'onda piccola |
+## | rapporto danno pieno/piccolo | 2.56 | 3.27 | 6.01 | **4.21** | vedi sotto: non e' l'orda piena che e' cresciuta |
+##
+## **Le quattro colonne, e cosa dice il passaggio a 60 m.** Il quoziente scende
+## da 6,01 a **4,21** e il tetto `DPS_RATIO_MAX = 7.5` **non e' stato toccato**:
+## il numero si e' mosso da solo, verso il basso, perche' il denominatore e'
+## risalito (2,39 -> 3,37 hp/s sull'onda piccola) e il numeratore e' sceso di poco
+## (14,37 -> 14,17 hp/s sull'orda piena). La ragione e' la stessa di m9 e si vede
+## nel campione dei morsi (caso seme 4242, 25 vivi): a 46 m l'onda piccola tirava
+## **4 runner su 15 morsi**, a 60 m ne tira **0 su 17** e tutti e 17 sono **brute**
+## da 5,94 hp: il disco piu' largo diluisce l'anello di contatto e il morso cade
+## sui corpi piu' grossi, che mordono piu' forte ma molto meno spesso. La banda resta quindi quella dichiarata, con lo stesso tetto e lo
+## stesso pavimento, e il criterio continua a poter fallire.
 ##
 ## **Le due estremita' del rapporto, con i numeri.** L'onda piena fa **1.37 volte**
 ## il danno di prima (10.51 -> 14.37 hp/s) e l'onda piccola fa **0.70** (3.42 ->
@@ -339,6 +397,15 @@ const PLAYER_HP_REFERENCE := 100.0
 ## denominatore e' sceso**, e il numero storico di ~5.7 volte (senza
 ## `TOUCH_INTERVAL`) non e' piu' un metro con cui confrontare, perche' e' stato
 ## scritto su un'altra arena.
+##
+## **E in m11 il tetto non e' sceso**, e la ragione e' la regola di §1.2 applicata
+## al caso che nessuno aveva previsto: con R = 60 la misura dà **4,21** (era 6,01
+## a R = 46) e `DPS_RATIO_MAX` resta **7,5**. Un tetto si alza quando il numero
+## sale e **non si abbassa quando il numero scende**: abbassarlo toglie al
+## criterio la capacita' di fallire su un'orda che si riempie di corpi grossi. Il
+## numero e' sceso perche' l'anello di contatto si e' diluito sul disco piu'
+## largo, non perche' il gioco faccia meno danno: le due cose si somigliano nel
+## quoziente e non sono la stessa cosa.
 ##
 ## Il **valore di m8 non e' una regressione e non e' difeso**: e' la richiesta
 ## dell'utente, e il piano lo dichiara (§1.11, "cosa cambia nella difficolta'").
@@ -369,7 +436,9 @@ const SURVIVAL_MAX := 50.0
 ## che spiega perche' il quoziente e' salito e da dove. Il tetto resta un tetto
 ## vero: **senza** `TOUCH_INTERVAL` il campione crescerebbe ancora, ma la stima
 ## di ~5.7 volte era di un'altra arena e non viene riportata qui come se fosse
-## ancora un riferimento.
+## ancora un riferimento. **In m11, con R=60, la misura da' 4,21 e il tetto resta
+## 7,5**: un tetto non si abbassa quando il numero scende, perche' cosi' perderebbe
+## la capacita' di fallire (paragrafo sopra).
 const DPS_RATIO_MAX := 7.5
 
 ## ## Cosa misura questa sezione, e cosa non misura
@@ -2306,9 +2375,9 @@ func _denti_del_criterio(h, horde: HORDE) -> void:
 			% [dentro_tot, dentro_passi, dentro_max])
 	h.check(montato != null and horde.flow_field == montato,
 		"il campo e' stato rimesso dopo la prova: la sezione 13b resta quella che misura")
-	print("m10: denti del criterio n. 2 -- campo spento: %d nemici dentro un ostacolo in %d passi su %d (picco %d in un passo)"
+	print("m10: denti del criterio n. 2 -- campo spento: %d nemici dentro un ostacolo in %d passi su %d (picco %d in un passo); a R=46,0 m erano 17524 in 1306 passi (picco 55)"
 		% [dentro_tot, dentro_passi, M10_WARMUP + M10_WINDOW, dentro_max])
-	print("m10: denti del criterio n. 2 -- campo acceso (sezione 13b): 0 nemici dentro un ostacolo")
+	print("m10: denti del criterio n. 2 -- campo acceso (sezione 13b): 0 nemici dentro un ostacolo a R=%.1f m, come a R=46,0 m" % horde.arena_radius)
 
 # --- 13d. Il criterio n. 5: nessuno nasce dentro un disco ---------------------
 
@@ -2347,6 +2416,262 @@ func _spawn_sicuro(h, horde: HORDE) -> void:
 	# starebbe misurando niente e la soglia sarebbe decorativa.
 	print("m10: %d semi, %d punti di spawn e %d posizioni iniziali, nessuno dentro un disco (raggio %.2f m)"
 		% [semi, punti, semi * horde.count, skin])
+
+# --- 13e-bis. m11: il raggio 46 -> 60, misurato dalle due parti ----------------
+#
+# ## Perche' questa sezione esiste invece di una riga cambiata
+#
+# Il passaggio da 46,0 a 60,0 m non e' una costante: e' **la geometria su cui la
+# simulazione converge**, quindi cambia quattro cose che nessun `assert` su una
+# costante vedrebbe — la griglia del campo, la griglia dei vicini, la misura
+# della pista fra i dischi e il costo per passo. Ognuna di queste ha un numero
+# di prima, e un numero di prima che non e' stampato accanto a quello di dopo e'
+# una riga che qualcuno fra tre mesi legge come se fosse sempre stata cosi'.
+#
+# ## Il metodo: le due misure nello stesso processo, con lo stesso codice
+#
+# Il numero di prima **non** e' rileggi da un file di log e non e' ricordato a
+# memoria: e' rimisurato qui, a 46,0 m, dalla stessa identica funzione che
+# rimisura il dopo a 60,0 m, nello stesso lancio e sullo stesso processore. Il
+# solo modo in cui si cambia qualcosa in mezzo e' `Game.arena_radius`, che e'
+# l'unica sorgente del raggio (contratto di m9), e il valore dichiarato viene
+# rimesso **e asserito** prima che la sezione successiva legga qualcosa.
+#
+# ## Cosa non e' dentro il confronto, e perche'
+#
+# Il **criterio n. 2 con il campo spento** (i denti) gira una volta sola, a
+# 60,0 m: due bracci da 2400 passi sono esattamente quello che ha fatto scadere
+# il timeout di 120 s in m11. Il suo numero di prima (17 524 a 46 m) e' il
+# valore dichiarato nella tabella in testa al file, e qui sotto la sezione 13c-bis
+# lo stampa accanto al numero di oggi: e' l'unico dei quattro criteri di m10 che
+# non e' rimisurato due volte, ed e' dichiarato perche'.
+#
+# ## I due picchi della griglia dei vicini, e non sono uno
+#
+# `worst_bucket()` dice due cose diverse a due momenti diversi, e il raggio nuovo
+# le sposta in due direzioni opposte:
+#
+#   - **sulla disposizione iniziale** (`reseed`, primo frame): e' la griglia che
+#     m3 ha campionato su 24 semi e su cui `GRID_CEILING = 8` e' dichiarato. Il
+#     disco piu' grande la **raffredda**: piu' spazio, meno nemici per cella;
+#   - **a regime**, con i 200 addensati sul bersaglio: e' il caso peggiore in
+#     assoluto, ed e' la misura che ha fatto scegliere `BUCKET_SLOTS = 32` in m1
+#     (picco 19 allora, con la sola separazione). Anche questo scende a 60 m, e
+#     per la stessa ragione: l'anello che si stringe intorno al giocatore e'
+#     limitato dal primo anello di dischi, che a 46 m e' a 15,18 m dal centro e a
+#     60 m e' a 19,80 m.
+#
+# Il tetto `GRID_CEILING = 8` vive in `tests/test_arena.gd`, che e' di `-arena`:
+# questa sezione **stampa** i due numeri e non tocca la costante, perche' la
+# costante va riderivata dalla chi la possiede quando quella chiude la porta
+# rossa. Dichiararlo qui sarebbe la copia che m9 ha imparato a contare.
+#
+# ## Il raggio di prima, dichiarato come nome e non come copia del contratto
+#
+# `RAGGIO_PRIMA` e' il raggio che m9 ha consegnato: e' il valore che questa sezione
+# deve poter rimettere sul contratto per confrontare, non il raggio di oggi scritto
+# due volte. Se il vertice tornasse a 46,0 m, questa sezione continuerebbe a
+# confrontare 46 contro 60 e a dire che sono la stessa cosa: ed e' esattamente la
+# difetta che il criterio n. 2 di m9 chiude, quindi la sezione comincia anche da
+# un'asserzione che i due numeri siano **diversi**.
+
+## Il raggio di m9, il valore che questa sezione rimette sul contratto per fare
+## il confronto. Non e' una copia del raggio di oggi: e' il numero di **prima**,
+## e senza di questo la sezione misurerebbe 60 contro 60 e chiamerebbe «uguali»
+## due numeri che non si sommano.
+const RAGGIO_PRIMA := 46.0
+## Passi di assestamento e passi misurati, **per ogni raggio**, a DT = 1/60.
+##
+## L'assestamento serve perche' il costo per passo dipende dallo **stato**:
+## un'orda ancora sparsa sul disco costa meno di un'orda da 200 addensata sul
+## giocatore, e confrontare 46 m a folla con 60 m a folla e' l'unico confronto
+## che dice qualcosa. 600 passi sono 10 s, e a 60 m il nemico piu' esterno parte
+## dal bordo e arriva al centro in meno di 9 s: quindi la misura parte da un
+##'orda **arrivata** in entrambi i casi. I 240 passi misurati sono 4 s, dieci
+## volte il periodo di ricostruzione del campo (GOAL_MOVE a 13,65 m/s = 0,44 s),
+## e sono presi col **minimo** per il motivo gia' dichiarato in `_query_budget`:
+## tutto quello che c'e' dentro una singola corsa e' rumore che si somma solo.
+const RAGGIO_WARMUP := 600
+const RAGGIO_PASSI := 240
+## Quanti byte occupa una cella del campo: `blocked` e `fuori` sono un byte,
+## `cost`, `dir_x`, `dir_z` e `queue` sono quattro. Serve per dire che cosa
+## costa in memoria il raggio nuovo, che e' il numero che il raggiovecchio
+## non aveva.
+const BYTE_PER_CELLA := 18
+
+## Ostacoli e campo **costruiti per un raggio dato**, montati sulla simulazione.
+##
+## `src/sim/flow_field.gd` non viene toccato: `build()` deriva **tutto** dal
+## raggio che riceve (dimensione della griglia, gonfiatura, maschera del muro),
+## quindi l'unica cosa che serve per confrontare due raggi e' chiamarlo con il
+## raggio giusto. Il perche' questa funzione esiste e non sta dentro la sezione
+## e' che serve **due volte**, una per ciascun raggio.
+func _monta_raggio(horde: HORDE, r: float) -> FLOW:
+	var obs := OBST.layout(r)
+	var campo: FLOW = FLOW.new()
+	campo.build(obs, r, _m10_skin())
+	campo.rebuild(Vector3.ZERO)
+	horde.obstacles = obs
+	horde.flow_field = campo
+	return campo
+
+## Una misura completa al raggio `r`: griglia del campo, dischi, griglia dei
+## vicini, criterio n. 2 e costo per passo. Restituisce i numeri e non li
+## asserisce, perche' sono **due** misure da confrontare e la frase che le
+## confronta e' una sola.
+func _misura_raggio(h, horde: HORDE, game: Node, r: float) -> Dictionary:
+	# L'unica sorgente del raggio e' il contratto: e' quello che `_contract_radius()`
+	# rilegge a ogni passo, quindi e' quello che si scrive. La copia dell'orda
+	# (`horde.arena_radius`) la ricalcola da sola al primo passo.
+	game.arena_radius = r
+	horde.arena_radius = r
+	var campo := _monta_raggio(horde, r)
+	# Il contatore del campo parte da qui: quello che conta e' quante volte si
+	# ricostruisce **durante i passi**, e non quante volte l'ha costruito questa
+	# sezione per misurarlo.
+	var ricostruite_all_inizio: int = campo.rebuilds
+	horde.set_focus(Vector3.ZERO)
+	horde.auto_respawn = true
+	# L'onda bloccata a 1 per la stessa ragione delle sezioni 11c e 13b: con
+	# l'onda che avanza, `population` cresce e la misura finisce descrivendo
+	# un'orda diversa da quella che si voleva confrontare.
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.population = HORDE.MAX_ENEMIES
+	# `reseed` ripopola **a `population`** senza dover fare la rampa degli 8/s:
+	# un confronto di costo che includesse il riempimento misurerebbe il ritmo
+	# di spawn e non il passo.
+	horde.reseed(M10_SEME)
+	h.eq(horde.count, HORDE.MAX_ENEMIES,
+		"m11: a R=%.1f la misura parte da %d nemici" % [r, HORDE.MAX_ENEMIES])
+	# Il picco **della disposizione** e' il numero su cui `GRID_CEILING` e'
+	# dichiarato, quindi va preso qui, sul primo frame dopo `reseed`: e' la
+	# griglia che m3 ha campionato con 24 semi. Il picco **a regime**, che si
+	# legge piu' sotto, e' un'altra grandezza e va detto quale e': e' l'orda da
+	# 200 addensata sul bersaglio, cioe' il caso peggiore, non quello che il tetto
+	# di densita' descrive.
+	var picco_disposizione := horde.worst_bucket()
+
+	for _i in RAGGIO_WARMUP:
+		horde.step(DT)
+
+	# Il **minimo** del costo per passo e' la stima piu' vicina a «quanto costa
+	# davvero»: il resto e' il carico della macchina, che cambia da un giro
+	# all'altro e che nessuno deve confondere con il codice.
+	var costo_min := 1 << 40
+	var costo_tot := 0
+	var picco := 0
+	var traboccati := 0
+	for _i in RAGGIO_PASSI:
+		var t0 := Time.get_ticks_usec()
+		horde.step(DT)
+		var dt_us := Time.get_ticks_usec() - t0
+		costo_min = mini(costo_min, dt_us)
+		costo_tot += dt_us
+		picco = maxi(picco, horde.worst_bucket())
+		if horde.grid_overflowed():
+			traboccati += 1
+
+	var dentro := horde.inside_obstacles()
+	h.eq(dentro, 0,
+		"m11: a R=%.1f nessun nemico dentro un ostacolo dopo %d passi a %d vivi"
+			% [r, RAGGIO_WARMUP + RAGGIO_PASSI, horde.count])
+	h.eq(horde.grid_unknown_cells, 0,
+		"m11: a R=%.1f la griglia dei vicini non ha creato celle nuove" % r)
+	h.eq(traboccati, 0,
+		"m11: a R=%.1f nessun passo e' caduto a scansione lineare" % r)
+	h.eq(campo.unreachable, 0,
+		"m11: a R=%.1f nessuna cella libera del campo e' irraggiungibile (%d su %d)"
+			% [r, campo.unreachable, campo.cells_x * campo.cells_z])
+
+	var obs: PackedVector3Array = horde.obstacles
+	var disco := OBST.radius_for(r)
+	var vicini := OBST.min_separation(obs)
+	var area := 100.0 * float(obs.size()) * disco * disco / maxf(1.0, r * r)
+	return {
+		"r": r,
+		"celle": campo.cells_x, "celle_tot": campo.cells_x * campo.cells_z,
+		"bloccate": campo.blocked_cells(), "gonfiatura": campo.inflate,
+		"celle_vicini": horde.occupied_cells(), "picco": picco,
+		"picco_disposizione": picco_disposizione,
+		"dentro": dentro, "ricostruzioni": campo.rebuilds - ricostruite_all_inizio,
+		"disco": disco, "vicini": vicini, "passaggio": vicini - 2.0 * disco,
+		"boss": 2.0 * ENEMY.RADIUS[ENEMY.BOSS], "area": area,
+		"costo_min": float(costo_min) / 1000.0,
+		"costo_med": float(costo_tot) / float(RAGGIO_PASSI) / 1000.0,
+		"vivi": horde.count,
+	}
+
+## La sezione: due misure, una frase per numero.
+##
+## Il contratto torna al raggio dichiarato **prima** di tornare: sotto c'e' la
+## riga che asserisce che il valore dichiarato e' ancora quello di prima della
+## sezione, e che l'orda in memoria lo riporta al primo passo. Una sezione che
+## lascia il contratto su un raggio di comodo lascerebbe tutte le sezioni
+## successive una simulazione su un numero che nessuno ha dichiarato.
+func _raggio_60(h, horde: HORDE) -> void:
+	var game := _game()
+	if not h.check(game != null, "m11: nessun contratto: il raggio non si puo' confrontare"):
+		return
+	var dichiarato := _raggio_contratto()
+	h.check(dichiarato > RAGGIO_PRIMA,
+		"m11: il contratto dichiara %.1f m e il confronto gira su %.1f m: senza i due numeri "
+			% [dichiarato, RAGGIO_PRIMA]
+		+ "diversi questa sezione misurerebbe un numero contro se stesso")
+
+	var prima := _misura_raggio(h, horde, game, RAGGIO_PRIMA)
+	var dopo := _misura_raggio(h, horde, game, dichiarato)
+
+	# Rimessa a posto: il contratto al valore dichiarato, la geometria e il campo
+	# al raggio di oggi, l'orda sul seme che le sezioni dopo si aspettano.
+	game.arena_radius = dichiarato
+	_monta_raggio(horde, dichiarato)
+	horde.set_focus(Vector3.ZERO)
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	horde.population = HORDE.MAX_ENEMIES
+	horde.reseed(M10_SEME)
+	horde.step(DT)
+	h.near(float(game.arena_radius), dichiarato, 0.0001,
+		"m11: il contratto e' tornato al raggio dichiarato (%.1f m)" % dichiarato)
+	h.near(horde.arena_radius, dichiarato, 0.0001,
+		"m11: e l'orda in memoria riporta il raggio del contratto al primo passo")
+
+	# ## Le quattro frasi, ognuna con il prima e il dopo nella stessa riga
+	#
+	# Il costo per passo e' l'unico dei quattro che **deve** peggiorare: il disco
+	# e' 1,30 volte piu' grande e la griglia del campo ha 1,57 volte le celle. Il
+	# numero e' scritto accanto a quello di prima perche' un peggioramento
+	# dichiarato e' informazione e un peggioramento nascosto dietro «e' accettabile»
+	# e' una decisione presa senza dirlo.
+	print("m11: griglia del campo -- R=%.1f m: %dx%d = %d celle da %.1f m, %d bloccate, gonfiatura %.2f m (%.1f KB) | R=%.1f m: %dx%d = %d celle, %d bloccate, gonfiatura %.2f m (%.1f KB)"
+		% [float(prima["r"]), int(prima["celle"]), int(prima["celle"]), int(prima["celle_tot"]),
+			FLOW.CELL, int(prima["bloccate"]), float(prima["gonfiatura"]),
+			float(prima["celle_tot"]) * BYTE_PER_CELLA / 1024.0,
+			float(dopo["r"]), int(dopo["celle"]), int(dopo["celle"]), int(dopo["celle_tot"]),
+			int(dopo["bloccate"]), float(dopo["gonfiatura"]),
+			float(dopo["celle_tot"]) * BYTE_PER_CELLA / 1024.0])
+	print("m11: ostacoli -- R=%.1f m: %d dischi di %.2f m, i due piu' vicini a %.2f m, passaggio utile %.2f m (%.2fx il boss), area %.1f%% | R=%.1f m: %d dischi di %.2f m, i due piu' vicini a %.2f m, passaggio utile %.2f m (%.2fx il boss), area %.1f%%"
+		% [float(prima["r"]), OBST.OBSTACLE_COUNT, float(prima["disco"]),
+			float(prima["vicini"]), float(prima["passaggio"]),
+			float(prima["passaggio"]) / maxf(0.001, float(prima["boss"])), float(prima["area"]),
+			float(dopo["r"]), OBST.OBSTACLE_COUNT, float(dopo["disco"]),
+			float(dopo["vicini"]), float(dopo["passaggio"]),
+			float(dopo["passaggio"]) / maxf(0.001, float(dopo["boss"])), float(dopo["area"])])
+	print("m11: griglia dei vicini -- disposizione iniziale: R=%.1f m: %d celle riscaldate, picco %d | R=%.1f m: %d celle riscaldate, picco %d (GRID_CEILING = 8 e' la costante di tests/test_arena.gd, file di -arena: questa sezione la stampa e non la tocca, e i due numeri ci stanno sotto)"
+		% [float(prima["r"]), int(prima["celle_vicini"]), int(prima["picco_disposizione"]),
+			float(dopo["r"]), int(dopo["celle_vicini"]), int(dopo["picco_disposizione"])])
+	print("m11: griglia dei vicini -- a regime, 200 addensati sul bersaglio: R=%.1f m: picco %d | R=%.1f m: picco %d, nessun traboccamento su %d slot (e' la misura che ha fatto scegliere BUCKET_SLOTS = 32, e non il numero che descrive GRID_CEILING)"
+		% [float(prima["r"]), int(prima["picco"]), float(dopo["r"]), int(dopo["picco"]),
+			GRID.BUCKET_SLOTS])
+	print("m11: criterio n. 2 e campo fermo -- R=%.1f m: %d nemici dentro un ostacolo, campo ricostruito %d volte | R=%.1f m: %d nemici dentro un ostacolo, campo ricostruito %d volte (in %d passi a %d vivi, bersaglio fermo al centro)"
+		% [float(prima["r"]), int(prima["dentro"]), int(prima["ricostruzioni"]),
+			float(dopo["r"]), int(dopo["dentro"]), int(dopo["ricostruzioni"]),
+			RAGGIO_WARMUP + RAGGIO_PASSI, HORDE.MAX_ENEMIES])
+	print("m11: costo per passo con %d nemici -- R=%.1f m: min %.3f ms, medio %.3f ms | R=%.1f m: min %.3f ms, medio %.3f ms (%.2f volte il minimo di prima; a 46 m il numero dichiarato era 3,2 ms, il 19%% di un core a 60 fps, e a 60 m un core e' %.3f ms)"
+		% [HORDE.MAX_ENEMIES, float(prima["r"]), float(prima["costo_min"]), float(prima["costo_med"]),
+			float(dopo["r"]), float(dopo["costo_min"]), float(dopo["costo_med"]),
+			float(dopo["costo_min"]) / maxf(0.0001, float(prima["costo_min"])), 1000.0 / 60.0])
 
 # --- 13e. La catena: `Game.obstacles` esiste davvero ---------------------------
 #

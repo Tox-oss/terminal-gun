@@ -280,24 +280,47 @@ var kills: int = 0
 ## ## Questo numero e' un FALLBACK DICHIARATO, non una fonte (m9)
 ##
 ## Il numero che vale davvero e' quello del contratto, e la sua fonte e'
-## `src/render/arena.gd:ARENA_RADIUS` (**46.0**), che la registra sul contratto in
+## `src/render/arena.gd:ARENA_RADIUS` (**60.0**), che la registra sul contratto in
 ## `_enter_tree()`; da li' `_contract_radius()` la rilegge a ogni passo, quindi in
 ## partita questa riga **non viene mai usata**. Vive per il caso in cui il
 ## contratto non c'e' ancora (i processi di test lanciati con `--script`, e
 ## l'ordine di ingresso in cui l'orda e' costruita prima dell'arena).
 ##
-## Perche' 46.0 e non 28.0: il valore e' uscito dalla sonda
-## `docs/piramide/probe_arena_density.gd` (piano §1.12) — a 200 nemici lo spazio
-## libero passa dall'85,2% al 94,6% e la bolla sicura piu' grande da 9,5 a
-## 19,1 m. Un fallback che dicesse 28.0 mentirebbe proprio nel caso in cui
-## nessuno lo guarda, cioe' quando l'arena non si e' ancora registrata.
+## ## m11: **46.0 -> 60.0**, e da dove viene il numero
+##
+## Il **prima** e il **dopo** nella stessa frase, perche' il raggio non e' una
+## costante di stile: e' la misura su cui poggia tutto il resto di questa foglia.
+##
+##   - **46.0** (m9): il valore era uscito dalla sonda
+##     `docs/piramide/probe_arena_density.gd` (piano 1.12): a 200 nemici lo
+##     spazio libero passava dall'85,2% al 94,6% e la bolla sicura piu' grande da
+##     9,5 a 19,1 m. Era il massimo che quella sonda guardava;
+##   - **60.0** (m11): il valore e' uscito dalla sonda
+##     `docs/piramide/probe_survive.gd` (piano 1.14-quinque), che misura la
+##     **sopravvivenza** di uno schivatore al variare del raggio, tre semi per
+##     raggio e con due casi a risposta nota (a R = 12 m, dove non si puo'
+##     schivare, lo strumento **deve** morire: e' morto a 61,20 s). Caso peggiore:
+##     **55,33 s a 46 m**, **146,72 s a 60 m**, fattore **2,65**; da 60 a 75 m il
+##     fattore e' **1,07**, quindi il ginocchio e' a circa 60 m e oltre non si
+##     compra niente.
+##
+## Nessuna riga di `src/sim/` e' cambiata per questo passaggio: e' cambiata **la
+## geometria su cui la simulazione converge**, che e' esattamente la forma del
+## 28 -> 46 di m9. Quello che ne deriva e' dichiarato dove viene misurato, cioe'
+## in `tests/test_orda.gd` (la sezione sul raggio): la griglia del campo passa
+## da 55x55 a 69x69 celle, i dischi da 2,99 a 3,90 m di raggio, e il costo per
+## passo e' rimisurato con lo stesso codice a 46 m e a 60 m.
+##
+## Un fallback che dicesse 46.0 mentirebbe proprio nel caso in cui nessuno lo
+## guarda, cioe' quando l'arena non si e' ancora registrata: e in quel caso
+## nessuna delle misure qui sopra sarebbe quella che vale in partita.
 ##
 ## Il criterio n. 2 di m9 e' sulla **deriva**, non sull'assenza: se qualcuno
 ## cambiasse una delle copie senza cambiare le altre, la porta va rossa. Di questa
 ## copia si occupa `tests/test_orda.gd` (legge questa riga dal sorgente e la
 ## confronta col default del contratto); delle altre si occupa
 ## `tests/test_arena.gd`.
-var arena_radius: float = 46.0
+var arena_radius: float = 60.0
 ## Ultimi colpi ricevuti, in un anello di capienza fissa: `hit_count` quanti
 ## sono validi. Serve a sfx/flash senza toccare gli array e senza allocare.
 var hit_count: int = 0

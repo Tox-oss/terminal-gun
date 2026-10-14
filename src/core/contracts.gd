@@ -6,12 +6,19 @@ extends Node
 ## DATI — nel proprio `_ready()`, una volta sola:
 ##     Game.player = self
 ##     Game.horde = self
-##     Game.arena_radius = 46.0
+##     Game.arena_radius = 60.0
 ##
 ## Quell'ultima riga e' un **esempio di forma**, non un valore da copiare: il raggio
 ## dell'arena ha una sola fonte, `src/render/arena.gd:ARENA_RADIUS`, che la registra lei
 ## stessa nel proprio `_enter_tree()` prima di qualunque `_ready()` (§5.1). Il default qui
 ## sotto deve **coincidere** con quello, ed e' il criterio n. 2 di m9 a dirlo.
+##
+## **Il numero e' cambiato dal 46,0 al 60,0 il 2026-10-14**, e questa riga e' rimasta a
+## 46,0 fino a che `-scheletro` me l'ha segnalata leggendo il gate. Il motivo e' la
+## lezione di m9: il raggio era in **sei copie**, io ne ho cambiata la fonte e non ho
+## **avvisato**, e due foglie hanno scoperto il numero vecchio dalla porta. La sequenza
+## che funziona e' **vertice cambia la fonte -> vertice avvisa -> foglie rispecchiano**,
+## e il vertice non puo' saltare il passo di mezzo.
 ##
 ## METODI — nel proprio `_ready()`, una volta sola:
 ##     Game.register_impl("nearest_enemy", self._nearest_enemy)
@@ -85,13 +92,35 @@ var horde: Node
 ## giocatore **non si assottiglia**, perche' e' un numero di simulazione (popolazione e
 ## separazione) e non di mappa.
 ##
+## ## m11, 2026-10-14: **46,0 -> 60,0 m**, e il raggio non e' piu' una scelta a occhio.
+##
+## La sonda `docs/piramide/probe_survive.gd` (piano sez. 1.14-quinque) ha misurato la
+## sopravvivenza di uno schivatore al variare del raggio, su **tre semi** e con **due casi a
+## risposta nota**:
+##
+## | R | caso peggiore | fattore sul passo precedente |
+## |---|---|---|
+## | 12 m (riferimento: li' non si puo' schivare, e lo strumento **deve** morire) | 61,20 s | — |
+## | **46 m (questo valore)** | **55,33 s** | — |
+## | **60 m** | **146,72 s** | **2,65** |
+## | 75 m | 156,33 s | 1,07 |
+##
+## Il **ginocchio e' a circa 60 m**: da 46 a 60 il caso peggiore guadagna 2,65 volte, da 60 a 75
+## solo 1,07. Percio' il raggio va portato a 60 e **non** piu' in la', e allargarlo oltre sarebbe
+## pagare area libera che il gioco non usa (vedi la nota sopra sullo spazio frammentato).
+##
+## **Quello che 60 m NON risolve, dichiarato perche' il piano non vende numeri:** al raggio 75,
+## che e' 1,63 volte questo valore, il caso peggiore muore lo stesso a 156,33 s, e i 600 s
+## dell'utente sono **3,8 volte** tanto. Quindi **la mappa non basta da sola** e il resto del
+## lavoro di m11 e' sulla rampa delle onde.
+##
 ## **Perche' il default e' qui e cosa significa.** `src/render/arena.gd:ARENA_RADIUS` e' la
 ## **fonte unica** e la registra nel proprio `_enter_tree()`: questo valore e' cioe' quello
 ## che c'e' **prima** che l'arena si registri, e per m9 deve essere **uguale** a quello. Non
 ## e' una seconda fonte e non deve essere cambiato per ottenere un verde: e' il valore che
 ## `tests/test_smoke.gd` e `tests/test_gameplay.gd` asseriscono, e il criterio n. 2 di m9
 ## verifica che tutte le copie **esistenti** dicano lo stesso numero.
-var arena_radius: float = 46.0
+var arena_radius: float = 60.0
 
 ## -arena (m10). Gli ostacoli del mondo: **dischi sul piano XZ**.
 ##
@@ -175,6 +204,28 @@ const M2_SURFACE := [
 	# fanno**, e li espone chi possiede i numeri.
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "offer_label", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "progression", "member": "offer_effect", "kind": "method"},
+	# --- m11, la superficie del boss finale: **ancora non dichiarata, e perche'**. ---
+	#
+	# Il boss finale e' una cosa nuova: oggi `BOSS` e' una specie con 900 hp e
+	# resistenza 0,90 al knockback, e `Spawner.wave_weights(wave)` cambia i pesi per
+	# onda, ma **nessun codice sa che "al minuto 10 c'e' il boss"**. Non c'e' un'onda
+	# designata, non c'e' un trigger, non c'e' una vittoria: quindi serve uno **stato**,
+	# e uno stato nuovo e' superficie di contratto da congelare **prima** dell'onda che
+	# lo usa, come in m3, m6 e m10.
+	#
+	# **Perche' pero' non la dichiaro adesso.** L'ho scritta, e poi l'ho tolta, perche'
+	# dichiararla renderebbe `test_smoke` **rosso** con cinque membri mancanti senza che
+	# nessuno li implementi, e soprattutto la renderebbe **inraggiungibile**: la misura
+	# dice che al raggio 60 m lo schivatore peggiore muore a **146,72 s**, quindi nessuno
+	# arriva a 600 s e il boss non potrebbe mai sparare. Codice che non puo' partire e'
+	# la classe di difetto che questo progetto ha gia' chiuso piu' volte: la sonda
+	# rimossa e mai eseguita, l'asserzione decorativa, il criterio che nasce verde.
+	#
+	# **La congelo all'inizio dell'onda del boss**, cioe' dopo che l'apertura e' stata
+	# sistemata e il trigger a 600 s e' misurato. E il numero di *quando* parte l'ultima
+	# onda sara' di `-orda` e vivera' in `run.gd`: il contratto dichiarera' la
+	# **regola**, non copiera' il numero. Copiarlo qui creerebbe esattamente la copia
+	# che m9 ha imparato a contare.
 ]
 
 ## L'oggetto di m2 che -gameplay registra. Non e' un nodo: e' il

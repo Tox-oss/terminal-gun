@@ -1079,6 +1079,17 @@ milestone. Finché non è deciso, **nessuna foglia lo implementa**: qui sotto c'
 `grep "take_damage" src/**/*.gd` → **una** riga: `player.gd:326`, la **definizione**. Nessun
 chiamante. Il giocatore è letteralmente invulnerabile, e per decisione dichiarata (§1.4a).
 
+> **RITIRATO, 2026-10-14. La salute esiste dal 2026-10-13.** Questa diagnosi era vera quando è
+> stata scritta e **non è più vera**: `m7` ha chiuso il difetto di §1.4a e da allora il giocatore
+> **prende danno e muore**, misurato — *«m7 criterio 2: percorso intero, 2 colpi dal codice di
+> gioco, 100,0 → 88,11 di 100,0 HP»* e *«giocatore fermo al centro, 200 vivi: morto dopo 13,20 s»*.
+> Quindi la tabella qui sotto va riletta: le righe con «**no**» nella colonna «si può costruire
+> oggi» **non sono più bloccate dalla salute**, e il «blocco» che le fermava era questo, che è
+> caduto. **Ciò che resta scritto in quel documento è un inventario, non un verdetto**, e va
+> riesaminato prima di usarlo per pianificare. La cosa che invece **non** è caduta, e che oggi
+> spiega la segnalazione dell'utente, è un'altra: vedi **§1.14-nona**, hitbox e corpo visibile
+> non combaciano.
+
 | elemento del design | su cosa poggia | stato misurato |
 |---|---|---|
 | `$SUDO` — invulnerabilità | il giocatore è **già** invulnerabile | **senza effetto** |
@@ -2325,6 +2336,66 @@ il difetto che questo progetto ha chiuso tre volte, e stavolta sarebbe stato un 
    contratto e la congelo in quel momento e non prima.
 3. **la vista isometrica**, che è indipendente dalle prime due e si può rifare quando le foglie
    tornano disponibili.
+
+### 1.14-nona **«Alcuni nemici non riescono a farmi danno»: il corpo non combacia con l'hitbox**
+
+Segnalazione dell'utente, 2026-10-14. **La diagnosi è misurata e non è quella che sembra**: non
+sono i nemici che non mordono, è che **non mordono quando sono già dentro di te**.
+
+**I due numeri che non combaciano.** `m8` ha reso i nemici **leggibili** moltiplicando il raggio
+**disegnato** per `SIZE_FACTOR = 3.4` (misurato 3,4000, escursione 0,000000294 su 200 nemici). Ma
+**non ha toccato `RADIUS[kind]`, che è il raggio di collisione**: il morso è
+`dist <= RADIUS[kind] + TOUCH_REACH` (`enemy.gd:280`) e `TOUCH_REACH` è **0,45**. Quindi il corpo
+che vedi è **3,4 volte** l'hitbox che morde, e il giocatore è disegnato di **0,45 m**.
+
+| specie | `RADIUS` | morde entro | contatto **visibile** | banda di sovrapposizione a vuoto |
+|---|---|---|---|---|
+| runner | 0,45 m | **0,90 m** | 3,4·0,45 + 0,45 = **1,98 m** | **1,08 m** |
+| grunt | 0,60 m | **1,05 m** | **2,49 m** | **1,44 m** |
+| brute | 1,00 m | **1,45 m** | **3,85 m** | **2,40 m** |
+| **boss** | 1,90 m | **2,35 m** | **6,91 m** | **4,56 m** |
+
+**Ecco perché il boss sembra non colpire.** Il suo corpo visibile arriva a **6,91 m** dal centro del
+giocatore e il morso parte a **2,35 m**: per **4,56 metri** il nemico è letteralmente dentro il
+giocatore e non fa niente. È la banda di sovrapposizione, e **cresce con la specie** — che è
+l'opposto di quello che serve.
+
+**La conferma che non è un'impressione.** La sezione `m8 scena vera` di `test_orda` conta i nemici
+**a portata di morso** con il giocatore fermo al centro fra 200 vivi, e i numeri sono:
+`0,00 m → 6`, `0,45 m → 10`, `0,90 m → 14`, `1,20 m → 16`. Sono **6-16 nemici su 200** in
+qualsiasi istante, mentre la sovrapposizione visibile è molto più larga. E il morso effettivo è
+**34 offerti in 30 s, 24 accettati**: circa uno al secondo, da un giocatore che ha **duecento**
+nemici addosso. **Il numero è basso e la ragione è questa.**
+
+**L'invariante, scritto prima del rimedio.** Il morso deve cadere **non più tardi** del contatto
+visibile, cioè il nemico non può stare dentro di te a vuoto:
+
+```
+RADIUS[kind] + TOUCH_REACH  >=  SIZE_FACTOR * RADIUS[kind] + RADIUS_giocatore_visibile
+```
+
+Oggi **vale per nessuna delle quattro specie**, e per il boss è disattesa di **4,56 m**.
+
+**E l'invariante, così com'è, non si può soddisfare col solo `TOUCH_REACH`.** Per il boss servirebbe
+`TOUCH_REACH >= 5,01 m`, cioè un morso che colpisce a cinque metri: non è un morso, è un'area. Quindi
+**le due strade sono diverse e la scelta è di design, non mia**:
+
+| strada | cosa cambia | cosa costa |
+|---|---|---|
+| **A — ingrandire l'hitbox** | `RADIUS` diventa il raggio **visibile** | il gioco diventa **molto** più duro: il morso arriva a 2-3 volte la frequenza di oggi. Va **rimisurato** con la sonda, non dichiarato |
+| **B — rimpicciolire il corpo** | `SIZE_FACTOR` torna verso 1 | si perde la **leggibilità** che m8 ha comprato, e il criterio di m8 va riscritto con il numero nuovo |
+
+**Non scelgo io, e non lo scrivo.** La scelta cambia il gioco, e il numero che la decide non l'ho
+ancora misurato. Quello che **non** si fa è intervento a metà: prendere `RADIUS` e lasciare il
+modello 3,4 volte più grande, che è lo stato di oggi.
+
+**Chi lo fa, e perché non adesso.** La collisione del nemico è di **`-orda`**, il raggio visibile
+del giocatore è di **`-gameplay`**, la scala del modello disegnato è di **`-arena`**, e i tre numeri
+dovrebbero combaciare per costruzione: o li possiede **uno** e gli altri li leggono, o ognuno ne ha
+una copia e la copia mente — che è il difetto delle sei copie di m9, già pagato una volta. **La
+forma** la congelo prima dell'onda, come la superficie di m3, m6 e m10. **Ma le foglie non si
+possono più lanciare** (§1.14-ottava: quota dell'account), quindi questa voce **resta aperta** e
+non è un lavoro che il vertice possa fare da solo: `src/sim/**` e `src/render/**` non sono suoi.
 
 ### Le onde della milestone 3
 

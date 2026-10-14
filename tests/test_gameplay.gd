@@ -545,6 +545,10 @@ func _process(_delta: float) -> bool:
 		# precedenti, e dopo questa riga non resta piu' nessuna sezione che
 		# guardi il contratto con la scena sotto.
 		_m10_ostacoli_del_contratto(h)
+		# m11-bis: la sezione vera eseguita N volte. Va per **ultima** perche'
+		# monta `scenes/arena_main.tscn` come fanno le tre precedenti e non
+		# restituisce il contratto a nessuno.
+		_m11bis_determinismo(h)
 	print("gameplay: test terminato in %d ms" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_gameplay"))
 	return true
@@ -2634,6 +2638,299 @@ func _count_unique(values: Array) -> int:
 
 ## Solo ASCII nelle stringhe che finiscono a schermo: e' la regola del progetto
 ## (piano §5.1) e la console di Windows la mangia proprio dove serve leggerla.
+## (la definizione sta in fondo al file, dopo la sezione di m11-bis)
+
+# ================================================================================
+# m11-bis: la sezione vera, eseguita N volte, stampa lo stesso numero
+# ================================================================================
+#
+# ## Che cosa e' rotto, e perche' questa sezione esiste
+#
+# Piano §1.14-bis: `tests/test_orda.gd`, sezione «m8 scena vera», dava
+# **28,20 / 8,58 / 8,40 s** sullo stesso comando e con lo stesso seme. Misurato
+# di nuovo qui, stesso comando, tre esecuzioni: **13,38 / 15,63 / 12,55 s**
+# (6 campioni in tutto, escursione 8,40-28,20 s = **3,35 volte**). Nello stesso
+# pacchetto, tutte e tre le esecuzioni: `m10: passo 0..9` e `m10: campo
+# ricostruito 0 volte` **identici**, e le tre righe `morso seme 4242 / 7311 /
+# 20260912` identiche. Il confine non e' una sfumatura: e' il seme.
+#
+# Tutto cio' che chiama `reseed()` e' deterministico. Tutto cio' che monta
+# `scenes/arena_main.tscn` non lo e'. **La sezione che chiude il difetto e' questa**,
+# e la forma e' quella scritta prima del codice: *la stessa sezione, eseguita N
+# volte nello stesso albero, stampa lo stesso numero*. Non «quasi uguale»:
+# **uguale**.
+#
+# ## Perche' N = 3, e perche' zero tolleranza
+#
+# N = 3 e' il piu' piccolo N che dà **tre campioni indipendenti** e **due**
+# confronti indipendenti. Con N = 2 c'e' un solo confronto: una coincidenza lo
+# farebbe passare, e allora il criterio direbbe «deterministico» guardando una
+# volta sola. I confronti che ne escono sono **due**, ed entrambi sono **contro
+# il montaggio 0**, non a catena: il primo monte e' la referencia dei due.
+#
+# Il numero non e' scelto a occhio: e' **eseguito**, e i confronti che il
+# criterio stampa sono **quelli qui sotto**, presi dalle due esecuzioni fatte a
+# N = 3. Ogni riga e' un numero uscito dal `FAIL`, non una previsione.
+#
+# Esecuzione 1, le tre impronte (stampe del criterio, prime 48 cifre piu' i
+# tre puntini che `_corta` aggiunge):
+#   montaggio 0  [473 caratteri]  21.961941/7.195422;-1.745642/2.060686;2.285231/2...
+#   montaggio 1  [492 caratteri]   9.702716/-23.797411;-5.190982/-10.284017;-9.4753...
+#   montaggio 2  [486 caratteri]  -0.284232/1.554628;2.953493/-8.746940;-15.658925...
+# I due confronti che ne escono, **entrambi rossi**:
+#   0 contro 1: `primo_colpo` (-0.657903, -0.066756, -0.750138) contro
+#                (0.370745, -0.065818, 0.926400), cioe' due direzioni opposte
+#                sul piano XZ; `uccisi` 8 contro 12, `xp` 24.000 contro 36.000,
+#                `vivi` 24 contro 25, `dist_min` 0.093984 contro 0.607030 m
+#   0 contro 2: `primo_colpo` (-0.657903, -0.066756, -0.750138) contro
+#                (0.563766, -0.074845, 0.822536); `vivi` 24 contro 25,
+#                `dist_min` 0.093984 contro 0.209345 m
+#
+# Esecuzione 2, le tre impronte:
+#   montaggio 0  [486 caratteri]  -0.941335/-1.990957;-5.392146/-10.537677;16.1611...
+#   montaggio 1  [494 caratteri]  -0.456003/-0.251655;-7.919039/-15.627367;1.07816...
+#   montaggio 2  [469 caratteri] -34.905910/-11.528071;2.357681/1.026355;-1.04002...
+# I due confronti, **entrambi rossi** di nuovo:
+#   0 contro 1: `primo_colpo` (0.654131, -0.074845, 0.752669) contro
+#                (0.363811, -0.068213, 0.928972); `dist_min` 0.318175 contro
+#                0.091392 m
+#   0 contro 2: `uccisi` 10 contro 11, `xp` 30.000 contro 33.000, `vivi` 25
+#                contro 24, `dist_min` 0.318175 contro 0.078119 m
+#
+# Quattro confronti su due esecuzioni, **nessuno verde**, e in ciascuna
+# esecuzione le tre impronte sono diverse l'una dall'altra gia' al primo
+# carattere. A N = 3 la divergenza non e' un caso che capita una volta su
+# tre: e' quello che fa **ogni** montaggio. (N = 2 eseguito a parte, una volta
+# sola: un confronto, rosso anche lui - ma un numero che non puo' distinguere
+# «deterministico» da «fortunato» non serve, ed e' il motivo per cui qui siamo
+# a 3.)
+#
+#
+#
+# N = 3 non e' scelto perche' economico: e' il piu' piccolo N che distingue
+# «deterministico» da «un confronto fortunato». Il costo e' dichiarato sotto.
+#
+#
+#
+#
+# Tolleranza **zero** e non «una banda»: una banda del 10% sui numeri che
+# questa sezione confronta coprirebbe tutta la dispersione misurata **sopra**:
+# le tre impronte di una esecuzione sono lunghe 473, 492 e 486 caratteri e
+# cambiano gia' al primo carattere: non e' il 10% del campo, e' tutto il campo.
+# Un criterio che tollera quello che non sa dichiara `PASS` mentre non sa
+# (piano §1.4a).
+#
+# ## Quanto costa, dichiarato
+#
+# Misurato oggi sullo stesso comando, togliendo e rimettendo **solo** la
+# chiamata a questa sezione: senza di lei il test intero gira in **753 ms**;
+# con lei a **N = 3** gira in **1831 ms** e **1773 ms**, e a N = 2 in **1393 ms**.
+# Quindi la sezione costa **~1,0-1,1 s** a N = 3, cioe' **~340-360 ms per
+# montaggio**, e il test intero resta sotto 1,9 s contro i **120 s** che la porta
+# dà a tutto il file: un ordine di grandezza di margine.
+#
+# ## Che cosa NON fa questa sezione, e chi deve fare cosa
+#
+# **Non semina niente.** Il test non tocca `horde.seed`: se lo facesse, misurerebbe
+# un mondo che il gioco non consegna, e il difetto resterebbe fuori dalla porta
+# insieme a tutto il resto. Il confronto e' fra tre montaggi **come sono
+# consegnati**.
+#
+# Il difetto **non e' di -gameplay** ed e' dichiarato qui perche' chi legge il
+# `FAIL` sappia a chi rivolgersi: `src/sim/horde.gd::_build()` fa
+# `_rng.randomize()` quando `seed == 0`, e `scenes/arena_main.tscn` monta il
+# nodo `Horde` senza la proprieta' `seed`, quindi `seed == 0` a ogni avvio. Il
+# rimedio e' di -orda (`src/sim/`) o di -arena (la scena); finche' nessuno dei
+# due lo fa, questa sezione resta **rossa**, ed e' quello che deve dire.
+
+## Montaggi per sezione. Vedi sopra: il piu' piccolo N con due confronti.
+const DETERM_N := 3
+## Passi a DT (1/60 s) per montaggio: 600 passi = 10 s di gioco. La finestra e'
+## lunga abbastanza che l'orda **arriva**: `dist_min` e' sceso a 0,067-0,279 m
+## nei tre montaggi misurati, cioe' dentro `Enemy.ARRIVE_RADIUS`. Sotto i ~300
+## passi l'inseguimento resterebbe indietro e `dist_min` non misurerebbe niente.
+const DETERM_PASSI := 600
+## Vita data al giocatore durante la misura: la finestra non deve finire a
+## `game_over` a meta' misura, altrestore i numeri dopo il primo morso non
+## sarebbero piu' numeri di niente. Oggi il morso **non arriva** in 600 passi
+## (misurato: `Horde.touch_damage_last` resta 0.0 in 3 montaggi su 3), quindi
+## questa costante non cambia nessun numero: resta perche' il giorno in cui i
+## morsi arriveranno la misura non si spegga a meta'. E' il trucco che
+## `tests/test_orda.gd` chiama `VERA_HP_ALTO`.
+const DETERM_HP_ALTO := 1000000.0
+
+func _m11bis_determinismo(h) -> void:
+	var campioni: Array = []
+	for giro in DETERM_N:
+		var c: Dictionary = _m11bis_campione()
+		if not h.check(not c.is_empty(), "m11-bis: il montaggio %d della scena vera e' riuscito" % giro):
+			return
+		print("m11-bis, montaggio %d: %s" % [giro, c["riga"]])
+		campioni.append(c)
+		# **Prima** di confrontare, due numeri che devono **essere** numeri: se il
+		# campo fosse vuoto l'impronta da confrontare sarebbe la stringa vuota in
+		# tutti i montaggi, e se l'arma non sparasse `primo_colpo` sarebbe
+		# `(0, 0, 0)` in tutti i montaggi. In entrambi i casi le asserzioni
+		# sotto passerebbero senza aver guardato niente: e' la classe di difetto
+		# di piano 1.4a, quindi qui si dichiara invece di lasciarla aperta.
+		h.check(int(c["vivi"]) > 0,
+			"m11-bis, montaggio %d: il campo e' vuoto al passo %d, quindi l'impronta da confrontare sarebbe la stringa vuota" % [giro, DETERM_PASSI])
+		h.check(bool(c["primo_colpo_reale"]),
+			"m11-bis, montaggio %d: l'arma non ha sparato al primo passo, quindi la direzione del primo colpo da confrontare sarebbe (0, 0, 0)" % giro)
+	# **I numeri confrontati sono otto, e sono tutti dichiarati qui.** Nessuno e'
+	# tollerato: il confronto e' `==` su interi, su booleani e su `float` il cui
+	# unico errore possibile e' che la simulazione sia diversa bit per bit.
+	#   impronta            il campo intero al passo `DETERM_PASSI`: `%.6f/%.6f`
+	#                       di ogni nemico vivo, nell'ordine degli slot
+	#   primo_colpo         la direzione del **primo** colpo dell'arma vera
+	#   primo_colpo_reale   quel colpo e' esistito (il confronto qui sotto puo'
+	#                       valere `ZERO == ZERO` se l'arma non spara mai)
+	#   colpi / uccisi      quante volte l'arma ha sparato e quante volte ha
+	#                       risposto `true` a `damage_enemy`
+	#   xp / livello        la progressione, che dipende dagli uccisioni
+	#   vivi                quanti nemici sono vivi a fine finestra
+	#   dist_min            la distanza minima nemico-giocatore su tutta la
+	#                       finestra: l'inseguimento, non la sua disposizione
+	# I primi cinque sono l'impronta di **dove** e' il mondo, gli ultimi tre di
+	# **cosa e' successo** in quel mondo. Un tempo di morte da solo non basterebbe
+	# a coprirli: puo' coincidere per caso.
+	var primo: Dictionary = campioni[0]
+	for giro in range(1, campioni.size()):
+		var c: Dictionary = campioni[giro]
+		var dove := "fra i montaggi 0 e %d" % giro
+		# Il confronto e' fra le impronte **intere**, ma il messaggio porta solo
+		# un'impronta corta: 25 nemici stampati per intero sono due righe di
+		# rumore nel `FAIL`, e il `FAIL` e' la riga che qualcuno legge per
+		# capire cosa e' rotto.
+		h.check(c["impronta"] == primo["impronta"],
+			"m11-bis (%s): la disposizione dell'orda e' diversa (%s contro %s). La scena vera va consegnata con un seme: src/sim/horde.gd::_build() fa randomize() quando seed == 0, e scenes/arena_main.tscn monta il nodo Horde senza seed"
+				% [dove, _corta(c["impronta"]), _corta(primo["impronta"])])
+		h.vec_near(c["primo_colpo"], primo["primo_colpo"], 0.0,
+			"m11-bis (%s): il PRIMO colpo dell'arma vera punta da un'altra parte, quindi il mondo che vede -gameplay non e' lo stesso" % dove)
+		h.eq(c["primo_colpo_reale"], primo["primo_colpo_reale"],
+			"m11-bis (%s): in un montaggio l'arma non ha sparato e nell'altro si'" % dove)
+		h.eq(c["colpi"], primo["colpi"], "m11-bis (%s): numero di colpi diverso" % dove)
+		h.eq(c["uccisi"], primo["uccisi"], "m11-bis (%s): numero di uccisioni diverse" % dove)
+		h.eq(c["xp"], primo["xp"], "m11-bis (%s): XP accumulati diversi" % dove)
+		h.eq(c["livello"], primo["livello"], "m11-bis (%s): livello diverso" % dove)
+		h.eq(c["vivi"], primo["vivi"], "m11-bis (%s): numero di vivi diverso" % dove)
+		h.check(c["dist_min"] == primo["dist_min"],
+			"m11-bis (%s): l'inseguimento e' arrivato in un punto diverso (%.6f contro %.6f m)"
+				% [dove, float(c["dist_min"]), float(primo["dist_min"])])
+
+## Le prime `n` cifre dell'impronta piu' la sua lunghezza: abbastanza per dire
+## «sono diverse» e «quanto», senza stampare il mondo intero.
+func _corta(impronta: String, n: int = 48) -> String:
+	var t := impronta.substr(0, mini(n, impronta.length()))
+	return "[%d caratteri] %s..." % [impronta.length(), t]
+
+## Un montaggio della scena vera **come e' consegnata**, misurato.
+##
+## L'ordine dei due `step()` e' quello dell'albero: `Horde` sta prima di
+## `Player` in `scenes/arena_main.tscn`, quindi nel gioco l'orda si muove prima e
+## il giocatore spara dopo. Il passo e' `DT` e il ciclo di frame e' disabilitato:
+## due orologi non si misurano (e' la regola scritta in `tests/test_orda.gd`).
+func _m11bis_campione() -> Dictionary:
+	var packed = load(ARENA_SCENE)
+	if not (packed is PackedScene):
+		return {}
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+	# I nodi si cercano **dopo** `add_child`: il pool non e' nella `.tscn`, lo
+	# crea `weapon_base.gd::_ready()`, e il `_ready()` gira quando la scena
+	# entra nell'albero. Cercarlo prima restituirebbe `null` e la sezione
+	# misurerebbe l'assenza di un nodo invece di una partita.
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	var p = scena.get_node_or_null("Player")
+	var arma = scena.get_node_or_null("Player/Weapon")
+	var pool = scena.get_node_or_null("Player/Weapon/Pool")
+	if hd == null or p == null or arma == null or pool == null:
+		_libera(scena)
+		return {}
+	scena.process_mode = Node.PROCESS_MODE_DISABLED
+	p.call("drive_manually")
+	hd.set_physics_process(false)
+	p.set("hp", DETERM_HP_ALTO)
+	var primo_colpo := Vector3.ZERO
+	var primo_colpo_reale := false
+	# La distanza **minima** fra un nemico e il giocatore su tutta la finestra:
+	# e' il numero che dice se l'inseguimento e' arrivato, e quindi se la
+	# simulazione ha girato davvero invece di essere girata attorno al vuoto.
+	var dist_min := 1.0e9
+	for i in DETERM_PASSI:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+		if i == 0:
+			# `active_at(0)` e' il proiettile **piu' vecchio** ancora vivo, e al
+			# primo passo ne vive uno solo: e' quindi il primo colpo della
+			# partita. Se l'arma non avesse sparito `active_at(0)` darebbe
+			# `null`, `primo_colpo` resterebbe `Vector3.ZERO` **in tutti i
+			# montaggi** e il confronto passerebbe senza aver guardato niente:
+			# per questo anche il booleano viene confrontato.
+			var primo = pool.call("active_at", 0)
+			if primo != null:
+				primo_colpo = primo.dir
+				primo_colpo_reale = true
+		var dd := _piu_vicino(hd, p.get("global_position"))
+		if dd < dist_min:
+			dist_min = dd
+	var t: PackedVector3Array = hd.get("transforms")
+	var impronta := ""
+	for k in t.size():
+		impronta += "%.6f/%.6f;" % [t[k].x, t[k].z]
+	var prog = p.get("progression")
+	var colpi: int = arma.get("shots")
+	var uccisi: int = prog.get("kills")
+	var xp: float = prog.get("xp_earned")
+	var livello: int = prog.get("level")
+	var vivi: int = hd.get("count")
+	# **`hp_persi` non e' qui, e il motivo e' misurato.** Con questa finestra il
+	# giocatore non viene mai morso: `Horde.touch_damage_last` resta a 0.0 in
+	# 3 montaggi su 3 pur con l'orda a 0,067-0,279 m dal giocatore (misurato,
+	# stessa procedura di questa sezione). Confronto `hp_persi` significherebbe
+	# confrontare `0.00` con `0.00`: un'asserzione che non puo' cadere, cioe'
+	# decorativa con tre cifre. Al suo posto c'e' `dist_min`, che **non** e' mai
+	# costante e copre lo stesso strato: l'inseguimento. Il numero resta
+	# stampato, e resta anche `DETERM_HP_ALTO`: se un giorno i morsi arrivassero,
+	# la finestra non deve finire a `game_over` a meta' misura.
+	var riga := "primo_colpo=(%.6f, %.6f, %.6f) colpi=%d uccisi=%d xp=%.3f livello=%d vivi=%d dist_min=%.6f" % [
+		primo_colpo.x, primo_colpo.y, primo_colpo.z, colpi, uccisi, xp, livello, vivi, dist_min]
+	var fuori := {}
+	fuori["impronta"] = impronta
+	fuori["primo_colpo"] = primo_colpo
+	fuori["primo_colpo_reale"] = primo_colpo_reale
+	fuori["colpi"] = colpi
+	fuori["uccisi"] = uccisi
+	fuori["xp"] = xp
+	fuori["livello"] = livello
+	fuori["dist_min"] = dist_min
+	fuori["vivi"] = vivi
+	fuori["riga"] = riga
+	_libera(scena)
+	return fuori
+
+## Libera la scena **senza spargere `SCRIPT ERROR`**, e senza lasciare il
+## contratto appeso a un nodo fuori dall'albero.
+##
+## Sono due fatti distinti e i due rimedi sono distinti:
+##
+##   - `free()` e' immediato, ma il motore ha gia' in coda, per *quel* frame,
+##     le chiamate a `_process` dei nodi: distruggerli sul posto fa venire un
+##     errore per ognuno, e un `FAIL` con dodici `SCRIPT ERROR` dietro e' un
+##     `FAIL` che nessuno legge;
+##   - `remove_child()` prima lascia `Game.player` e `Game.horde` appesi a nodi
+##     fuori dall'albero, e il **montaggio successivo** li legge nel suo
+##     `_ready()`: `get_global_transform()` su un nodo fuori dall'albero stampa
+##     un errore, e il montaggio dopo misurerebbe un mondo costruito con un
+##     giocatore che non c'e' piu'.
+##
+## `queue_free()` da sola risolve i due: la scena resta viva e in albero fino
+## alla fine del frame (quindi `Game.player` e' sempre un nodo vero) e sparisce
+## dopo, quando la coda delle chiamate e' gia' svuotata. Non tocca nessun
+## numero: la misura e' gia' stata letta prima.
+func _libera(scena: Node) -> void:
+	scena.queue_free()
+
 func _ascii(s: String) -> bool:
 	for i in s.length():
 		if s.unicode_at(i) > 126:

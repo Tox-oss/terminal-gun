@@ -744,6 +744,14 @@ di essere aggiornato alla regola nuova.
 
 ### Il leak: isolato, e la porta è **non deterministica**
 
+> **AMMENDATO, 2026-10-14.** La parola **«isolato»** e la riga «nessun impatto» **non reggono
+> più**, e non per il leak: per quello che c'è **intorno**. Misurato lo stesso giorno, tre
+> esecuzioni dello stesso test danno `m8 scena vera` a **28,20 / 8,58 / 8,40 s** — **3,3×** —
+> mentre tutte le sezioni che chiamano `reseed()` restano **bit-identiche**. Vedi **§1.14-bis**.
+> Non sto dicendo che il leak e quello siano la stessa causa: sto dicendo che **la porta non sa
+> più distinguere «difetto» da «dado»**, che è la cosa che questa sezione dichiarava evitata.
+> E la baseline «2 allarmi su 5» è **ritirata**: oggi sono **2 su 2**.
+
 `-orda` l'ha chiuso, e la sua correzione a se stesso vale più del leak:
 
 | passo | leak |
@@ -1897,6 +1905,208 @@ ricostruito **0 volte** in 2400 passi con il bersaglio fermo: costa una volta so
 5. **`NODI_SCENA_VERA` è passato da 19 a 20** e l'incremento è **di `-arena`**, dichiarato nel
    file. Il tetto vero resta 120. È la prima volta che una foglia consuma il budget di un'altra:
    il numero era giusto e nessuno lo aveva previsto.
+
+### 1.14 Milestone 11 — Mondo 1, Difficoltà 1: isometrico, dieci minuti, boss finale
+
+Decisione dell'utente, 2026-10-13, testuale: **«stiamo in 2d isometrico ma una mappa considerata mondo 1 difficoltà 1 quindi mi serve una mappa nel quale sopravvivere 10 minuti prima di un boss finale»**.
+
+**La buona notizia, e va detta perché è la ragione per cui questa milestone esiste.** L'isometrico
+è una decisione di **vista**, non di simulazione: il campo di percorrenza resta sul piano XZ e
+l'aggiramento di m10 **non si butta**. Un mondo su più livelli con movimento verticale avrebbe
+invalidato la griglia, il campo e il muro; l'isometrico no. La distanza fra le due idee che
+l'utente aveva è tutta qui: una è un cambio di telecamera, l'altra è un cambio di architettura.
+
+**Che cosa tocca, e chi.** La vista è di `-arena` (`arena_camera.gd`, `arena_ground.gd`); la
+curva delle onde e il trigger del boss sono di `-orda` (`run.gd`, `spawner.gd`, `horde.gd`); il
+HUD del mondo e della difficoltà è di `-ui`. **Tre foglie**, e la tabella di scope si scrive dopo
+il `grep` del numero che cambia, come al solito (§3.6-bis).
+
+**Tre numeri che la condizionano già, e che sono misurati, non ipotizzati.**
+
+| fatto | numero | cosa significa per i dieci minuti |
+|---|---|---|
+| **la rampa attuale arriva a 200 nemici al passo 16 538** | **275,63 s**, cioè **4,6 minuti** | per arrivare al boss a 600 s la rampa va allungata di **2,2 volte** |
+| **`MAX_ENEMIES = 200` è un tetto**, non una coda | l'onda 8 è già 200 e le successive non possono superarlo | il disegno è **rampa fino a 200, poi plateau fino al boss**, non una crescita senza fine |
+| **il giocatore uccide ~4,4 nemici/s** (`test_progression`: 200 uccisioni in 45,48 s) e `SPAWN_RATE = 8,0/s` | **uccide meno di quanto lo spawner riempia** | l'arena **resta satura a 200** e lo resta: dieci minuti sono, per la maggior parte, **200 nemici addosso** |
+
+**E il numero che rende la cosa seria.** Sulla scena vera, fermo al centro con 200 vivi, il
+giocatore **muore dopo 10,98 s** (calcolato 12,04). Quindi **un'ora di dieci minuti è possibile
+solo se il giocatore si muove**: la sua unica evasione oggi è **correre**, a 13,65 m/s contro un
+runner a 6,6 m/s e un boss a 1,7 m/s, dentro un disco di 46 m con un muro.
+
+> **RITIRATO, 2026-10-14. Non è un numero: è uno dei tre.** La stessa sezione, stesso seme,
+> stesso comando, tre esecuzioni: **28,20 s**, **8,58 s**, **8,40 s**. Ampiezza **3,3×**.
+> Vedi §1.14-bis. Il numero **10,98 s** resta nel piano solo per mostrare quanto è facile
+> scrivere una cifra che non esiste.
+
+**Perché questo è il punto in cui non scrivo il numero.** «Dieci minuti» è una **speranza**, non
+una misura, e questo progetto ha una regola che esiste per questo (§1.4b: *nessuna cifra scritta
+prima della misura*). Il primo deliverable di m11 **non è un codice**: è la misura di **quanto
+vive un giocatore che schiva davvero**, cioè uno che insegue il punto più lontano dall'orda e
+resta dentro l'arena. Quella misura dice tre cose che oggi nessuno sa:
+
+1. se dieci minuti sono raggiungibili con i numeri attuali, o se la rampa va addolcita;
+2. quanto deve essere lunga la rampa prima che l'orda piena arrivi;
+3. se **correre basta** — cioè se il verbo del gioco è la corsa, e se serve qualcos'altro.
+
+**La terza è l'unica che non posso misurare al posto dell'utente.** Un giocatore che schiva è
+uno che ho scritto io, e uno che ho scritto io **non può dirvi cosa è divertente**: può dirvi
+che cosa è possibile. La domanda «ti basta correre, o serve una scorciatoia?» è una decisione di
+design ed è sua.
+
+**Il boss finale è una cosa nuova, non un parametro.** Oggi `BOSS` è una specie con 900 hp e
+resistenza 0,90 al knockback, e `Spawner.wave_weights(wave)` cambia i pesi per onda, ma **non
+esiste** un'onda designata né un trigger: niente nel codice sa che «al minuto 10 c'è il boss».
+Quindi m11 aggiunge uno **stato** (l'onda finale, e la fine della partita dopo il boss), che è
+**superficie di contratto**, e il vertice la congela **prima** dell'onda come ha fatto in m3, m6 e
+m10.
+
+### 1.14-bis **m11 è bloccata**: la simulazione non è deterministica, e la barra di errore è 3,3×
+
+Questa sezione è il **risultato** di m11 finora, ed è un risultato negativo che vale più di
+una specifica. È scritta prima di qualunque codice di m11, perché quello che blocca non è un
+criterio: è la fiducia nei numeri.
+
+**La misura.** `test_orda`, sezione `m8 scena vera`, tre esecuzioni dello **stesso comando** con
+lo **stesso seme**, senza toccare niente:
+
+| esecuzione | giocatore fermo al centro, 200 vivi | morsi offerti in 30 s |
+|---|---|---|
+| gate, giro 1 | morto dopo **28,20 s** | 11 (0,37/s) |
+| gate, giro 2 | morto dopo **8,58 s** | 37 (1,23/s) |
+| `test_orda` da solo | morto dopo **8,40 s** | 36 (1,20/s) |
+
+**3,3 volte di differenza sullo stesso input.** E la cosa che rende il fatto serio non è la
+dispersione: è **dove** la dispersione è e **dove non è**.
+
+| sezione | comportamento in tre esecuzioni |
+|---|---|
+| m10 (10 righe di traccia del campo), morsi per seme 4242/7311/20260912, knockback, densità, griglia | **bit-identiche** |
+| `test_progression`: onda 1 chiusa in 2686 passi vs 3194 | **diverge** |
+| `m8 scena vera`: **28,20 / 8,58 / 8,40 s** | **diverge** |
+| `test_arena` m3 sweep (24 semi) | **identico** — chiama `reseed()` |
+
+**Il confine è il seme, e il confine è netto.** Tutto ciò che chiama `reseed()` è deterministico;
+tutto ciò che monta la **scena vera** con l'**arma vera** non lo è. La differenza fra le due
+colonne non è una sfumatura: è l'unica cosa che le separa.
+
+**Perché questo non è il leak di `bonk.wav`, e perché la baseline «2 su 5» va ritirata.**
+Il leak dichiarato sotto §1.7 è un messaggio **all'uscita**, e il piano lo dichiara «isolato,
+nessun impatto». Questa misura dice che l'impatto c'è ed è **sulla simulazione**. Oggi `test_ui` è
+fallito **2 volte su 2**, non 2 su 5: la baseline è vecchia, e se fosse ancora quella il leak
+avrebbe una frequenza del 40% e non del 100%. **Non sto dicendo che abbiano la stessa causa** —
+sto dicendo che il conto del piano **non torna più**, e che finché non torna la differenza fra
+«difetto» e «dado» nella porta resta aperta, che è ciò che §11 vieta.
+
+**La conseguenza che blocca m11, e la dico perché è scomoda.** Un numero di durata che può valere
+**8,40 s o 28,20 s** a parità di input non può progettare una rampa da 600 s: significherebbe
+progettare su una sbarra d'errore più larga del progetto. **Quindi la prima milestone dopo m10
+non è m11: è rendere deterministico ciò che m11 deve misurare.** E questo vale anche per la mia
+sonda: i numeri che ho prodotto oggi (`163,77 s` e poi `124,18 s` sulla configurazione **identica**
+R=46) non sono due misure in contraddizione, sono **due campioni dello stesso dado**. Li avevo
+attribuiti all'ordine di montaggio della scena e non li avevo risolti: **era la pista giusta, e
+l'avevo scartata.**
+
+**Che cosa serve per chiudere, e come lo si sa che è chiuso.** Un criterio con denti:
+**la stessa sezione, eseguita N volte nello stesso albero, stampa lo stesso numero**. Non «quasi
+uguale»: **uguale**. Un criterio che tollera ±10% è un criterio che dichiara `PASS` anche quando
+non sa, e per §1.4a lo abbiamo già visto produrre un verde sopra un giocatore che non poteva
+morire. Il numero N, e la tolleranza **zero**, sono cose da **misurare** e non da scegliere a
+occhio: prima va trovato **dove** entra il ramo non seminato.
+
+**Il sospetto, dichiarato come sospetto e non come diagnosi.** L'unica sezione che diverge è
+l'unica che monta la scena vera con l'arma vera, e il pezzo già sospettato per il leak è
+`src/weapons/weapon_base.gd:194` (`_sfx.play()` dentro `on_impact()`). Se nell'arma c'è un
+`randf()`/`randi()` **globale** invece che del seme di `-orda`, oppure un percorso che legge il
+**tempo reale** invece che il **numero di passi**, allora tutto quello che ho misurato oggi è
+rumore e la misura va rifatta da capo. **Non lo dichiaro un difetto finché non l'ho misurato**, e
+la misura la fa `-gameplay`, che è la foglia di quel file.
+
+**Il verdetto, in una riga.** `GATE: 7/8` e `PERM: 15/15`, albero **non committato**, `9b9fcc1`
+resta l'ultimo verde: **non si committa** perché la porta è rossa e perché il rosso non è più
+quello dichiarato.
+
+### 1.14-ter **La causa, verificata, e la specifica che la chiude**
+
+**La causa, e l'ho verificata io prima di scriverla.** `-gameplay` l'ha isolata per bisezione e io ho
+riletto il pezzo:
+
+```
+src/sim/horde.gd:372-375   if seed != 0: _rng.seed = seed
+                         else:           _rng.randomize()
+scenes/arena_main.tscn:109-110   monta il nodo Horde SENZA la proprieta' seed
+```
+
+Quindi `seed = 0` → `randomize()` a **ogni montaggio**. **Ogni montaggio della scena vera è una
+partita diversa.** Non un difetto di `-weapons` né di `-player`: la bisezione li scagiona, e scaglia
+anche il mio sospetto — con `_sfx.play()` spento la non determinazione **resta uguale**.
+
+| gradino | esito su 3 montaggi, stesso processo |
+|---|---|
+| scena vera come consegnata | **diverge**: hp persi 108,57 / 61,71 / 98,97 |
+| idem, `_sfx.play()` **spento** | **diverge lo stesso**: 134,86 / 45,94 / 69,49 |
+| `seed` scritto prima di entrare nell'albero | **identico bit per bit, 3 su 3** |
+| idem, senza il giocatore | **identico 3/3** — il giocatore è innocente |
+| idem, arma che spara e giocatore che cammina | **identico 3/3** — l'arma è innocente |
+
+**E il fatto era già qui da m3.** Riga 65 di questo piano, scritto allora: *«sulla scena vera l'orda
+la crea `arena_main.tscn`, quindi nessun codice esterno scrive `seed` prima di `_build()`»*. Il
+fatto era registrato e **non era mai stato chiuso**: mancava che cosa significa. Significa che
+**ogni numero di durata di questo progetto, misurato sulla scena vera, è un campione**, e che la
+mia sonda di oggi non ha mai misurato niente.
+
+**Una seconda entrata che ho dato per scontata, e che era FALSA:** avevo scritto che
+`src/render/arena_ground.gd:184` costruisce un `RandomNumberGenerator` **senza seme** per le casse.
+`-arena` l'ha verificata e ha trovato il contrario: `CRATE_SEED := 20240502` **era già seminato dal
+commit `0d5b0c5`**, cioè dalla chiusura di m1. Non era un difetto: mancava solo la **dichiarazione**
+(valore, perché una data, che cosa rende), e quella l'ha scritta. È la **terza** volta oggi che una
+mia ipotesi viene smentita da una misura — il suono, il costo del campionamento, e questa — e ogni
+volta la foglia aveva ragione. Il metodo non è da cambiare: è da continuare a usare.
+
+Una cosa che `-arena` ha misurato e che vale più della frase che ho scritto io: in Godot 4.7
+`RandomNumberGenerator.new()` **nasce già casuale** (semi `3613518067136908358` e
+`-265288651179134434` su due generatori freschi). Quindi `rng.seed = CRATE_SEED` **non è una
+formalità**, e il confronto fra due costruzioni ha denti per costruzione.
+
+#### Il progetto di m11, e perché non è «semina tutto e vediamo»
+
+È la **stessa forma** del canale dati di m10: **un solo flag che serve a due proprietari**. Al
+gioco serve la casualità (ogni partita diversa), ai test serve la riproducibilità, e oggi un solo
+`seed` copre le due cose e vince il gioco. Il canale si apre così:
+
+| chi | cosa possiede | cosa dichiara |
+|---|---|---|
+| **`-arena`**, `scenes/arena_main.tscn` | il **default** della scena | un `seed` **fisso**, dichiarato, sulla scena |
+| **`-orda`**, `src/sim/horde.gd` | il **reroll** di partita | `restart_run()` **randomizza esplicitamente** |
+| **`-arena`**, `src/render/arena_ground.gd` | le casse | **già seminate** dal `0d5b0c5`: aggiunta solo la dichiarazione, nessun numero cambia |
+
+**Il secondo rigo è quello che tiene insieme il progetto.** Senza di lui la correzione **scambia un
+difetto con un altro**: da «ogni misura è un campione» a «ogni partita è identica», che per un
+bullet heaven è peggio. I due criteri sono quindi **un invariante e la sua faccia rossa**, e vanno
+verificati insieme.
+
+#### I criteri, scritti prima del codice
+
+1. **Riproducibilità, tolleranza zero.** La scena vera, montata **N volte nello stesso albero e
+   nello stesso processo**, stampa **lo stesso numero**. Non «quasi uguale»: **uguale**. N è
+   dichiarato e motivato. *Le conseguenze del criterio 1, se non lo si applica: ogni durata di
+   m11 è rumore, e la rampa da 600 s non si può scrivere.*
+2. **Il reroll esiste ed è vero.** Dopo `restart_run()`, due partite consecutive hanno **disposizioni
+   diverse** — misurato con lo stesso metodo a risposta nota che m3 usò per `worst_bucket()`, cioè
+   confrontando disposizioni e non somme. *Il criterio 2 da solo sarebbe un test verde sopra un
+   gioco sempre uguale, che è la classe di difetto di §1.4a.*
+
+Il **criterio 1 va scritto e mostrato ROSSO prima** del rimedio: un criterio che nasce verde non
+dimostra niente, e su questo progetto ne abbiamo già uno.
+
+#### L'onda, e perché è in due tempi
+
+| onda | foglie | cosa |
+|---|---|---|
+| **m11-bis-a** | `-gameplay` | **criterio 1, mostrato rosso.** Cancella anche le **157 righe di sonda mai chiamate** che hai lasciato in `tests/test_gameplay.gd`: una sonda non eseguita è un numero che nessuno ha mai visto |
+| **m11-bis-b** | `-orda` ∥ `-arena` | il rimedio: `-orda` semantica del `seed` e reroll esplicito in `restart_run()`; `-arena` `seed` fisso sulla scena e RNG delle casse seminato |
+
+**Non nello stesso giro.** Il criterio che ha i denti si vede solo se c'è un prima e un dopo.
 
 ### Le onde della milestone 3
 

@@ -130,6 +130,16 @@ const GAMEPLAY_APIS := ["spawn_projectile", "player_position"]
 
 var _h: H = null
 var _ran: bool = false
+## Quando il test e' partito. Serve solo al numero di costo stampato in fondo: il
+## gate da 120 s a tutto il file, e un file che non dice quanto costa non permette
+## a nessuno di sapere se il prossimo criterio entra nel margine.
+var _t0: int = 0
+## I due numeri della sezione m11-bis sulle casse: quante ne sono state confrontate
+## e quante sono **diverse** fra la scena e un secondo terreno costruito li'
+## accanto. `-1` quando il confronto non e' stato fatto, cosi' la stampa non
+## racconta un numero che nessuno ha misurato.
+var _crate_count: int = 0
+var _crate_diff: int = -1
 
 
 ## Niente qui dentro. Il corpo del test gira al **primo frame**, non in
@@ -139,6 +149,7 @@ var _ran: bool = false
 ## `Game.arena_radius`, la costruzione della MultiMesh, il terreno.
 func _initialize() -> void:
 	_h = H.new()
+	_t0 = Time.get_ticks_msec()
 
 func _process(_delta: float) -> bool:
 	if _ran:
@@ -171,6 +182,10 @@ func _run() -> void:
 		return
 
 	_wiring(h, arena, game)
+	# m11-bis: **prima** di `_criterion_3`, che svuota l'orda. Qui la disposizione
+	# e' ancora quella del primo frame, cioe' quella che `arena_main.tscn` consegna:
+	# dopo, e' gia' stata riscritta piu' volte e il confronto non guarderebbe niente.
+	_m11bis(h, arena)
 	_criterion_3(h, arena, game)
 	_terrain(h, arena)
 	_milestone_10(h, arena, game)
@@ -190,6 +205,7 @@ func _run() -> void:
 	_milestone_8(h, arena)
 
 	_cleanup(arena)
+	print("test_arena: tutto il file in %d ms; la porta dà 120 s a questo test (m11-bis ha costato la cifra stampata nella sua riga)" % (Time.get_ticks_msec() - _t0))
 	quit(h.finish("test_arena"))
 
 # --- 1. Che cosa registra arena, da solo ---------------------------------------
@@ -383,6 +399,128 @@ func _wiring(h, arena: Node3D, game: Node) -> void:
 	for api in GAMEPLAY_APIS:
 		h.check(game.has_impl(api),
 			"caricando la scena, l'API \"%s\" di -gameplay deve risultare registrata" % api)
+
+# --- 2b. m11-bis: la scena consegnata porta il seme, e lo porta davvero -------
+#
+# ## Il difetto, e chi lo possiede
+#
+# `src/sim/horde.gd:372-375` fa `_rng.randomize()` quando `seed == 0`, e
+# `scenes/arena_main.tscn` montava il nodo `Horde` **senza la proprieta' `seed`**:
+# ogni montaggio della scena vera era quindi una partita diversa. Il fatto era
+# gia' in questo piano fin da m3 (riga 65); mancava la conseguenza, cioe' che
+# ogni numero di durata misurato sulla scena vera e' un campione.
+#
+# ## Perche' qui NON si montano tre scene, che e' quello che fa -gameplay
+#
+# `tests/test_gameplay.gd`, sezione m11-bis, confronta tre **montaggi** della scena
+# e costa ~1 s (misurato li': 745 ms senza, 1754-1762 ms con). Qui si confronta
+# **la scena consegnata con il seme dichiarato**: una domanda diversa, che e' la
+# domanda di -arena, e che costa una sola `_populate()` da 25 nemici. Se le due
+# sezioni dicessero la stessa cosa, una delle due sarebbe un criterio che paga
+# per vedere la stessa cosa.
+#
+# Tolleranza **zero** come in 8.1: due disposizioni sono uguali o non lo sono, e
+# una banda qui coprirebbe esattamente il difetto che il criterio cerca.
+
+## Il seme che la scena deve consegnare: `SEED_A`, il numero che questo file
+## dichiara gia' dal m3 e che e' anche il seme della sonda di densita' di m9
+## (riportato in `src/render/arena.gd`) e quello della riga `morso seme 4242` di
+## `tests/test_orda.gd`. Non e' una copia di un raggio: e' lo **stesso fatto
+## dichiarato** che il resto del progetto usa, e il criterio dice che la scena
+## consegnata deve partire da li'. Nessun numero nuovo in questo file.
+func _m11bis(h, arena: Node3D) -> void:
+	var t0 := Time.get_ticks_msec()
+	var horde = arena.get_node_or_null("Horde")
+	if not h.check(horde != null, "m11-bis: la scena vera non ha il nodo Horde"):
+		return
+	var ground = arena.get_node_or_null("Ground")
+	if not h.check(ground != null, "m11-bis: la scena vera non ha il nodo Ground"):
+		return
+
+	# ## 2b.1 IL SEME DICHIARATO: la scena deve portarlo, e `0` e' il difetto
+	#
+	# `0` non e' "il seme zero": e' il valore che quell'API riserva a «randomizza»
+	# (punto 2 del contratto di m3). Quindi `seed == 0` non e' un caso particolare
+	# da tollerare: e' **esattamente** la riga mancante che questo criterio chiude,
+	# e il messaggio lo dice perche' il FAIL deve dire il rimedio.
+	var dichiarato: int = horde.seed
+	h.check(dichiarato != 0,
+		"m11-bis: scenes/arena_main.tscn monta il nodo Horde con seed = 0, e src/sim/horde.gd:372-375 fa _rng.randomize() quando seed == 0: ogni montaggio della scena e' una partita diversa. La riga da rimettere e' `seed = %d` accanto a `script = ExtResource(\"5_horde\")`, con la dichiarazione che c'e' gia' li'" % SEED_A)
+	h.eq(dichiarato, SEED_A,
+		"m11-bis: il seme che la scena consegna deve essere quello dichiarato dal progetto (%d, SEED_A qui sopra): e' %d" % [SEED_A, dichiarato])
+
+	# ## 2b.2 IL SEME È ARRIVATO DAVVERO AL GENERATORE
+	#
+	# Il numero sulla scena e' una dichiarazione: qui si prova che l'orda **partita
+	# da quel numero** e' identica, posizione per posizione, all'orda che nasce da
+	# `reseed(SEED_A)`. Il confronto e' sul primo frame, quando la disposizione e'
+	# ancora quella consegnata: se la riga mancasse, `reseed(SEED_A)` riscriverebbe
+	# tutto e il confronto lo direbbe con i due numeri accanto.
+	#
+	# Effetto collaterale utile: dopo questa riga l'orda e' determinista **anche se
+	# la scena non lo fosse**, quindi le sezioni che vengono dopo misurano un mondo
+	# solo. Non e' un criterio (non lo asserisco) e non e' una riparazione: il
+	# rimedio e' nella scena.
+	var primitivo: PackedVector3Array = horde.transforms.duplicate()
+	var colori_primitivo: PackedColorArray = horde.colors.duplicate()
+	horde.reseed(SEED_A)
+	var atteso: PackedVector3Array = horde.transforms.duplicate()
+	h.eq(atteso.size(), primitivo.size(),
+		"m11-bis: l'orda consegnata dalla scena e quella di reseed(%d) devono avere lo stesso numero di nemici: %d e %d"
+			% [SEED_A, primitivo.size(), atteso.size()])
+	h.check(atteso == primitivo,
+		"m11-bis: la disposizione che la scena consegna NON e' quella del seme dichiarato %d: %d posizioni diverse su %d al primo frame, e la somma delle coordinate e' %.6f contro %.6f. Il difetto e' che seed = 0 sulla scena fa randomize()"
+			% [SEED_A, _differing(primitivo, atteso), mini(primitivo.size(), atteso.size()),
+				_checksum(primitivo), _checksum(atteso)])
+	h.check(horde.colors == colori_primitivo,
+		"m11-bis: anche i colori per specie devono essere quelli del seme %d: la scena consegna una disposizione diversa" % SEED_A)
+
+	_casse_da_un_numero(h, ground)
+	print("test_arena: m11-bis: seme consegnato %d (0 = randomizza, ed e' il difetto), disposizione al primo frame %d/%d diverse da reseed(%d); casse %d di %d diverse fra due costruzioni; la sezione ha costato %d ms"
+		% [dichiarato, _differing(primitivo, atteso), primitivo.size(), SEED_A,
+			_crate_diff, _crate_count, Time.get_ticks_msec() - t0])
+
+## Le casse: la scena non deve essere casuale **a occhio**.
+##
+## Finora nessuna asserzione del progetto guardava la posizione delle 28 casse,
+## quindi la casualita' scenografica stava **fuori da ogni porta**: si vedeva solo
+## lanciando il gioco due volte. Il confronto e' fra la scena vera e un **secondo
+## `Ground` costruito adesso**, dopo che tutta la simulazione di questo test ha
+## gia' girato: se `rng.seed = CRATE_SEED` sparisce, il generatore nasce casuale
+## (misurato in Godot 4.7: due `RandomNumberGenerator.new()` di fila danno semi
+## diversi) e le due costruzioni divergono.
+##
+## Costo: una costruzione di terreno, cioe' 2500 + 290 + 28 scritture e tre mesh
+## gia' in cache. Il numero misurato e' stampato sotto e dichiarato accanto al
+## chiamante.
+func _casse_da_un_numero(h, ground) -> void:
+	var seme = _const_of(GROUND_SCRIPT, "CRATE_SEED")
+	h.check(seme > 0.0,
+		"m11-bis: src/render/arena_ground.gd deve dichiarare CRATE_SEED maggiore di zero: e' il numero da cui dipendono le 28 casse, e 0 e' il valore che in Godot significa 'non seminato'. Letto %.0f" % seme)
+	_crate_count = int(ground.crate_instances())
+
+	var secondo := Node3D.new()
+	secondo.name = "GroundAlone"
+	secondo.set_script(load(GROUND_SCRIPT))
+	root.add_child(secondo)
+
+	var stesse: int = _crate_count
+	for i in mini(_crate_count, secondo.crate_instances()):
+		if secondo.crate_transform(i) != ground.crate_transform(i):
+			stesse -= 1
+	_crate_diff = _crate_count - stesse
+
+	h.eq(secondo.crate_instances(), _crate_count,
+		"m11-bis: un secondo Ground costruito nella stessa scena deve mettere lo stesso numero di casse: %d contro %d" % [_crate_count, secondo.crate_instances()])
+	h.near(secondo.arena_radius(), ground.arena_radius(), RADIUS_TOLERANCE,
+		"m11-bis: i due terreni devono essere costruiti con lo stesso raggio, altrimenti le casse non si confrontano: %.3f e %.3f m"
+			% [secondo.arena_radius(), ground.arena_radius()])
+	h.eq(stesse, _crate_count,
+		"m11-bis: le casse devono essere una funzione di CRATE_SEED anche a occhio: %d di %d sono in un punto diverso da quelle della scena, quindi la disposizione cambia a ogni montaggio (rng.seed = CRATE_SEED manca in src/render/arena_ground.gd)"
+			% [_crate_diff, _crate_count])
+
+	root.remove_child(secondo)
+	secondo.free()
 
 # --- 3. Il criterio n. 3 -------------------------------------------------------
 

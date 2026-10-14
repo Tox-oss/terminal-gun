@@ -144,7 +144,22 @@ var population: int = 0
 ## Se falsa, l'orda non si riempie da sola: serve al test per vedere il
 ## conteggio scendere davvero.
 var auto_respawn: bool = true
-## Seed della disposizione. 0 = casuale a ogni avvio; un numero = riproducibile.
+## ## `seed`: il seme **della disposizione che e' in campo**, non un default
+## ##
+## Tre cose, e sono tre cose diverse:
+##   - **`0`** = la disposizione in campo e' casuale: non la si puo' riprodurre.
+##   - **un numero** = la disposizione in campo e' quella di quel seme, e si puo'
+##     rifare: e' il contratto di m3 (`reseed(s)`), verificato da
+##     `tests/test_arena.gd` e da `tests/test_orda.gd`.
+##   - **il default dell'avvio** e' un'altra cosa ancora, e non sta qui: e' la
+##     proprieta' `seed` con cui `scenes/arena_main.tscn` monta il nodo `Horde`,
+##     che e' di `-arena`. Quel numero rende **la prima partita** riproducibile
+##     (senza di lui ogni montaggio della scena e' una partita diversa, e ogni
+##     durata misurata sul gioco e' un campione: piano §1.14-ter).
+##
+## `_build()` lo legge **una volta sola**, nel `_ready()`: dopo l'avvio il campo
+## si cambia solo da `reseed(s)` e da `restart_run()`, e le due scrivono qui il
+## valore che descrive **la disposizione che stanno scrivendo**.
 var seed: int = 0
 
 # --- API massa (piano 5) -------------------------------------------------------
@@ -369,10 +384,15 @@ func _build() -> void:
 	# nasce dentro uno e il criterio n. 2 ha gia' un nemico da segnalare al
 	# primo frame.
 	_load_obstacles()
+	# Il seme si legge **una volta sola**, qui: `seed` e' il default che la scena
+	# consegna, e da questo momento in poi lo cambiano solo `reseed(s)` e
+	# `restart_run()`. Il ramo «casuale» non e' una riga qui dentro: e'
+	# `_reroll()`, lo stesso che chiama il restart, cosi' «casuale» e' scritto in
+	# un posto solo e non in tre (`_build`, `reseed`, `restart_run`).
 	if seed != 0:
 		_rng.seed = seed
 	else:
-		_rng.randomize()
+		_reroll()
 	# La griglia si riscalda su un quadrato piu' largo dell'arena: i nemici non
 	# escono mai, ma il knockback puo' spingerli oltre il raggio utile.
 	# `_sync_grid()` fa `setup()` solo quando l'estensione cambia davvero:
@@ -901,6 +921,48 @@ func wave_hp_scale() -> float:
 ## rimettere in piedi anche il giocatore: se le vite restano a zero, il passo di
 ## simulazione successivo rilegge `game_over` e la partita si ferma di nuovo,
 ## che è la cosa giusta da fare ma non è un restart riuscito.
+##
+## ## m11-bis-b: il restart **rimescola** (piano §1.14-ter)
+##
+## Una riga nuova in cima a tutto, `_reroll()`, ed è la riga che tiene insieme il
+## progetto: **`restart_run()` randomizza esplicitamente**, e non «per caso».
+##
+## Il fatto che l'ha resa necessaria è verificato e scritto nel piano. `scenes/
+## arena_main.tscn` non montava la proprietà `seed`, quindi `_build()` faceva
+## `_rng.randomize()` a ogni montaggio: **ogni montaggio della scena vera era una
+## partita diversa**, e ogni durata misurata sul gioco — «morto dopo 8,40 s» o
+## «dopo 28,20 s» sullo stesso comando — era un campione di un dado.
+##
+## Il rimedio è diviso in due, e i due pezzi appartengono a due foglie:
+##
+## | chi | cosa possiede | cosa dichiara |
+## |---|---|---|
+## | `-arena`, `scenes/arena_main.tscn` | il **default** della scena | un `seed` **fisso**, dichiarato, sulla scena |
+## | `-orda`, questo file | il **reroll** di partita | `restart_run()` **randomizza esplicitamente** |
+## | `-arena`, `src/render/arena_ground.gd` | le casse | lo stesso seme, dichiarato |
+##
+## **Il secondo rigo è quello che chiude il difetto invece di scambiarlo con
+## un altro.** Con la scena a seme fisso e senza il reroll, il gioco sarebbe
+## **sempre identico**: da «ogni misura è un campione» a «ogni partita è la
+## stessa», che per un bullet heaven è peggio. Sono un invariante e la sua faccia
+## rossa, e si verificano insieme: la riproducibilità è il criterio 1
+## (`tests/test_gameplay.gd`, `-arena`), il reroll è il criterio 2
+## (`tests/test_orda.gd`, qui).
+##
+## Il reroll è **esplicito** e non implicito in tre motivi, e sono i tre che lo
+## rendono verificabile invece che Lucky:
+##   1. **`restart_run()` è l'unico posto** in cui una partita ricomincia, quindi
+##      e' l'unico posto in cui il seme va rimescolato: metterlo dentro `_populate`
+##      o dentro `_spawn_one` lo farebbe succedere **anche** a `reseed(s)`, e un
+##      `reseed` che rimescola non riproduce piu' niente;
+##   2. **`seed` viene scritto a `0`**, cioè al suo significato dichiarato di
+##      «casuale»: dopo il restart il campo dice la verità sulla disposizione
+##      che è in campo. Lasciarci il seme fisso della scena sarebbe un campo che
+##      mente — direbbe «questa disposizione è riproducibile da 4242» per una
+##      disposizione che 4242 non produce;
+##   3. **nessun nodo e nessuna allocazione**: `_reroll()` è una riga su un
+##      `RandomNumberGenerator` che esiste già, e il ripopolamento è lo stesso
+##      `_populate` del primo frame e di `reseed`.
 func restart_run() -> void:
 	if not _built:
 		return
@@ -910,11 +972,32 @@ func restart_run() -> void:
 	_bite_interval_left = 0.0
 	touch_damage_last = 0.0
 	touch_bites_last = 0
+	# **Prima** di `_populate`: il ripopolamento legge `_rng`, quindi il seme va
+	# rimescolato prima e non dopo (dopo sarebbe un no-op silenzioso, e un
+	# no-op silenzioso è un difetto che la porta non vede).
+	_reroll()
 	_sync_wave()
 	_sync_weights()
 	_sync_population()
 	_budget = 0.0
 	_populate(population)
+
+## Il **reroll**: «da qui in poi la disposizione è casuale».
+##
+## Sono due righe, e sono le uniche due che rendono casuale una disposizione in
+## tutto `src/sim/`: `_build()` e `reseed(0)` ci passano quando non c'è un seme
+## da seguire, `restart_run()` ci passa **sempre**. Scriverlo qui e non nei tre
+## chiamanti è la differenza fra «una decisione» e «tre copie di una decisione»:
+## il giorno che «casuale» volesse dire qualcos'altro (un seme derivato dal
+## numero della partita, un `state` del motore) si cambia **una** riga.
+##
+## `seed = 0` non è un dettaglio: è il significato dichiarato del campo pubblico
+## (`seed.gd`, testa del file), e dopo questa chiamata il campo **descrive** la
+## disposizione che verrà scritta. `reseed(s != 0)` continua a scriverci `s`, e
+## quindi il campo non è mai un numero che mente su quello che è in campo.
+func _reroll() -> void:
+	seed = 0
+	_rng.randomize()
 
 ## Ridispone l'orda su un altro seme: il **semplice** e' la disposizione, non
 ## la partita. Chiamata dal contratto di m3 (`contracts.gd`, "Supersficie di
@@ -929,7 +1012,8 @@ func restart_run() -> void:
 ##
 ## ## I cinque punti, e come sono resi qui
 ##
-## 1. scrive il campo pubblico `seed` con `s` — una riga sotto.
+## 1. scrive il campo pubblico `seed` con `s` — nei due rami sotto, `_reroll()`
+##    per `s == 0` e la coppia `seed = s` / `_rng.seed = s` per `s != 0`.
 ## 2. `s == 0` **mantiene il significato dichiarato del campo**: `randomize()`,
 ##    cioe' casuale, e non "seme zero" (che Godot tratterebbe come seme fisso).
 ## 3. con `s != 0` fissa `_rng` sul seme e ripopola **a `population`** con lo
@@ -958,11 +1042,16 @@ func restart_run() -> void:
 func reseed(s: int) -> void:
 	if not _built:
 		return
-	seed = s
-	if s != 0:
-		_rng.seed = s
+	# `s == 0` e' il ramo «casuale», ed e' `_reroll()`: la stessa funzione che
+	# chiama `restart_run()`. Il punto 1 del contratto di m3 («scrive il campo
+	# pubblico `seed` con `s`») resta valido perche' `_reroll()` scrive `0`, che
+	# e' `s` in quel ramo; il punto 2 («`s == 0` mantiene il significato
+	# dichiarato del campo: `randomize()`») e' quello che la funzione contiene.
+	if s == 0:
+		_reroll()
 	else:
-		_rng.randomize()
+		seed = s
+		_rng.seed = s
 	_populate(population)
 	_rebuild_grid()
 

@@ -13,7 +13,11 @@ extends SceneTree
 ##      minimo e mediana, perche' una corsa sola e' rumore e fallirebbe a caso;
 ##   5. 600 aggiornamenti in headless: nessun SCRIPT ERROR, nessuna crescita di
 ##      nodi, oggetti e memoria;
-##   6. `damage_enemy` uccide e il conteggio scende, per scambio-ultimo.
+##   6. `damage_enemy` uccide e il conteggio scende, per scambio-ultimo;
+##   7. m11-bis-b: dopo `restart_run()` due partite consecutive hanno
+##      **disposizioni diverse** (criterio n. 2 di §1.14-ter), e `reseed` resta
+##      riproducibile: il rimedio non può aver scambiato «ogni misura è un
+##      campione» con «ogni partita è la stessa».
 ##
 ## ## m9: il raggio dell'arena è in sei copie, e due di queste sono mie
 ##
@@ -235,6 +239,11 @@ func _run() -> void:
 	_denti_del_criterio(h, horde)
 	_spawn_sicuro(h, horde)
 	_touch(h, horde)
+	# m11-bis-b: il reroll di `restart_run()`. Sta qui, dopo `_touch` e **prima**
+	# di `_scena_vera`, e il posto e' dichiarato nella sezione: sulla scena vera un
+	# restart rimescolerebbe proprio il numero che il criterio n. 1 di 1.14-ter
+	# confronta fra montaggi.
+	_reroll(h, horde)
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
 	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
@@ -2414,3 +2423,209 @@ func _ostacoli_contratto(h, horde: HORDE) -> void:
 		% [letti.size(), letti[0].y, sep])
 	print("m10: orda che gioca -- %d ostacoli, flow_problem vuoto, campo attivo, %d ricostruzioni"
 		% [_vera_flow_obstacles, _vera_flow_rebuilds])
+
+# --- 14. m11-bis-b: il reroll della partita (criterio n. 2 di §1.14-ter) ---------
+#
+# ## Il difetto che questa sezione chiude, e la sua direzione
+# #
+# # Il fatto, verificato e scritto in piano §1.14-ter
+# #
+# `src/sim/horde.gd::_build()` fa `_rng.randomize()` quando `seed == 0`, e
+# `scenes/arena_main.tscn` montava il nodo `Horde` **senza la proprietà `seed`**:
+# quindi `seed == 0` a ogni montaggio e **ogni montaggio della scena vera era una
+# partita diversa**. Non un difetto di `-gameplay` né di `-weapons`: misurato,
+# `primo_colpo` e `dist_min` davano numeri diversi a ogni montaggio dello stesso
+# comando (28,20 s / 8,58 s / 8,40 s di sopravvivenza: ampiezza 3,3×).
+# #
+# # Il rimedio, e perché è in due pezzi di due foglie
+# #
+# | chi | cosa possiede | cosa dichiara |
+# |---|---|---|
+# | `-arena`, `scenes/arena_main.tscn` | il **default** della scena | un `seed` **fisso** sulla scena |
+# | `-orda`, `src/sim/horde.gd` | il **reroll** di partita | `restart_run()` **randomizza esplicitamente** |
+# | `-arena`, `src/render/arena_ground.gd` | le casse | lo stesso seme, dichiarato |
+# #
+# **Il pezzo di questa foglia è il secondo, ed è quello che tiene insieme il
+# progetto.** Con la scena a seme fisso e senza il reroll il gioco sarebbe
+# **sempre identico**: si sarebbe scambiato un difetto con un altro, da «ogni
+# misura è un campione» a «ogni partita è la stessa», che per un bullet heaven è
+# peggio. Sono **un invariante e la sua faccia rossa**:
+# #
+#   - **criterio n. 1** — la scena vera montata N volte stampa lo stesso numero.
+#     È di `-arena` e sta in `tests/test_gameplay.gd`: il seme fisso sulla scena.
+#   - **criterio n. 2** — dopo `restart_run()` due partite consecutive hanno
+#     disposizioni diverse. È **di questa sezione**.
+# #
+# Il criterio 2 da solo sarebbe un test verde sopra un gioco sempre uguale, che
+# è la classe di difetto di §1.4a: per questo qui sotto c'è anche il suo
+# **controllo** (la stessa disposizione, riperdotta a seme fisso, deve tornare
+# identica) e non solo la faccia «diverse».
+#
+# ## Il metodo è quello di m3, non uno nuovo
+# #
+# Il confronto è **elemento per elemento** su `transforms`, con tolleranza zero,
+# ed è il metodo a risposta nota con cui `tests/test_arena.gd` confronta due
+# disposizioni (criterio n. 2 di m3): `_differing` sotto, e il tetto in
+# `REROLL_FRACTIONE`, che è la frazione che m3 ha **misurata e dichiarata**
+# (200 posizioni diverse su 200 con due semi diversi). Il confronto non passa
+# per una somma di coordinate: una somma si può riequilibrare e sembrare uguale
+# (`worst_bucket()` di §1.12 ha la stessa forma di argomento), e qui si vuole
+# sapere se **i nemici** si sono spostati, non se il totale torna.
+#
+# ## Perché l'orda isolata e non la scena vera
+# #
+# Sulla scena vera il reroll si può misurare, ma **non in questa sezione**: un
+# `restart_run()` a metà della sezione «m8 scena vera» cambierebbe la
+# disposizione sotto la finestra di misura e renderebbe di nuovo un **campione**
+# proprio il numero che il criterio n. 1 confronta fra montaggi. Il reroll si
+# verifica dove è economico e dove non rompe niente: qui, su un'orda che ha una
+# disposizione nota (`reseed(SEME_CAPACITY)`) e costa cinque disposizioni e
+# **zero passi di simulazione**.
+#
+# ## Quanto costa
+# #
+# Cinque ripopolamenti da 25 nemici e zero `step()`: il tempo è stampato sotto,
+# in microsecondi di motore. Il timeout di `tools/gate.gd` è 120 s e questo file
+# gira già vicino: un criterio che si mangia secondi non è un criterio che si
+# può eseguire.
+
+## Quante posizioni devono moversi fra la disposizione di una partita e quella
+## della successiva, in frazione dei nemici vivi.
+##
+## **Non è un numero scritto qui per far passare.** È la frazione che m3 ha
+## dichiarato e misurata (`REPRO_DIFF_FRACTION` in `tests/test_arena.gd`, 0,9,
+## derivata da 200 posizioni diverse su 200 con due semi diversi), ripresa perché
+## la domanda è la stessa: «due disposizioni diverse, di quanto?». La ragione
+## della frazione è quella di m3 — la disposizione è ad anelli e l'angolo di ogni
+## nemico esce da `_rng`, quindi **tutti** si muovono — e il `maxi(1, ...)` tiene
+## la forma di m3: un tetto di zero posizioni sarebbe un'asserzione che non può
+## fallire, cioè la cosa che questa sezione sta cercando di evitare.
+const REROLL_FRACTIONE := 0.9
+
+func _reroll(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+
+	# ## 1. La disposizione che l'orda **consegna**
+	#
+	# `reseed(SEME_CAPACITY)` fa esattamente quello che fa `_build()` quando la
+	# scena monta l'orda con un `seed` fisso: è la condizione in cui il difetto è
+	# visibile, cioè un'orda con seme dichiarato che al restart **non** cambia.
+	horde.reseed(SEME_CAPACITY)
+	h.eq(horde.seed, SEME_CAPACITY,
+		"m11-bis-b: reseed(s != 0) scrive il campo pubblico `seed` con s (punto 1 del contratto di m3)")
+	var fissa: PackedVector3Array = horde.transforms.duplicate()
+	var colori_fissi: PackedColorArray = horde.colors.duplicate()
+	var vivi := horde.count
+	var minimo := _tetto_diverse(vivi)
+
+	# ## 2. Il reroll: **lo stesso punto di partenza, due restart**
+	#
+	# È la riga che dà i denti al criterio, e la ragione per cui non basta
+	# confrontare due restart di fila.
+	#
+	# Il confronto «prima restart, seconda restart» **passerebbe anche senza
+	# reroll**: `_populate` tira da `_rng`, e `_rng` dopo un ripopolamento è avanti,
+	# quindi anche un restart che non rimescola niente produce una disposizione
+	# diversa dalla precedente. Quel test sarebbe verde sopra un gioco in cui il
+	# restart **non** cambia niente, che è la classe di difetto di §1.4a.
+	#
+	# Qui invece i due restart partono **dallo stesso stato**: fra i due si rimette
+	# la disposizione a seme dichiarato, cioè `_rng` torna esattamente dove era.
+	# Senza reroll i due restart darebbero quindi la **stessa** disposizione, bit
+	# per bit, e questa riga andrebbe a 0/25 diverse; col reroll sono due estrazioni
+	# indipendenti e non coincidono. La stessa identica disposizione è l'unica
+	# risposta che sa distinguere «rimescolato» da «non rimescolato».
+	#
+	## Sono tre restart in tutta la sezione (B, B', C) e non uno: è il minimo che
+	# dà **due** confronti indipendenti invece di uno solo, per il motivo che
+	# `-gameplay` ha già dichiarato per `DETERM_N` nella sua sezione di §1.14-bis.
+	## Il costo di un restart in più è 25 spawn e ~0,3 ms.
+	var prima_partita := _restart_e_disposizione(h, horde, "B", vivi)
+	horde.reseed(SEME_CAPACITY)
+	var seconda_partita := _restart_e_disposizione(h, horde, "B'", vivi)
+	var d := _differing(prima_partita, seconda_partita)
+	h.check(d >= minimo,
+		"criterio n. 2 (1.14-ter): due restart dallo STESSO punto di partenza devono dare disposizioni diverse, altrimenti il restart non ha rimescolato niente: %d posizioni diverse su %d, tetto ripreso da m3 il %.0f%% = %d"
+			% [d, mini(prima_partita.size(), seconda_partita.size()),
+				REROLL_FRACTIONE * 100.0, minimo])
+
+	# ## 3. Il criterio come lo scrive il piano: due partite consecutive
+	#
+	# La stessa domanda nella forma che il piano usa, e con lo stesso metodo: la
+	# partita dopo `restart_run()` non puo' essere la partita di prima.
+	var terza_partita := _restart_e_disposizione(h, horde, "C", vivi)
+	var d2 := _differing(seconda_partita, terza_partita)
+	h.check(d2 >= minimo,
+		"criterio n. 2 (1.14-ter): due partite consecutive dopo restart_run() hanno disposizioni diverse: %d posizioni diverse su %d, tetto ripreso da m3 il %.0f%% = %d"
+			% [d2, mini(seconda_partita.size(), terza_partita.size()),
+				REROLL_FRACTIONE * 100.0, minimo])
+
+	# ## 4. Il controllo: il seme dichiarato riproduce ancora
+	#
+	# È la parte che dimostra che il reroll **non ha mangiato** la
+	# riproducibilità, cioè che l'invariante dell'altra metà della specifica
+	# (criterio n. 1, di `-arena`) è ancora raggiungibile: dopo due restart
+	# casuali, tornare al seme dichiarato deve ridare la disposizione **di prima**,
+	# posizione per posizione. Se il confronto di sopra potesse dire «diverse» senza
+	# guardare, qui direbbe «diverse» anche per due copie dello stesso mondo — e
+	# questa riga è quella che se lo accorgesse.
+	horde.reseed(SEME_CAPACITY)
+	h.eq(_differing(fissa, horde.transforms), 0,
+		"m11-bis-b: dopo il reroll, tornare al seme %d deve ridare la disposizione di prima, identica: %d posizioni diverse su %d"
+			% [SEME_CAPACITY, _differing(fissa, horde.transforms), fissa.size()])
+	h.check(horde.colors == colori_fissi,
+		"m11-bis-b: tornati al seme dichiarato anche i colori sono quelli di prima")
+	h.eq(horde.seed, SEME_CAPACITY,
+		"m11-bis-b: reseed(s) rimette il campo `seed` a s: il campo descrive sempre la disposizione in campo")
+
+	# Una sezione che non stampa i propri numeri è una sezione di cui il lettore
+	# deve fidarsi. Il costo è stampato con i numeri, perché qui il vincolo è il
+	# timeout di 120 s e non la bellezza dell'asserzione.
+	print("orda: m11-bis-b, %d vivi: due restart dallo stesso punto di partenza %d/%d diverse, due partite consecutive %d/%d diverse, tetto %d"
+		% [vivi, d, mini(prima_partita.size(), seconda_partita.size()),
+			d2, mini(seconda_partita.size(), terza_partita.size()), minimo])
+	print("orda: m11-bis-b: controllo a seme %d dopo il reroll, %d/%d diverse (identiche: era %s)"
+		% [SEME_CAPACITY, _differing(fissa, horde.transforms), fissa.size(),
+			str(_differing(fissa, horde.transforms) == 0)])
+	print("orda: m11-bis-b: sezione intera in %d us, %d ripopolamenti da %d nemici, nessun passo di simulazione"
+		% [Time.get_ticks_usec() - t0, 6, vivi])
+
+## Un `restart_run()` e la disposizione che ne esce, con le tre cose che il
+## reroll deve aver fatto e che tornano a ogni restart.
+func _restart_e_disposizione(h, horde: HORDE, nome: String, vivi: int) -> PackedVector3Array:
+	horde.restart_run()
+	# Il campo `seed` deve **descrivere** la disposizione in campo: dopo un
+	# reroll è `0`, cioè «casuale». Se restasse il seme della scena il campo
+	# direbbe «questa disposizione si rifa da 4242» per una disposizione che
+	# 4242 non produce.
+	h.eq(horde.seed, 0,
+		"m11-bis-b (%s): dopo il restart `seed` vale 0, il suo significato dichiarato di 'casuale'" % nome)
+	h.eq(horde.count, horde.population,
+		"m11-bis-b (%s): il reroll non ha cambiato il numero di vivi (%d su %d, attesi %d)"
+			% [nome, horde.count, horde.population, vivi])
+	h.eq(horde.transforms.size(), horde.count,
+		"m11-bis-b (%s): transforms allineata a count dopo il reroll" % nome)
+	h.eq(horde.radii.size(), horde.count,
+		"m11-bis-b (%s): anche radii allineata a count dopo il reroll" % nome)
+	return horde.transforms.duplicate()
+
+## Quante posizioni devono moversi fra due disposizioni, su `live` nemici vivi.
+## Stessa forma e stessa derivazione di `_diff_min` in `tests/test_arena.gd`
+## (criterio n. 2 di m3): la frazione arrotondata per eccesso, e `maxi(1, ...)`
+## perché un tetto di zero posizioni non può mai fallire.
+func _tetto_diverse(live: int) -> int:
+	return maxi(1, int(ceil(REROLL_FRACTIONE * float(live))))
+
+## Quante posizioni di due disposizioni sono diverse.
+##
+## **Il metodo è quello di m3**, non uno inventato qui: elemento per elemento,
+## `!=` su `Vector3`, **toleranza zero**. Una tolleranza lascerebbe passare un
+## reroll che sposta ogni nemico di mezzo centimetro, e il criterio vuole sapere
+## se i nemici si sono spostati, non se sono «quasi gli stessi».
+func _differing(a: PackedVector3Array, b: PackedVector3Array) -> int:
+	var n := mini(a.size(), b.size())
+	var d := 0
+	for i in n:
+		if a[i] != b[i]:
+			d += 1
+	return d

@@ -32,6 +32,18 @@
 ; scena: scriverle non e' toccare i loro file, e le foglie restano libere di
 ; cambiare i propri contenuti senza che nessuno debba venirne qui.
 ;
+; ## I DUE SEMI DELLA SCENA, E SONO DUE PER UN MOTIVO
+;
+;   - `seed = 4242` sul nodo `Horde`, qui sotto. E' il **default della scena
+;     consegnata** e riguarda l'orda, cioe' la simulazione.
+;   - `CRATE_SEED = 20240502` in `src/render/arena_ground.gd`. Riguarda le 28
+;     casse, cioe' la scenografia. Il numero e' e il perche' sono scritti li'.
+;
+; Sono due flussi separati e non si accorciano: l'orda si tira un dado nuovo a
+; ogni partita (`restart_run()`, di -orda), le casse no, perche' sono costruite
+; una volta sola in `_ready()` e non si muovono mai. La dichiarazione lunga di
+; `seed = 4242` sta accanto alla riga stessa, sotto il nodo `Horde`.
+;
 ; Perche' il terreno e i nemici sono MultiMesh e non nodi: il criterio n. 3
 ; della milestone e' `node_count < 120` con `horde.count == 200`. Un nodo per
 ; nemico, o 961 piastrelle di pavimento, lo renderebbero impossibile da soli.
@@ -108,6 +120,57 @@ script = ExtResource("8_obstacles")
 
 [node name="Horde" type="Node3D" parent="."]
 script = ExtResource("5_horde")
+
+; ## IL SEME: 4242, dichiarato qui e in nessun altro posto
+;
+; Fino a m11-bis questa riga **non c'era**, e il difetto era gia' scritto in questo
+; piano fin da m3 (riga 65, «sulla scena vera l'orda la crea arena_main.tscn,
+; quindi nessun codice esterno scrive `seed` prima di `_build()`»): il fatto era
+; registrato e la **conseguenza** non era mai stata scritta. La conseguenza e'
+; che `src/sim/horde.gd:372-375` fa `_rng.randomize()` quando `seed == 0`, quindi
+; **ogni montaggio della scena consegnata era una partita diversa** — e ogni
+; numero di durata mai misurato su questa scena era un campione, non una misura.
+;
+; ## PERCHE' 4242 E NON UN ALTRO NUMERO
+;
+; Perche' 4242 e' il seme che il progetto **dichiara gia'** in tre posti, e sono i
+; tre da cui vengono i numeri che qualcuno ha gia' scritto:
+;   - `SEED_A` in `tests/test_arena.gd` (la riproducibilita' e lo sweep di m3),
+;   - la tabella della sonda `docs/piramide/probe_arena_density.gd`, il cui
+;     valore e' riportato in `src/render/arena.gd` (la densita' di m9 da cui e'
+;     nato il raggio di 46 m),
+;   - la riga `morso seme 4242` di `tests/test_orda.gd`.
+; Quindi il numero con cui l'utente avvia l'eseguibile e' **lo stesso** con cui
+; sono state prese quelle misure: la tabella della sonda descrive il gioco che si
+; gioca, e non un mondo simile a quello che si gioca. Un numero nuovo qui
+; avrebbe reso quei tre posti una quarta copia e avrebbe fatto perdere il
+; collegamento, che e' l'unica cosa che questo numero rende.
+;
+; ## PERCHE' NON 0
+;
+; Perche' `0` non e' "il seme zero": e' il valore che quell'API **riserva** a
+; «randomizza» (punto 2 del contratto di m3, in `src/sim/horde.gd::reseed`). Un
+; `0` qui dentro significherebbe esattamente il difetto che questa riga chiude,
+; e sembrerebbe il contrario: la riga ci sarebbe e il difetto ci sarebbe lo stesso.
+;
+; ## COSA DIVENTA POSSIBILE GRAZIE A QUESTO NUMERO
+;
+; La scena consegnata diventa una **funzione di un numero**: montarla due volte
+; da' lo stesso mondo, quindi due misure sono confrontabili, una durata e' una
+; durata e un difetto che si vede una volta si vede sempre. E il numero da
+; cambiare quando l'orda cambia e' **uno solo**: questa riga, che e' l'unica
+; copia e che `tests/test_arena.gd` rilegge dalla scena viva.
+;
+; ## IL SEME FISSO E' IL PRIMO DADO, NON IL DADO UNICO
+;
+; La casualita' **di partita** resta di -orda: `restart_run()` deve tirare un
+; seme nuovo a ogni nuova partita (`src/sim/horde.gd`, m11-bis-b, -orda; il
+; rimedio e' suo e questa scena non lo tocca). Quel che e' dichiarato qui e' il
+; **default**: il mondo da cui si parte quando nessuno ha ancora tirato. Sono due
+; pezzi dello stesso rimedio, non due scelte: senza il reroll, questa riga
+; scambierebbe un difetto con uno peggiore (partite sempre identiche, che per un
+; bullet heaven e' peggio di partite diverse).
+seed = 4242
 
 [node name="Enemies" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("3_enemies")

@@ -84,11 +84,21 @@ const EDGE_PUSH := 3.0
 # `scenes/arena_main.tscn` per intero, orda a 200 vivi, giocatore vero fermo al
 # centro, passo fisso 1/60 s, 30 s di riscaldamento e 30 s di finestra.
 #
-# **La scena vera non ha seme**: `horde.seed = 0` vuol dire `randomize()`, quindi
-# la disposizione e' diversa a ogni avvio. Le righe sotto hanno dispersione e si
+# **La scena vera allora non aveva seme**: `horde.seed = 0` vuol dire `randomize()`,
+# quindi la disposizione era diversa a ogni avvio — e questa frase, insieme al
+# rimedio, e' il difetto di m11-bis-b (piano §1.14-ter): `_arena` ha messo sulla
+# scena un `seed` **fisso** dichiarato, e `horde.gd::restart_run()` **rimescola** a
+# ogni nuova partita. Quindi la riga qui sotto vale per la misura **come era**,
+# presa su una disposizione casuale: le righe successive hanno dispersione e si
 # leggono come **bande**, non come valori; sono stampate a ogni lanzo dalla
 # sezione 12, che e' il posto dove si rileggono. L'unica riga senza dispersione
 # e' la prima, e non per caso: e' l'unica che **sceglie** il numero.
+#
+# Dopo il rimedio la sezione 12 e' di nuovo **una funzione del seme** finche'
+# non chiama `restart_run()`: e' per questo che la sezione 14 di
+# `tests/test_orda.gd` verifica il reroll **sull'orda isolata** e non dentro la
+# sezione 12 — un restart li riaprirebbe proprio il numero che il criterio n. 1
+# confronta fra montaggi.
 #
 # | grandezza misurata | prima (`TOUCH_REACH` = 1.2) | dopo (0.45) |
 # |---|---|---|

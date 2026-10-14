@@ -22,6 +22,38 @@ const WALL_ROWS := 2
 ## Crate sparse dentro l'arena. Poche e deterministiche: sono un segnalibro, non
 ## un labirinto.
 const CRATE_COUNT := 28
+
+## ## IL SEME DELLE CASSE: 20240502, dichiarato perche' e' un numero nuovo
+##
+## `RandomNumberGenerator.new()` nasce **gia' casuale** in Godot 4.7: misurato qui,
+## due generatori freschi di fila danno `seed` diversi (`3613518067136908358` e
+## `-265288651179134434`) e tirano numeri diversi. Quindi `rng.seed = CRATE_SEED`
+## sotto non e' una formalita': senza quella riga le 28 casse cambiano disposizione
+## **a ogni montaggio della scena**, e la scena non e' riproducibile nemmeno a
+## occhio.
+##
+## Il numero resta quello di allora (una data, 2024-05-02): nessuna ragione di
+## cambiarlo qui dentro, e cambiarlo sposterebbe 28 casse per un motivo che nessuno
+## ha. Quello che mancava non era il valore ma la **dichiarazione**: la costante
+## era gia' li' dalla chiusura di m1 (`0d5b0c5`), con una riga di commento che
+## diceva solo «sono un segnalibro, non un labirinto».
+##
+## ## PERCHE' NON E' IL 4242 DELLA SCENA, E NON PER DIMENTICANZA
+##
+## Sono due flussi separati e devono restarlo. L'orda e' **simulazione**: il suo
+## seme e' il default che `-orda` tira da capo a ogni `restart_run()`. Le casse
+## sono **scenografia**: si costruiscono una volta sola in `_ready()` e non si
+## muovono mai, ne' al restart ne' al death/respawn. Un numero solo per i due
+## toglierebbe la distinzione e inviterebbe esattamente l'errore da evitare, cioe'
+## far scivolare la scena insieme al dado della simulazione.
+##
+## ## COSA RENDE POSSIBILE
+##
+## Rende l'arena riproducibile **anche a occhio**, che e' la meta' che nessuna
+## porta puo' guardare: nessuna asserzione del progetto legge le posizioni delle
+## casse, quindi senza questo numero il difetto starebbe **fuori da ogni porta** e
+## si vedrebbe solo da chi lancia il gioco due volte. Con il numero, la scena che
+## si vede e' una funzione di un numero dichiarato, come quella che si misura.
 const CRATE_SEED := 20240502
 ## ## FALLBACK RADIUS: un fallback **dichiarato**, non una fonte (criterio n. 2 di m9)
 ##
@@ -52,6 +84,15 @@ var _floor: MultiMeshInstance3D = null
 var _wall: MultiMeshInstance3D = null
 var _crates: MultiMeshInstance3D = null
 var _sources: Array[PackedScene] = []
+## Le trasformazioni delle casse **cosi' come sono state scritte nel buffer**. Non
+## e' una copia della geometria: e' la traccia di quello che questo file ha messo
+## sul serio, e serve perche' il buffer di un `MultiMesh` **non si rilegge in
+## headless** (in Godot 4.7 sta in uno storage buffer del RenderingDevice che nel
+## backend "dummy" di `--headless` non esiste, e `get_instance_transform`
+## restituisce silenziosamente una trasformazione vuota). Stesso motivo e stesso posto
+## di `written_transform()` in `arena_obstacles.gd`: 28 elementi, allocati una volta
+## sola all'avvio, che non crescono mai.
+var _written_crates: Array[Transform3D] = []
 var _contract_cache: Node = null
 var _built: bool = false
 
@@ -181,6 +222,10 @@ func _build_crates(mi: MultiMeshInstance3D, radius: float) -> void:
 	if mm == null:
 		return
 	mm.instance_count = CRATE_COUNT
+	_written_crates.clear()
+	# Il seme e' dichiarato accanto a `CRATE_SEED`. Senza questa riga il
+	# generatore nasce casuale (misurato in Godot 4.7: due generatori freschi
+	# danno semi diversi) e le casse cambiano disposizione a ogni montaggio.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = CRATE_SEED
 	var outer := maxf(CRATE_INNER + 1.0, radius - CRATE_OUTER_GAP)
@@ -190,7 +235,9 @@ func _build_crates(mi: MultiMeshInstance3D, radius: float) -> void:
 		# `crate.glb` e' un cubo di 0.9 centrato nell'origine: mezzo lato in alto
 		# lo appoggia al pavimento invece di affondarlo.
 		var pos := Vector3(cos(angle) * r, TILE * 0.225, sin(angle) * r)
-		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, rng.randf() * TAU), pos))
+		var t := Transform3D(Basis(Vector3.UP, rng.randf() * TAU), pos)
+		mm.set_instance_transform(i, t)
+		_written_crates.append(t)
 	mm.visible_instance_count = CRATE_COUNT
 
 # --- Lettura (per il test e per il debug) -------------------------------------
@@ -214,6 +261,19 @@ func wall_instances() -> int:
 
 func crate_instances() -> int:
 	return _visible_count(_crates)
+
+## La trasformazione della cassa `i` **cosi' com'e' stata scritta nel buffer**.
+##
+## Come `written_transform()` in `arena_obstacles.gd`, e per lo stesso motivo: in
+## headless il `MultiMesh` non si rilegge, quindi rileggere il buffer qui farebbe
+## passare il test su un terreno che non scrive niente. Serve a `tests/test_arena.gd`
+## per confrontare le casse della scena con quelle di un secondo terreno costruito
+## li' accanto: e' l'unico posto dove la casualita' **scenografica** della scena e'
+## guardabile, e finora non lo guardava nessuno.
+func crate_transform(i: int) -> Transform3D:
+	if i < 0 or i >= _written_crates.size():
+		return Transform3D.IDENTITY
+	return _written_crates[i]
 
 ## Metro quadrato di piastrelle che copre il muro: se e' piu' piccolo della
 ## circonferenza, il muro ha un buco.

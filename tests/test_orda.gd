@@ -286,6 +286,13 @@ func _run() -> void:
 	# restart rimescolerebbe proprio il numero che il criterio n. 1 di 1.14-ter
 	# confronta fra montaggi.
 	_reroll(h, horde)
+	# m11-ter: la cucitura di misura dell'apertura. Sta qui perche' e' l'unica
+	# sezione che **cambia** un numero di gioco e lo rimette: prima di
+	# `_scena_vera`, che deve trovare l'orda costruita dal suo codice e non una
+	# raddrizzata a mano, e dopo `_reroll`, che usa `restart_run()` e avrebbe
+	# potuto assorbire una delle tre scale che questa sezione prova.
+	_scala_nei_file(h)
+	_scala_popolazione(h, horde)
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
 	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
@@ -1812,16 +1819,47 @@ func _chiudi(arena) -> void:
 ## sezione 11b: il chiamante di `damage_player` va cercato in **tutto** `src/`,
 ## non nella directory che questa foglia si aspetta di scrivere.
 func _file_gdc_in(dir_path: String) -> PackedStringArray:
+	return _file_con_estensione(dir_path, ".gd")
+
+## Tutti i file con estensione `ext` sotto `dir_path`, ricorsivamente.
+##
+## La sezione 15 (`population_scale`) cerca anche dentro `res://scenes`, e le
+## scene sono `.tscn`: la stessa ricorsione serve per due estensioni diverse, e
+## due copie della stessa funzione sarebbero due numeri che possono divergere.
+func _file_con_estensione(dir_path: String, ext: String) -> PackedStringArray:
 	var trovati := PackedStringArray()
 	var d := DirAccess.open(dir_path)
 	if d == null:
 		return trovati
 	for nome in d.get_files():
-		if nome.ends_with(".gd"):
+		if nome.ends_with(ext):
 			trovati.append(dir_path.path_join(nome))
 	for sotto in d.get_directories():
-		trovati.append_array(_file_gdc_in(dir_path.path_join(sotto)))
+		trovati.append_array(_file_con_estensione(dir_path.path_join(sotto), ext))
 	return trovati
+
+## Quante volte `ago` compare **in codice** dentro `path`, cioe' fuori dai
+## commenti.
+##
+## ## Perche' conta solo il codice
+##
+## Il nome della cucitura e' scritto in decine di righe di documentazione dentro
+## `src/sim/horde.gd`, e quelle righe sono il **perche'** del campo: contarle
+## insieme al codice darebbe un numero che cambia ogni volta che qualcuno
+## spiega meglio, cioe' un criterio che va rosso per un-commento. Quindi ogni
+## riga viene troncata al primo `#` e il segno viene cercato solo nel pezzo
+## rimasto.
+##
+## `-1` quando il file non si apre: e' un file che non esiste, e un `-1` che
+## passerebbe un `== 2` non sarebbe un numero ma un difetto.
+func _occorrenze_di_codice(path: String, ago: String) -> int:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return -1
+	var n := 0
+	for riga in f.get_as_text().split("\n"):
+		n += riga.split("#")[0].count(ago)
+	return n
 
 func _contiene(path: String, ago: String) -> bool:
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -2954,3 +2992,270 @@ func _differing(a: PackedVector3Array, b: PackedVector3Array) -> int:
 		if a[i] != b[i]:
 			d += 1
 	return d
+
+# --- 15. m11-ter: `population_scale`, la cucitura di misura dell'apertura --------
+#
+# ## Che cosa e' e da dove viene
+#
+# La sonda `docs/piramide/probe_survive.gd` ha misurato che al raggio consegnato
+# di 60,0 m **tutte le morti cadono sull'onda 1 con 25 nemici vivi**, mai sulla 2
+# (piano §1.14-seque). Quindi la leva non e' il fondo: e' **l'apertura**. Per
+# misurare quanto deve essere morbida serve poter variare la popolazione
+# dell'onda 1 **a runtime**, e prima di m11-ter non si poteva: `Run.POP_BASE`
+# e' una `const`.
+#
+# Questa sezione non cambia il gioco. Cambia **quello che e' verificabile** di una
+# riga che il vertice usera' per misurare, e la divide in tre domande che sono
+# tre difetti diversi:
+#
+#   1. **il default e' 1.0** e nessuna riga di gioco lo cambia — criterio
+#      **statico**: il nome compare in due punti di codice in tutto `src/`, e in
+#      nessuna scena;
+#   2. **a 1.0 le popolazioni sono quelle di prima**, onda per onda — e' la prova
+#      che la riga e' un no-op sul comportamento, cioe' che i quattro numeri delle
+#      milestone non si sono spostati di una unita';
+#   3. **a 0.5 le dimezza davvero**, e non solo «la variabile esiste».
+#
+# ## Perche' il punto 3 e' quello che regge gli altri due
+#
+# «La variabile esiste» e' un fatto, e un fatto non si puo' usare per misurare.
+# Se il `* population_scale` sparisse dalla riga di `_sync_population()`, o se
+# qualcuno lo rendesse no-op con una soglia (`if population_scale > 1.0`), i
+# punti 1 e 2 continuerebbero a essere veri: il default ci sarebbe e a 1.0
+# mancherebbe niente. Solo la domanda a 0.5 distingue «c'e' una leva» da «c'e' un
+# campo». E' il dente, ed e' per questo che sta per ultima e non come una nota.
+#
+# ## Il percorso e' quello di gioco, non una chiamata privata
+#
+# Le popolazioni sotto non sono scritte a mano e `_sync_population()` non viene
+# chiamata da qui dentro: l'onda 1 si ottiene da `restart_run()` e le successive
+# chiudendo l'onda con `step()`, cioe' passando dagli stessi tre punti in cui il
+# gioco chiama `_sync_population()`. Se la sezione chiamasse il metodo privato
+# accetterebbe anche un'orda in cui quel ramo e' morto: e' la classe di difetto
+# di §1.6, una macchina verificata che il gioco non chiama.
+#
+# ## Perche' anche le scene
+#
+# Un `population_scale = 1.0` scritto su `scenes/arena_main.tscn` non e' codice e
+# nessuna `grep` sui `.gd` lo vede, ma e' una **seconda copia del default**: e due
+# copie di un numero in due file divergono senza che nessuno se ne accorga, che
+# e' la ragione per cui `Run.POP_MAX` e' dichiarato due volte e controllato due
+# volte. Quindi anche `res://scenes` e' guardata, e la riga che lo afferma dice
+# cosa fare se un giorno dovesse diventare rossa: si toglie la proprieta' dalla
+# scena, non si allarga il criterio.
+
+## Il default dichiarato in `src/sim/horde.gd`. Non e' una copia: e' il numero
+## che il campo deve avere **dopo** che il percorso di gioco ci ha passato
+## sopra, e il criterio 1 lo confronta con quello che il file dichiara.
+const SCALA_DEFAULT := 1.0
+## La scala con cui si misura che la leva **morde**. Meta': il numero che
+## distingue «la variabile esiste» da «la variabile fa qualcosa», e non un
+## valore che servirebbe al gioco (il gioco non la tocca, e li' e' dichiarato).
+const SCALA_PROVA := 0.5
+## Quante onde si percorrono per scala. `Run.POP_SATURATION` = 8, quindi 10
+## copre tutta la crescita **e** la coda piatta oltre il tetto: una scala che
+## funzionasse solo sull'onda 1 sarebbe una scala che la sonda puo' usare solo
+## per la prima Seconds, che e' proprio il difetto che la riga deve chiudere.
+const SCALA_ONDE := 10
+
+## Le tre asserzioni statiche sul nome: un file solo in `src/`, un file solo che
+## lo nomina in codice, nessuna scena che lo scriva.
+func _scala_nei_file(h) -> void:
+	var citano := PackedStringArray()
+	for path in _file_gdc_in("res://src"):
+		if _contiene(path, "population_scale"):
+			citano.append(path)
+	citano.sort()
+	h.check(citano.size() == 1 and citano[0] == "res://src/sim/horde.gd",
+		("m11-ter: in src/ il nome population_scale compare solo in "
+			+ "src/sim/horde.gd, perche' il gioco non la tocca. Trovato in: "
+			+ str(citano))
+			+ ". Se una foglia di gioco lo usa, la cucitura ha smesso di essere una "
+			+ "cucitura e va tolta da li', non allargato questo criterio.")
+
+	# I **due** punti sono la dichiarazione e `_sync_population()`. Un terzo punto
+	# in codice significa che qualcuno scrive il campo da un'altra parte
+	# (`_build()`, `restart_run()`, un `step()`): il difetto che la sezione 14 ha
+	# appena chiuso sul seme, ripetuto sul numero.
+	h.eq(_occorrenze_di_codice("res://src/sim/horde.gd", "population_scale"), 2,
+		"m11-ter: in src/sim/horde.gd il nome compare in DUE punti di codice, la "
+			+ "dichiarazione e _sync_population(). Tre o piu' significa che qualcuno "
+			+ "la scrive altrove (per esempio in restart_run) e il default non e' piu' "
+			+ "l'unico posto in cui il valore si decide.")
+
+	# ## Le scene, e la guardia che rende questa riga non decorativa
+	#
+	# Se `res://scenes` non si aprisse, `scene` sarebbe vuoto e `scene.size() == 0`
+	# passerebbe **senza aver guardato niente**: un criterio che passa qualunque
+	# cosa non vale niente. Percio' prima si conta quante scene ci sono state
+	# guardata, e si asserisce che siano piu' di zero: il vuoto che viene dopo e'
+	# allora un numero, non una mancata apertura.
+	var scene_trovate := _file_con_estensione("res://scenes", ".tscn")
+	h.check(scene_trovate.size() > 0,
+		"m11-ter: la scansione delle scene ha guardato almeno una .tscn, altrimenti "
+			+ "il criterio 'nessuna scena scrive population_scale' passerebbe senza "
+			+ "aver aperto niente")
+	var scene := PackedStringArray()
+	for path in scene_trovate:
+		if _contiene(path, "population_scale"):
+			scene.append(path)
+	scene.sort()
+	h.eq(scene.size(), 0,
+		("m11-ter: nessuna delle %d scene scrive population_scale, perche' il default "
+			% scene_trovate.size())
+			+ "vive in un posto solo (src/sim/horde.gd). Trovato in: " + str(scene)
+			+ ". Se una scena dovesse impostarlo, si toglie la proprieta' dalla scena: "
+			+ "due copie di un default divergono senza che nessuno se ne accorga.")
+
+## Il numero di default, letto dal **file**, non da una copia scritta qui.
+## E' quello che rende la riga di sopra un confronto e non un tautologia: se il
+## campo cambiasse default e questa costante no, le due cose non starebbero piu'
+## nella stessa frase.
+func _scala_default_dichiarata() -> float:
+	var f := FileAccess.open("res://src/sim/horde.gd", FileAccess.READ)
+	if f == null:
+		return -1.0
+	for riga in f.get_as_text().split("\n"):
+		if riga.begins_with("var population_scale"):
+			return float(riga.split("=")[-1].strip_edges())
+	return -1.0
+
+## La sezione: il default, il no-op a 1.0, il dente a 0.5.
+func _scala_popolazione(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var respawn_prima := horde.auto_respawn
+	# La sezione non vuole misurare la rampa degli 8/s: `restart_run()` riempie
+	# gia' a `population`, quindi il numero che si confronta e' la curva e non il
+	# ritmo di spawn. Il flag torna com'e' alla fine, perche' le sezioni dopo
+	# devono trovare l'orda com'era.
+	horde.auto_respawn = false
+
+	# 1. il default, com'e' lo ha lasciato costruire `_build()`
+	#
+	# Questa e' l'asserzione che rende la prima meta' del criterio 1 non
+	# dichiarativa: il campo non e' 1.0 perche' il test l'ha messo a 1.0, e'
+	# 1.0 perche' nessuno l'ha toccato. E il confronto e' con il valore **letto
+	# dal sorgente**, non con una copia scritta qui accanto.
+	h.eq(horde.population_scale, SCALA_DEFAULT,
+		"m11-ter: l'orda appena costruita ha la cucitura al suo default")
+	h.eq(_scala_default_dichiarata(), SCALA_DEFAULT,
+		"m11-ter: il default dichiarato in src/sim/horde.gd e' quello che il test "
+			+ "usa come riferimento, quindi qui non c'e' una seconda copia del numero")
+
+	# 2. `restart_run()` non la tocca
+	#
+	# Il percorso che il vertice esercita a ogni tentativo di sonda e' proprio
+	# questo: se un restart riallineasse la scala, la sonda misurerebbe una
+	# partita che non e' quella che sta descrivendo, e il difetto sarebbe
+	# invisibile perche' i numeri restano plausibili.
+	horde.restart_run()
+	h.eq(horde.population_scale, SCALA_DEFAULT,
+		"m11-ter: restart_run() non tocca la cucitura")
+	h.eq(horde.population, RUN.population_of(1),
+		"m11-ter: e la popolazione resta quella della curva")
+	h.eq(horde.count, horde.population,
+		"m11-ter: il campo e' a quel numero")
+
+	# 3. a 1.0 non cambia niente, onda per onda
+	#
+	# E' la risposta nota della sezione, nella forma della 13e-bis: le stesse
+	# popolazioni di `Run.population_of`, lette dall'orda, sugli stessi numeri che
+	# la funzione da', senza scrivere niente a mano.
+	var intera := _popolazioni_scala(horde, SCALA_DEFAULT)
+	var dimezzata := _popolazioni_scala(horde, SCALA_PROVA)
+	# `range(1, N + 1)` e non `for w in N`: `for w in N` va da 0 a N-1, e
+	# `Run.population_of(0)` vale `population_of(1)` per il `maxi` — quindi il
+	# confronto partirebbe dall'onda 1 due volte e finirebbe all'onda 9, senza
+	# accorgersene. Qui l'indice delle due sequenze e' `w - 1`, e deve.
+	for w in range(1, SCALA_ONDE + 1):
+		var atteso := RUN.population_of(w)
+		h.eq(intera[w - 1], atteso,
+			"m11-ter: a scala %.2f l'onda %d ha la popolazione della curva"
+				% [SCALA_DEFAULT, w])
+		h.eq(dimezzata[w - 1], roundi(float(atteso) * SCALA_PROVA),
+			"m11-ter: a scala %.2f l'onda %d ha la curva moltiplicata"
+				% [SCALA_PROVA, w])
+		# Il numero deve essere **minore**, non diverso: una scala che sposta il
+		# numero senza abbassarlo non e' una leva sull'apertura.
+		h.check(dimezzata[w - 1] < atteso,
+			"m11-ter: a scala %.2f l'onda %d ha meno nemici della curva (%d su %d)"
+				% [SCALA_PROVA, w, dimezzata[w - 1], atteso])
+
+	## 4. il dente: a 0.5 l'apertura e' davvero piu' sottile **in campo**
+	##
+	## Fin qui il confronto e' su `population`, un campo. La riga che conta e'
+	## l'altra: quanti **corpi** ci sono quando l'onda parte. `restart_run()`
+	## riempie a `population` senza passare dalla rampa, quindi il numero e'
+	## leggibile subito, e a 0.5 deve essere metà della curva sull'onda 1.
+	horde.population_scale = SCALA_PROVA
+	horde.restart_run()
+	h.eq(horde.count, roundi(float(RUN.population_of(1)) * SCALA_PROVA),
+		"m11-ter: a scala %.2f il campo parte con la meta' dei nemici della curva"
+			% SCALA_PROVA)
+	h.check(horde.count < RUN.POP_BASE,
+		"m11-ter: a scala %.2f l'apertura e' piu' sottile di quella di oggi (%d su %d)"
+			% [SCALA_PROVA, horde.count, RUN.POP_BASE])
+	h.eq(horde.transforms.size(), horde.count,
+		"m11-ter: a scala %.2f gli array restano allineati a count" % SCALA_PROVA)
+
+	## 5. rimessa a posto, e dichiarato
+	horde.population_scale = SCALA_DEFAULT
+	horde.restart_run()
+	horde.auto_respawn = respawn_prima
+	h.eq(horde.population_scale, SCALA_DEFAULT,
+		"m11-ter: la sezione rimette la cucitura al default prima di restituire l'orda")
+	h.eq(horde.population, RUN.population_of(1),
+		"m11-ter: e l'orda torna alla popolazione della curva")
+	h.eq(horde.count, horde.population,
+		"m11-ter: e il campo torna a quel numero")
+
+	# Una sezione che non stampa i propri numeri e' una sezione di cui il lettore
+	# deve fidarsi. Il costo e' stampato con i numeri perche' qui il vincolo e' il
+	# tetto di 120 s di `tools/gate.gd` e non la bellezza dell'asserzione.
+	print("orda: m11-ter, scala %.2f -- onde 1..%d: %s | Run.population_of: %s | scala %.2f: %s"
+		% [SCALA_DEFAULT, SCALA_ONDE, _sequenza(intera), _sequenza_curve(),
+			SCALA_PROVA, _sequenza(dimezzata)])
+	print("orda: m11-ter: onda 1 in campo %d nemici a scala 1.0 e %d a scala %.2f "
+		% [RUN.population_of(1), roundi(float(RUN.population_of(1)) * SCALA_PROVA),
+			SCALA_PROVA]
+		+ "(Run.POP_BASE = %d, MAX_ENEMIES = %d)" % [RUN.POP_BASE, HORDE.MAX_ENEMIES])
+	print("orda: m11-ter: sezione intera in %d us (5 restart_run() e %d step(), zero "
+		% [Time.get_ticks_usec() - t0, 2 * (SCALA_ONDE - 1)]
+		+ "allocazioni nel ciclo di gioco)")
+
+## Le popolazioni che l'orda si assegna sulle prime `SCALA_ONDE` onde, con la
+## scala `scala` sopra.
+##
+## L'onda 1 arriva da `restart_run()` e le successive da `step()` con l'onda
+## chiusa: sono i tre punti in cui `_sync_population()` e' chiamata dal gioco, e
+## non una chiamata a `_sync_population()` scritta qui dentro. Con
+## `auto_respawn = false` un passo e' solo il passo: nessuna rampa, nessun costo
+## che non sia il confronto.
+func _popolazioni_scala(horde: HORDE, scala: float) -> PackedInt32Array:
+	var fuori := PackedInt32Array()
+	horde.population_scale = scala
+	horde.restart_run()
+	fuori.append(horde.population)
+	for _i in (SCALA_ONDE - 1):
+		# Chiudere l'onda e' quello che fa il gioco quando la barra arriva a
+		# zero: `wave_cleared()` e' vero e `step()` passa all'onda dopo.
+		horde.run.wave_killed = horde.run.wave_total
+		horde.step(DT)
+		fuori.append(horde.population)
+	return fuori
+
+## La stessa sequenza, calcolata dalla funzione dichiarata in `src/sim/run.gd`
+## invece che dall'orda. Serve solo da stampata: il confronto vero e' quello
+## fatto sopra, onda per onda.
+func _sequenza_curve() -> String:
+	var fuori := PackedInt32Array()
+	for w in range(1, SCALA_ONDE + 1):
+		fuori.append(RUN.population_of(w))
+	return _sequenza(fuori)
+
+## I numeri di una sequenza in interi, separati da `/`, per una riga di stampa.
+func _sequenza(a: PackedInt32Array) -> String:
+	var parti := PackedStringArray()
+	for v in a:
+		parti.append(str(v))
+	return "/".join(parti)

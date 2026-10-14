@@ -141,6 +141,36 @@ const MIN_SPAWN_GAP := 12.0
 ## commento di quel metodo). Il valore di partenza non e' 200 ma
 ## `Run.POP_BASE` = 25: la curva e la sua misura sono in `src/sim/run.gd`.
 var population: int = 0
+
+## ## m11-ter: `population_scale`, la cucitura di misura dell'apertura
+##
+## **Un moltiplicatore, dichiarato, che il gioco non tocca mai.** Esiste per una
+## ragione sola, e la ragione e' scritta qui perche' un campo senza ragione
+## dichiarata e' un numero che qualcuno puo' alzare per far passare un test.
+##
+## La sonda `docs/piramide/probe_survive.gd` (del vertice) ha misurato che al
+## raggio consegnato di 60,0 m **tutte le morti cadono sull'onda 1 con 25 nemici
+## vivi**, mai sulla 2 (piano §1.14-seque): quindi la leva e' **l'apertura**, non
+## il fondo. Per sapere quanto deve scendere `Run.POP_BASE` serve poter variare
+## la popolazione dell'onda 1 **a runtime**. Prima di questo campo non si poteva:
+## `Run.POP_BASE` e' una `const`, e una `const` non e' un punto da sonda — si
+## cambiava il sorgente a ogni tentativo, che e' il modo piu' lento di misurare e
+## il piu' facile di sbagliare.
+##
+## **Il default e' 1.0 esatto, quindi i numeri di oggi non si muovono.**
+## `roundi(intero * 1.0)` restituisce quell'intero, quindi l'onda 1 parte da
+## `Run.POP_BASE` = 25 come prima e i quattro numeri delle milestone restano
+## quelli che sono.
+##
+## **Chi lo tocca: solo una sonda, e solo per la durata della misura.** Il
+## percorso di gioco non lo tocca, e questo non e' una promessa ma un criterio:
+## `tests/test_orda.gd` sezione 15 conta le occorrenze **di codice** del nome in
+## tutto `res://src` e in `res://scenes`, e va rossa se compare un terzo punto,
+## se un `restart_run()` la tocca, o se una scena ne scrive una seconda copia del
+## default. La riga che mette la scala dentro la popolazione e' `_sync_population`,
+## ed e' l'unica.
+var population_scale: float = 1.0
+
 ## Se falsa, l'orda non si riempie da sola: serve al test per vedere il
 ## conteggio scendere davvero.
 var auto_respawn: bool = true
@@ -767,9 +797,16 @@ func _sync_wave() -> void:
 ## un test che pilota `population` a mano (il test di capacita') ottiene un'orda
 ## di 200 senza dipendere dalla curva, ed e' esattamente il motivo per cui i due
 ## numeri sono separati.
+##
+## **Qui dentro entra anche `population_scale`** (vedi la dichiarazione del campo):
+## e' l'unico punto di tutto `src/` in cui la cucitura di misura dell'apertura
+## viene letta. Il `roundi` serve perche' il campo e' un `float` e `population`
+## e' un `int`; a 1.0 — il default, e l'unico valore che il gioco usa — il
+## `roundi` restituisce l'intero di prima, quindi la riga e' un no-op sul
+## comportamento e una leva per chi misura.
 func _sync_population() -> void:
 	if run != null:
-		population = clampi(run.population_of(run.wave), 0, MAX_ENEMIES)
+		population = clampi(roundi(run.population_of(run.wave) * population_scale), 0, MAX_ENEMIES)
 
 ## Rimette a posto i nemici rimasti senza vita. `damage_enemy` li toglie subito,
 ## quindi di norma non trova niente: e' la rete di sicurezza, non il caso normale.

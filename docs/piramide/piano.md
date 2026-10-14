@@ -418,6 +418,7 @@ Installata in **w0** dal vertice. **Nessun agente deve installare nulla**, e nes
 | Python 3.14 | già presente | generazione SFX, script Blender |
 | ffmpeg 9 | già presente | normalizzazione audio, `ffprobe` per le verifiche |
 | git 2.55 + git-lfs 3.7 | già presente | versionamento, `winget` per il resto |
+| Kiro CLI 2.31 | già presente | **secondo agente, per delega**: il vertice lo lancia quando un pezzo di lavoro esce dalla piramide (§11.12) |
 
 Uso convenuto in ogni comando:
 ```sh
@@ -431,6 +432,7 @@ Path reali rilevati in w0:
 |---|---|---|
 | `GODOT` | `godot` | già su `PATH` via alias WinGet (`WinGet\Links\godot`). Verificato: `godot --headless --version` → `4.7.2.stable.official.ed1daf0bf` |
 | `BLENDER` | `C:/Program Files/Blender Foundation/Blender 5.2/blender.exe` | **non** su `PATH`: winget lo installa sotto `Program Files` senza alias. Trovato con `find "/c/Program Files/Blender Foundation" -iname blender.exe` |
+| `KIRO` | `kiro-cli` | già su `PATH` (`AppData\Local\Kiro-Cli`). Verificato: `kiro-cli --version` → `kiro-cli-chat 2.31.0`. **Non va in `env.sh`**: quel file esiste per i path che `PATH` non ha, e `perm_absolute` vieta i path assoluti negli allow (§11.12) |
 
 Installati in w0, in sequenza (lock globale di winget): Godot `4.7.2`, Blender `5.2.2`.
 Entrambe le installazioni winget sono avvenute **senza privilegi admin**; l'alias `godot`
@@ -3030,6 +3032,7 @@ Quella prova ha anche trovato **un bug nel controllore**, non solo nei permessi:
 - **`tools/verify_agent_install.py` simula l'installazione** e deve dire `SIMULAZIONE PERM: 15/15` **prima** che l'utente perda tempo a copiare: consegnare un file che al primo check e' rosso e' il modo piu' veloce per bruciare la fiducia in una porta. Il file di -ui e' generato da `docs/piramide/make_agent_files.py` a partire dal blocco `permissions` di -arena, che e' gia' verde: cosi' il blocco dei permessi differisce per **una** riga (il path del test), non per trenta righe riscritte a mano. Il generatore lo verifica e si ferma se le righe cambiate sono piu' di due.
 - **`check_perms.py` ha una precondizione, `perm_install`.** Un agente dichiarato in `LEAVES` senza file su disco produceva **tredici** `controllore rotto`, perche' tredici check chiamano `load(agent)` e sollevano `FileNotFoundError`: quattordici errori identici che nascondevano l'unica causa vera. Una porta che non sa dire *perche'* e' rotta e' peggio di una porta che non gira. Ora la precondizione gira **prima** dei check e dice il file mancante e il lato (mirror o installazione). Il numero resta `15`: `perm_install` non e' un sedicesimo check, e' la domanda "la piramide e' installata?", cui la risposta senza file e' no e basta.
 - **`.opencode/agents/` nel repo cambia la precedenza** di questo progetto (§11.6). Va detto all'utente, non scoperto da un agente a un'onda di distanza.
+- **`kiro-cli` non ha un check.** §11.12 scrive la regola e il perché, ma `perm_kiro` non esiste: nessuna porta verifica che resti `ask`, che resti del solo vertice, o che le quattro forme negate ci siano ancora. Un domani che la tocca porta `PERM: 15/15` verde. È un debito, dichiarato in §11.12, non un vizio nascosto.
 - **`core.autocrlf=true` spezzava `perm_mirror` al primo clone**: git avrebbe convertito i file del mirror in CRLF al checkout, mentre la copia installata in `~/.config` resta LF, e il confronto byte per byte sarebbe diventato rosso per motivi che non hanno niente a che fare con i permessi. Risolto in `.gitattributes` con `.opencode/agents/*.md text eol=lf`, verificato con `git ls-files --eol` → `i/lf w/lf`. **È il motivo per cui `perm_mirror` confronta byte e non testo normalizzato**: normalizzare avrebbe nascosto il problema invece di registrarlo.
 
 ### 11.9 Cosa è cambiato rispetto a prima, in una tabella
@@ -3044,6 +3047,7 @@ Prima (w1–w2) le allowlist erano **un elenco di comandi**. Ora sono **una poli
 | rete | `webfetch`/`websearch` allow | entrambe in `ask` |
 | `sudo` | negato a tutti, e nessuno sapeva perché | tre ACL allow ai due che possiedono `.godot/`, resto negato, con il **perché** dichiarato |
 | `esecutore` | raggiungibile dal vertice | negato: perde la regola 7.4 |
+| secondo agente | non esisteva | `kiro-cli` in `ask` e **solo al vertice**: delega dichiarata, non attività in background; forme interattive e installer negate (§11.12) |
 | `. tools/env.sh` | non eseguibile da nessun agente | allow esplicito: la convenzione del piano funziona |
 | `gitattributes` | allow scritto **`gitattributes`**, senza il punto: regola **morta** | `.gitattributes`, e `perm_piano` lega il vertice a quel file |
 | permessi | fuori git, senza history | mirror nel repo, `perm_mirror` ne verifica l'identità |
@@ -3283,6 +3287,56 @@ qui la porta ha fatto esattamente questo, ha fallito, e la modifica è stata agg
 era in vigore, qui un documento di codice che non era in grado di girare. In entrambi i casi
 lo strumento che l'avrebbe detto esisteva già — `tools/gate.gd` qui, una prova di rifiuto là —
 e in nessuno dei due era stato usato **su se stesso**. Un rimedio non si cita: si esegue.
+
+### 11.12 `kiro-cli`: il secondo agente, e perché è `ask` e non `allow`
+
+**Deciso dall'utente il 2026-10-14**, non scelto da un agente: `terminal-gun` non poteva
+avviare `kiro-cli`, e la domanda giusta non era «serve?» ma «con quale effetto?».
+
+**Che cos'è.** AWS Kiro CLI 2.31.0, **già su `PATH`** come `kiro-cli` (`which kiro-cli` →
+`C:/Users/bisco/AppData/Local/Kiro-Cli/kiro-cli`). Quindi la regola è sul **nome**, non su un
+path assoluto: è l'opposto del caso Blender dichiarato in §11.8, e `perm_absolute` lo conferma
+(`kiro-cli *` non contiene `C:\` né comincia per `/`). Non va in `tools/env.sh`, perché quel
+file raccoglie i path che `PATH` **non** ha.
+
+**Solo il vertice.** Le sei foglie restano con `deny`: una foglia che delega a un secondo
+agente è una piramide dentro la piramide, e il vertice non la vede — non può verificarla,
+non può pretenderne i contratti di output, non la committa. Il vertice è l'unico che lancia
+altri agenti e l'unico che committa (regola 7.2), quindi è l'unico posto dove una delega
+verso l'esterno è governabile.
+
+**Lettura e scrittura sì, e la concessione sta nel meccanismo, non nella riga.** `kiro-cli`
+può scrivere il progetto, e va bene, perché il lancio non è un'attivita' in background: è una
+**delega esplicita**, e ogni lancio passa da `question`, dove il vertice dichiara *cosa* ha
+delegato. Il vertice risponde di ciò che `kiro-cli` ha scritto nel suo scope esattamente come
+risponde di ciò che ha scritto una foglia: stessa delega, stesso debito di verifica.
+
+**`ask` e non `allow`.** Con `allow` la riga significherebbe *«il vertice può far scrivere il
+proprio scope da un altro agente senza chiedere»*, cioè bucare **da fuori** il muro
+`edit: * deny` del blocco 1 — che è la riga che tiene chiuso `src/`, ed è l'unico muro che
+non ha una porta che lo verifichi (§11.10). L'`ask` mette il vertice davanti alla domanda,
+e il vertice è l'unico che sa cosa non può cedere. Verificato con le funzioni di matching di
+`tools/check_perms.py`, non dichiarato: le due forme one-shot tornano `ask`, le forme
+interattive tornano `deny`, e su `terminal-gun-ui` la stessa riga resta `deny`.
+
+**Le forme negate, e perché ognuna.** Nessuna è una restrizione sulla delega:
+
+| negata | perché |
+|---|---|
+| `kiro-cli` e `kiro-cli chat` senza prompt | aprono la chat e **aspettano input**: non è una domanda all'utente, è uno stallo che lo shell tool non può mangiare |
+| `kiro-cli crew *` | *«Launch Kiro Crew, **installandolo** se non c'è»*: un agente che si installa da solo un plugin |
+| `kiro-cli powers *` | stessa riga, `powers` installa e disinstalla plugin |
+| `kiro-cli update *` | un agente che si aggiorna da solo è la stessa cosa di `winget install *` prima che diventasse ancorato (regola 7.3, §11.9) |
+
+La forma che si lancia è quindi una, e termina: `kiro-cli chat "<prompt>" --no-interactive`.
+
+**Il debito, dichiarato perché nessuna porta lo prende.** `tools/check_perms.py` ha 15 check e
+**nessuno guarda `kiro-cli`**: se domani qualcuno rimuove la riga, o la sposta su una foglia,
+`PERM` resta `15/15` e il gate è verde. È la stessa classe di difetto che `perm_blender` è
+nato per chiudere (§11.8): il piano assegna qualcosa che nessuno può verificare. Il rimedio
+è un sedicesimo check — `perm_kiro`: solo il vertice ce l'ha, l'effetto è `ask`, e le quattro
+forme negate ci sono — e non è stato scritto perché nessuna onda lo chiede. Dichiarato qui
+come debito, non dato per chiuso.
 
 ## 9. Tagli dichiarati
 

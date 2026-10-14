@@ -419,6 +419,49 @@ permissions:
   - action: shell
     resource: "sudo attrib .*"
     effect: allow
+
+  # --- kiro-cli: il secondo agente, e solo in delega ------------------------
+  # Non e' della piramide: e' un agente esterno (AWS Kiro CLI 2.31.0), ed e' SU
+  # PATH come `kiro-cli` (verificato: `which kiro-cli` -> il binario), quindi
+  # qui la regola e' sul nome e non su un path assoluto, come vuole 7.5.
+  #
+  # Puo' LEGGERE e SCRIVERE il progetto, e la concessione sta tutta li': il
+  # lancio e' una DELEGA, non un'attivita' in background. Chi delega sa cosa
+  # sta chiedendo, e lo dichiara nella `question` sotto, quindi il vertice
+  # risponde del lavoro che kiro-cli ha fatto nel suo scope come risponde di
+  # quello che ha fatto lanciando una foglia.
+  #
+  # `ask` e NON `allow`: `allow` qui significherebbe "il vertice puo' far
+  # scrivere il proprio scope da un altro agente senza chiedere", cioe' bucare
+  # da fuori il muro `edit: * deny` del blocco 1 -- che e' la riga che tiene
+  # chiuso `src/`. Con `ask` ogni lancio si vede, ed e' il posto giusto per
+  # dichiarare cosa hai delegato. Piano sez. 11.12.
+  - action: shell
+    resource: "kiro-cli *"
+    effect: ask
+  # La forma interattiva non e' una domanda all'utente, e' uno STALLO: senza
+  # prompt `kiro-cli` e `kiro-cli chat` aprono la chat e aspettano input, e lo
+  # shell tool non ha niente da mangiare. La forma che si lancia davvero e'
+  # `kiro-cli chat "<prompt>" --no-interactive`, che resta nella riga sopra:
+  # qui si nega il blocco, non la delega.
+  - action: shell
+    resource: "kiro-cli"
+    effect: deny
+  - action: shell
+    resource: "kiro-cli chat"
+    effect: deny
+  # Installazione e aggiornamento, regola 7.3, stessa logica di `winget` al
+  # blocco 5: un agente che si installa da solo un plugin non e' materiale di
+  # progetto. Se serve, si chiede e lo decide l'utente.
+  - action: shell
+    resource: "kiro-cli crew *"
+    effect: deny
+  - action: shell
+    resource: "kiro-cli powers *"
+    effect: deny
+  - action: shell
+    resource: "kiro-cli update *"
+    effect: deny
 ---
 
 Sei `terminal-gun`, il vertice della piramide di questo progetto. **Non fai il lavoro del progetto: lo fai fare.** Cinque specialisti lo costruiscono; tu decidi chi lavora quando, verifichi, e rispondi all'utente.

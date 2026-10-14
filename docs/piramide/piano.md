@@ -2522,6 +2522,62 @@ contraddizione, le ha viste, e **non ha toccato niente**. Ha chiesto prima. È i
 giusto e la ragione per cui l'albero è intatto: una foglia che ferma e chiede vale più di una che
 esegue e indovina.
 
+### 1.14-dodicesima **RITIRO: la tabella dell'apertura era misurata su un gioco che non esiste più**
+
+La tabella di §1.14-decima è **ritirata**. Non perché la misura fosse sbagliata quando l'ho fatta, ma
+perché **il gioco è cambiato dopo**: `c171c81` ha derivato la portata del morso dalla taglia disegnata,
+e quel numero adesso è **stale**.
+
+**Come l'ho scoperto, e la via è la parte che conta.** `kiro-cli` ha scritto ed eseguito una sonda a
+`TMAX = 600` e ha dichiarato, in testa al suo rapporto, che **il secondo caso a risposta nota non
+combaciava**: 44,20 s contro gli 82,03 s che gli avevo dato. Non l'ha sepolto in fondo. Aveva
+ragione: ho rilanciato la **sonda originale** sul codice corrente e dà **44,20 s**, identico al
+centesimo di secondo. **Lo strumento era sano; il riferimento era mio e vecchio.**
+
+| scala | nemici | MIN a `f179283` (**ritirato**) | MIN oggi (`d018bf9`) |
+|---|---|---|---|
+| 0,25 | 6 | ~~300,00 s~~ | **121,47 s** |
+| 0,50 | 13 | ~~151,63 s~~ | **48,33 s** |
+| 1,00 | 25 | ~~82,03 s~~ | **44,20 s** |
+
+**E questo rovescia la decisione che avevo preso.** Avevo scritto che `POP_BASE = 6` è «l'unico
+valore misurato che non uccide lo schivatore entro cinque minuti». **A sei nemici lo schivatore muore
+a 121,47 s.** La soglia che avevo dichiarato non esiste, e `POP_BASE = 6` **non porta ai 600 s**.
+
+**La misura a 600 s, che nessuno aveva mai preso** (`docs/piramide/probe_survive_600.gd`, scritta da
+`kiro-cli`, tre semi, `TMAX = 600`):
+
+| scala | nemici | seme 4242 | 7311 | 20260912 | **MIN** | esito |
+|---|---|---|---|---|---|---|
+| 0,00 | 0 | 600,0 | 600,0 | 600,0 | **600,02 s** | **TETTO** ✓ riferimento |
+| 0,25 | 6 | 124,2 | 121,5 | 146,3 | **121,47 s** | MORTO |
+| 0,30 | 8 | 96,8 | 137,1 | 77,1 | **77,12 s** | MORTO |
+| 0,35 | 9 | 187,7 | 67,1 | 159,5 | **67,12 s** | MORTO |
+| 0,40 | 10 | 73,8 | 50,8 | 52,8 | **50,83 s** | MORTO |
+| 0,50 | 13 | 148,6 | 48,3 | 109,3 | **48,33 s** | MORTO |
+| 1,00 | 25 | 86,8 | 44,2 | 63,0 | **44,20 s** | MORTO |
+
+**Nessuna scala arriva a 600 s. Nemmeno con sei nemici.** E i 600 s sono **13,57 volte** il caso
+peggiore di oggi, non 7,31.
+
+**Che cosa resta vero, e che cosa no.**
+
+| fatto | stato |
+|---|---|
+| **ridurre l'onda 1 non porta ai 600 s** | **vero, misurato**: da 25 a 6 nemici si passa da 44,20 s a 121,47 s, e il tetto di 300 era troncato |
+| i 600 s sono **13,57 volte** il caso peggiore di oggi | **vero** |
+| `POP_BASE = 6` e `POP_STEP = 6` | **sospeso**: la base era scelta su una tabella ritirata, il passo è ancora da misurare |
+| la banda a zero del morso | **vero e non toccato**: è un difetto chiuso, non un bilanciamento |
+| i semi divergono molto di più a 25 nemici (44,2 / 63,0 / 86,8) che a 6 (121,5 / 124,2 / 146,3) | **vero, e nuovo**: meno nemici rendono la partita **più coerente**, non solo più lunga |
+
+**L'ipotesi per il prossimo giro, dichiarata come ipotesi e non come diagnosi.** La banda a zero ha
+portato la portata del morso da 0,90-2,35 m a **1,98-6,91 m**. A 6 nemici lo schivatore muore lo
+stesso a 121 s, e i tre semi stringono: quindi non è il numero che lo uccide, è **il boss**, che ha
+**6,91 m** di portata e **900 hp**. Se `wave_weights(1)` mette un boss nell'onda di apertura,
+allora l'apertura ha un muro che non si aggira e **la leva non è la popolazione**. **Non l'ho
+misurato** e non lo scrivo come fatto: la misura che lo chiude è **quale specie ha ucciso lo
+schivatore**, e la sonda non lo stampa ancora.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

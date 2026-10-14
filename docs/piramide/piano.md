@@ -2131,31 +2131,36 @@ non cresce **monotono** con il raggio — 50,98 → 300,00 → 78,18, con un fat
 Quindi il raggio **non è la variabile**: la variabile è **se lo schivatore si fa chiudere in angolo**,
 e a 75 m il mio bot di otto raggi si chiude, a 60 m trova una linea di fuga e la mantiene.
 
-**E la causa è scritta in due numeri di `enemy.gd`, che è di `-orda`:**
+**E la causa che avevo nominato è SBAGLIATA, e la ritiro.** Avevo scritto che i 600 s sono
+raggiungibili «perché il giocatore è invulnerabile finché corre», e l'avevo appoggiato su un
+invariante, `RADIUS + TOUCH_REACH > ARRIVE_RADIUS`. **L'invariante non ha senso**: confronta una
+**portata** con una **scala di decelerazione**. Il sorgente lo dice e lo dice da sempre:
 
-| | valore |
-|---|---|
-| `ARRIVE_RADIUS` — dove il nemico **si ferma** | **3,00 m** |
-| portata del morso, `RADIUS + TOUCH_REACH` | **0,90 / 1,05 / 1,45 / 2,35 m** |
+```
+src/sim/enemy.gd:253   var arrive := clampf(dist / ARRIVE_RADIUS, 0.0, 1.0)
+src/sim/enemy.gd:254   var wanted := dir * SPEED[kind] * arrive + push
+```
 
-**Ogni specie si ferma più lontano di quanto possa mordere.** Un nemico che obbedisce alla propria
-regola di arrivo **non morde mai**: per farlo deve essere spinto dentro i 3 m dalla separazione o
-dalla folla. Quindi **se corri, non ti mordono** — e a 60 m la linea di fuga esiste, a 46 m il muro
-la chiude, e in entrambi i casi il numero che esce è quello del muro e non quello della difficoltà.
+`ARRIVE_RADIUS = 3.0` **non è un punto d'arresto**: a 3 m vale 1,0, a 0,9 m — la portata del morso
+del runner — vale **0,3**, e il nemico **continua ad avvicinarsi**. Quindi *«un nemico che obbedisce
+alla propria regola di arrivo non morde mai»* è **falso**, e i numeri lo confermano da sempre: il
+giocatore fermo al centro muore in **9,58 s** e si becca **27 morsi su 44 offerti** in 30 s.
 
-**È la stessa classe del difetto di m7**, che dichiarai verde perché il criterio guardava
-`damage_player` e non guardava **chi arriva abbastanza vicino**. Stavolta la misura non è una
-sonda: è un rapporto fra due numeri di costanti, e si vede senza eseguire niente.
+**Il meccanismo vero, che è più semplice e più brutale:** il giocatore corre a **13,65 m/s** e il
+nemico più veloce a **6,6 m/s**. Un giocatore che si muove **sempre** non è raggiungibile, e questo
+**non è un difetto**: è il disegno della velocità. I morsi arrivano solo quando il giocatore **non
+può continuare a muoversi**, cioè quando il muro o gli ostacoli lo chiudono.
 
-**Che cosa ne segue, e l'ordine è mio.** I 600 s dell'utente sono **raggiungibili oggi**, ma per il
-motivo sbagliato: si raggiungono **perché il giocatore è invulnerabile finché corre**, non perché il
-gioco sia bilanciato. Nessuna mappa, grande o piccola, lo cambia: è un numero dentro `enemy.gd`.
-Quindi **il primo intervento di m11 non è la mappa**: è l'invariante
-
-> **`RADIUS + TOUCH_REACH > ARRIVE_RADIUS` per ogni specie**
-
-come **criterio con denti**, e la mappa più grande che l'utente ha chiesto resta al suo posto — ma
-diventa il **secondo** intervento, non il primo.
+**E la tabella dei raggi, di conseguenza, non regge come prova.** L'inversione R=60 meglio di
+R=75 non è una proprietà del gioco: è il mio schivatore a otto raggi che al raggio maggiore si fa
+chiudere in angolo. **Uno strumento che dà un numero migliore a una configurazione e peggiore a una
+più grande non sta misurando l'arena**: sta misurando se stesso. Avevo già scritto questa regola
+quando ho aggiunto i tre semi, e poi l'ho dimenticata mentre leggevo la tabella. **La cosa che
+resta, e che è l'unica su cui si può costruire:** al raggio **consegnato di 46 m**, con i numeri
+consegnati, uno che schiva **muore sull'onda 1** in **51–124 s**, e i 600 s dell'utente sono da
+**4,8 a 11,8 volte** tanto. **Quella è la misura, e basta.** Il resto della tabella è da rifare
+con uno schivatore che non si chiuda in angolo, che è un problema di **strumento**, e uno strumento
+è roba mia.
 
 ### Le onde della milestone 3
 

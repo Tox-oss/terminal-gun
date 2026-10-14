@@ -1,13 +1,14 @@
 extends Node3D
 ## La radice dell'arena: `scenes/arena_main.tscn`. Terreno, ostacoli, orda,
-## nemici, giocatore, camera, HUD, e due registrazioni sul contratto.
+## nemici, giocatore, camera, HUD, e tre registrazioni sul contratto.
 ##
-## ## Le due cose che arena registra
+## ## Le tre cose che arena registra
 ##
-##     Game.arena_radius = 60.0        # m9, e' la fonte unica del raggio
-##     Game.obstacles     = [...]      # m10, i dischi su cui si scontra
+##     Game.arena_radius      = 60.0   # m9, e' la fonte unica del raggio
+##     Game.obstacles          = [...]  # m10, i dischi su cui si scontra
+##     Game.enemy_body_scale   = 3.4    # m11, il fattore di calibrazione del corpo
 ##
-## Sono due **dati**, quindi assegnazione diretta, una volta sola all'avvio (piano
+## Sono tre **dati**, quindi assegnazione diretta, una volta sola all'avvio (piano
 ## 5.1). Li registro in `_enter_tree()` e non in `_ready()`: i figli di questa
 ## scena costruiscono il terreno, gli ostacoli e l'orda nel loro `_ready()`, che
 ## gira prima del mio. Il commento di `_enter_tree()` spiega perche'.
@@ -149,6 +150,35 @@ const OBST := preload("res://src/sim/obstacles.gd")
 ## rilegge niente e non si ricostruisce niente.
 var OBSTACLE_LAYOUT: PackedVector3Array = OBST.layout(ARENA_RADIUS)
 
+## ## IL FATTORE CORPO: `SIZE_FACTOR` e' di -arena, e lo registra questo file
+##
+## E' l'ennesima volta la stessa forma, e questa volta **il numero e' mio**: lo
+## dichiara `src/render/horde_renderer.gd`, che e' di questa stessa foglia.
+##
+## Il contratto (`src/core/contracts.gd`, m11) dichiara
+## `Game.enemy_body_scale` perche' `-orda` ne ha bisogno: senza quel canale la
+## simulazione non sa **quanto e' grosso il corpo che si vede**, quindi per
+## mordere alla distanza giusta dovrebbe **copiare** `3.4` da qui, e una copia
+## mente alla prima riga cambiata — il difetto delle sei copie di m9, gia' pagato
+## una volta.
+##
+## Quindi qui sotto **non c'e' un numero scritto**: c'e' il posto dove va letto.
+## `3.4` compare in due punti del progetto — la `const SIZE_FACTOR` del renderer
+## e il **default dichiarato** del contratto — ed e' esattamente cosi' che devono
+## stare: il default e' il valore **di prima** che l'arena si registri (che e' la
+## condizione per cui la scena si carica anche senza nessuna piramide montata), e
+## non una seconda fonte. Se i due divergessero, nessuno se ne accorgerebbe: il
+## canale funziona **finche' coincidono per caso**, e la coincidenza non e' un
+## contratto. `tests/test_arena.gd` chiude il canale: mette il campo a `99.0`
+## **prima** di montare la scena, e il valore che si legge dopo puo' essere solo
+## quello che esce da qui sotto.
+##
+## Il `preload` e' lecito per la stessa ragione di `OBST` qui sopra: il
+## **proprietario** del numero e' dichiarato ed e' lo stesso file di -arena, il
+## dato ha **un solo produttore**, e quello che ci metto dentro (la registrazione)
+## e' mio. Se il renderer cambiasse il fattore, il contratto cambierebbe da solo.
+const RENDERER := preload("res://src/render/horde_renderer.gd")
+
 var _hud: Node = null
 var _registered: bool = false
 var _warned_no_hud: bool = false
@@ -159,6 +189,10 @@ var _warned_no_contract: bool = false
 ## nomina il difetto e il suo rimedio, e non un avviso che nessuno legge.
 var _warned_no_obstacles_field: bool = false
 var _warned_empty_layout: bool = false
+## Lo stesso per il fattore corpo di m11: se il vertice toglie il campo dal
+## contratto, l'assegnazione qui sotto diventa un SCRIPT ERROR e il canale
+## semplicemente non esiste, in silenzio.
+var _warned_no_body_scale_field: bool = false
 
 func _enter_tree() -> void:
 	# `_enter_tree()`, non `_ready()`, e la ragione sta nell'ordine.
@@ -196,7 +230,41 @@ func _register() -> void:
 			push_warning("arena: autoload Game non trovato, l'arena resta senza raggio")
 		return
 	game.arena_radius = ARENA_RADIUS
+	_register_body_scale(game)
 	_register_obstacles(game)
+
+## ## IL FATTORE CORPO: la registrazione di `Game.enemy_body_scale` (m11)
+##
+## Va in `_enter_tree()` come il raggio e come gli ostacoli, e per la **stessa**
+## ragione: `-orda` legge questo numero per decidere a che distanza morre, e se
+## l'arena lo registrasse in `_ready()` il lettore avrebbe gia' costruito il campo
+## di percorrenza sopra il **default** del contratto. Il default e' dichiarato
+## uguale al valore reale apposta perche' la scena si carichi anche da sola, ma
+## «il default dice la stessa cosa» **non e'** «il canale funziona»: sono due
+## numeri che oggi coincidono e che nessuno guarderebbe se smettessero.
+##
+## E' **idempotente** per costruzione: `_register()` non fa niente una seconda
+## volta, quindi qui dentro c'e' una riga sola e non una per tentativo.
+func _register_body_scale(game: Node) -> void:
+	if not _contract_has_body_scale(game):
+		if not _warned_no_body_scale_field:
+			_warned_no_body_scale_field = true
+			push_warning("arena: il contratto NON dichiara il campo `enemy_body_scale`. La superficie di m11 e' documentata in src/core/contracts.gd ma il campo non e' dichiarato: senza la riga `var enemy_body_scale: float` l'assegnazione qui sotto e' un SCRIPT ERROR e il fattore corpo non viene mai registrato, quindi -orda leggerebbe il default e morrebbe alla distanza sbagliata senza che nessuna porta lo veda. Il file e' del vertice: -arena non lo tocca.")
+		return
+	game.set("enemy_body_scale", RENDERER.SIZE_FACTOR)
+
+## Il contratto dichiara `enemy_body_scale`?
+##
+## Come per gli ostacoli, la risposta si prende dal **valore** e non dalla lista
+## delle proprieta'. Il campo e' un `float` dichiarato con un default, quindi un
+## contratto che lo dichiara restituisce un numero e un contratto che non lo
+## dichiara restituisce `null`: i due si distinguono col `typeof` senza dover
+## conoscere il nome del file del vertice. Il valore **non** viene confrontato qui:
+## se il vertice cambiasse il default, il confrontatore e' `tests/test_arena.gd`,
+## che legge entrambi i numeri e li stampa.
+func _contract_has_body_scale(game: Node) -> bool:
+	var v = game.get("enemy_body_scale")
+	return typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT
 
 ## ## L'OSTACOLO: la registrazione di `Game.obstacles` (m10)
 ##

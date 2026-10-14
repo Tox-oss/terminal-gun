@@ -63,6 +63,19 @@ const OBSTACLES_SCRIPT := "res://src/render/arena_obstacles.gd"
 ## `src/render/arena.gd` non ne abbia scritto una copia. Non e' una copia: e' una
 ## lettura, e il file di -orda non viene toccato.
 const OBST := preload("res://src/sim/obstacles.gd")
+## -arena, m11: il file che **dichiara** `SIZE_FACTOR`, il fattore di calibrazione
+## del corpo. Il test lo **carica a runtime** con `load()` e ne rilegge la
+## mappa delle costanti (`_const_of`), per la stessa ragione per cui rilegge la
+## fonte del raggio: verificare che il valore finito sul contratto venga di la e
+## non dal default rimasto al suo posto. Non e' una copia: e' una lettura, ed e'
+## lo stesso file che scrive il renderer.
+const RENDERER_SCRIPT := "res://src/render/horde_renderer.gd"
+## Il **veleno** di `_m11_size_factor`: il valore a cui il contratto viene portato
+## di proposito, **prima** di montare la scena, per distinguere «l'arena ha
+## registrato `SIZE_FACTOR`» da «il default del contratto dice la stessa cosa».
+## Scelto lontanissimo da 3.4 e da qualunque fattore plausibile, cosi' che il
+## confronto non possa passare per arrotondamento.
+const BODY_SCALE_POISON := 99.0
 ## Tolleranza dei confronti fra il disco che **blocca** (`Game.obstacles[i].y`) e
 ## quello che e' **disegnato**: il centro passa per una `Basis` scalata e il
 ## raggio per una `float` a 32 bit, quindi il confronto non e' mai esatto. 1e-4 m
@@ -199,10 +212,24 @@ func _run() -> void:
 	# vede anche se la scena non si carica.
 	_copie_del_raggio(h)
 
+	# m11-quarta: il fattore di calibrazione del corpo entra nel contratto. Il
+	# **veleno** va qui, PRIMA di `_load_arena()`: e' l'unico ordine in cui la
+	# sezione ha denti. Il valore dichiarato viene letto **prima** del veleno,
+	# perche' il veleno non lo cancelli e cosi' il ripristino non usa un numero
+	# che il test si e' scritto da solo.
+	var body_scale_dichiarato := _field_default_of(CONTRACT_SCRIPT, "var enemy_body_scale")
+	_poison_body_scale(h, game)
+
 	var arena = _load_arena(h, game)
 	if arena == null:
+		_restore_body_scale(h, game, body_scale_dichiarato)
 		quit(h.finish("test_arena"))
 		return
+
+	# m11-quarta: **dopo** il montaggio di `scenes/arena_main.tscn`. E' l'unica
+	# sezione che ha bisogno di un ordine rigido rispetto al montaggio, e quindi
+	# sta accanto a `_load_arena()` invece che in coda al file.
+	_m11_size_factor(h, game, body_scale_dichiarato)
 
 	_wiring(h, arena, game)
 	# m11-bis: **prima** di `_criterion_3`, che svuota l'orda. Qui la disposizione
@@ -394,6 +421,110 @@ func _load_arena(h, game: Node):
 		return null
 	root.add_child(arena)
 	return arena as Node3D
+
+# --- 1c. m11-quarta: il fattore corpo che entra nel contratto -----------------
+#
+# ## Il difetto che questa sezione chiude, e la sua forma esatta
+#
+# `src/core/contracts.gd` dichiara `var enemy_body_scale: float = 3.4`, e
+# `src/render/horde_renderer.gd` dichiara `const SIZE_FACTOR := 3.4`. Sono due
+# numeri che **oggi coincidono**, e fino a ieri non era successo niente: il
+# canale non esisteva, e il valore che `-orda` leggeva era il **default rimasto al
+# suo posto**. Funzionava perche' `3.4` era la copia giusta, non perche' ci fosse
+# un passaggio di valori: un canale che funziona per caso regge finche' i due
+# numeri coincidono, e la coincidenza non e' un contratto.
+#
+# ## Perche' un confronto coi numeri non basta, e serve il VELENO
+#
+# Il confronto ovvio sarebbe `Game.enemy_body_scale == SIZE_FACTOR`, e passa
+# **oggi** anche se l'arena non registra niente, perche' il default del contratto
+# dice gia' `3.4`. Quel test non avrebbe denti: direbbe "il canale funziona"
+# anche quando il canale e' un buco. Quindi qui il campo viene portato a
+# `BODY_SCALE_POISON` **prima** di montare la scena:
+#
+#     la registrazione funziona  ->  dopo il montaggio si legge 3.4
+#     la registrazione manca     ->  dopo il montaggio si legge 99.0
+#
+# e il caso a risposta nota e' la seconda riga: se l'arena non scrivesse niente,
+# questa sezione va rossa con `atteso 3.4, ottenuto 99.0`.
+#
+# ## Perche' il numero dichiarato non viene riletto da un altro posto
+#
+# Il "valore dichiarato" e' il default scritto nel contratto, letto **dal
+# sorgente** con `_field_default_of` e non da un numero scritto qui: una terza
+# copia del 3.4 sarebbe esattamente il difetto che questa sezione chiude.
+
+## Porta il campo a `BODY_SCALE_POISON` e verifica che il veleno sia al suo posto.
+##
+## L'asserzione sembra ovvia e non lo e': e' la **precondizione** del caso a
+## risposta nota. Senza di questa, una sezione che legge `3.4` potrebbe averlo
+## letto perche' il veleno non e' mai entrato, e il criterio diventerebbe
+## decorativo esattamente nella sola circostanza in cui deve mordere.
+func _poison_body_scale(h, game: Node) -> void:
+	game.set("enemy_body_scale", BODY_SCALE_POISON)
+	h.near(_contract_float(game, "enemy_body_scale"), BODY_SCALE_POISON, RADIUS_TOLERANCE,
+		"m11-quarta: il veleno deve essere %.1f sul contratto PRIMA di montare la scena, altrimenti il criterio non distingue 'l'arena ha registrato' da 'il default dice la stessa cosa'"
+			% BODY_SCALE_POISON)
+
+## Il criterio: dopo il montaggio della scena vera, il valore letto sul contratto
+## e' quello che dichiara il renderer, e non il default rimasto al suo posto.
+##
+## `dichiarato` arriva da fuori e viene letto **prima** del veleno: qui non si puo'
+## rileggerlo, perche' a questo punto il contratto porta il valore registrato e il
+## default non e' piu' osservabile da nessuna parte senza aprire il sorgente.
+func _m11_size_factor(h, game: Node, dichiarato: float) -> void:
+	var t0 := Time.get_ticks_msec()
+	var costante := _const_of(RENDERER_SCRIPT, "SIZE_FACTOR")
+	var letto := _contract_float(game, "enemy_body_scale")
+
+	h.check(costante > 0.0,
+		"src/render/horde_renderer.gd non dichiara piu' SIZE_FACTOR: il fattore di calibrazione del corpo ha una fonte sola e se la fonte sparisce non si puo' verificare che il contratto dica quello")
+	# Il canale: il valore sul contratto e' quello della costante.
+	h.near(letto, costante, RADIUS_TOLERANCE,
+		"m11-quarta: dopo il montaggio di arena_main.tscn Game.enemy_body_scale deve valere la SIZE_FACTOR dichiarata in src/render/horde_renderer.gd")
+	# Il caso a risposta nota, detto con parole: il veleno non e' sopravvissuto.
+	h.check(not is_equal_approx(letto, BODY_SCALE_POISON),
+		"m11-quarta: il valore letto dopo il montaggio e' ancora il veleno %.1f, quindi src/render/arena.gd NON ha registrato niente: il contratto sta servendo il default. -orda leggerebbe il default e ucciderebbe alla distanza sbagliata."
+			% BODY_SCALE_POISON)
+	# La deriva fra le due dichiarazioni. Non e' la stessa cosa del canale: anche
+	# registrando tutto, un default che dice un numero diverso lascerebbe il
+	# contratto mentire **prima** che l'arena si registri, cioe' su qualunque
+	# scena montata senza la piramide.
+	h.near(dichiarato, costante, RADIUS_TOLERANCE,
+		"m11-quarta: il default dichiarato del contratto deve dire lo stesso numero della SIZE_FACTOR del renderer, non %.4f" % dichiarato)
+
+	_restore_body_scale(h, game, dichiarato)
+
+	print("test_arena: m11-quarta fattore corpo: proprietario src/render/horde_renderer.gd (SIZE_FACTOR = %.4f), registrato da src/render/arena.gd nel proprio _enter_tree() come Game.enemy_body_scale = %.4f dopo il montaggio di scenes/arena_main.tscn; il contratto era stato portato a %.4f apposta prima di montare, e il default dichiarato dice %.4f"
+		% [costante, letto, BODY_SCALE_POISON, dichiarato])
+	print("test_arena: m11-quarta se i due divergessero: passerebbe tutto. Il default del contratto e' un valore di partenza, non una seconda fonte, quindi nessuna porta rossa lo guarderebbe; -orda leggerebbe dal contratto il numero del renderer, che e' quello giusto, e a un certo punto qualcuno cambierebbe SIZE_FACTOR per un motivo di disegno, il default resterebbe indietro e la scena che si carica senza l'arena leggerebbe il numero vecchio. Il canale si chiude qui perche' il criterio mette il campo a %.1f prima di montare e legge dopo: il valore che si vede non puo' essere quello rimasto al suo posto."
+		% BODY_SCALE_POISON)
+	print("test_arena: m11-quarta: la sezione ha costato %d ms" % (Time.get_ticks_msec() - t0))
+
+## Riporta il contratto al valore dichiarato, e **due** asserzioni dicono che e'
+## tornato.
+##
+## Il contratto e' un autoload: e' uno solo per tutto il processo e vive piu' a
+## lungo di questa sezione. Lasciare `99.0` addosso significherebbe che ogni
+## sezione successiva — e ogni altro file che lo leggesse — misurerebbe un numero
+## che nessuno ha scritto. Il ripristino quindi non e' pulizia: e' parte del
+## criterio, perche' un test che avvelena e non ripristina cambia il terreno
+## sotto chi viene dopo.
+##
+## **Le due asserzioni, e perche' due.** La prima dice che il valore sul contratto
+## e' quello dichiarato; la seconda dice che non e' il veleno. Servono **due**
+## perche' oggi `dichiarato == SIZE_FACTOR == 3.4`: la prima da sola passerebbe
+## anche se il ripristino non fosse mai partito, perche' il valore c'era gia'. E'
+## la seconda a dire che la scrittura e' avvenuta, ed e' quella che diventa
+## mordente nel giorno in cui i due numeri divergono.
+func _restore_body_scale(h, game: Node, dichiarato: float) -> void:
+	game.set("enemy_body_scale", dichiarato)
+	var dopo := _contract_float(game, "enemy_body_scale")
+	h.near(dopo, dichiarato, RADIUS_TOLERANCE,
+		"m11-quarta: dopo la sezione Game.enemy_body_scale deve essere tornato al valore dichiarato dal contratto (%.4f)" % dichiarato)
+	h.check(not is_equal_approx(dopo, BODY_SCALE_POISON),
+		"m11-quarta: il ripristino non ha spostato niente, il contratto e' ancora al veleno %.1f: le sezioni che vengono dopo misurerebbero un numero che nessuno ha scritto"
+			% BODY_SCALE_POISON)
 
 ## I nodi che la scena deve avere, i file di -orda e -gameplay **incollati** (non
 ## dei finti) e il contratto popolato da tutte e tre le foglie. E' la verifica che

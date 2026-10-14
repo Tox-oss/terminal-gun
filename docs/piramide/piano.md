@@ -2702,6 +2702,44 @@ riapparirà comunque. **Non ho misurato** quanto si guadagni davvero con il boss
 non scrivo `600 s` come risultato. La misura che lo chiude è la stessa sonda con la miscela
 dell'onda 1 cambiata, e la leva è di `-orda`: `wave_weights`.
 
+### 1.14-quindicesima **Il boss esce dall'onda 1 — e il motivo per cui non basta toccare i pesi**
+
+Il 2026-10-15 `-orda` è partita per il primo cambiamento di bilanciamento di m11 e si è fermata al
+primo passo: `shell` negato, nessun file scritto, `non eseguito` dichiarato. **È la regola 1 che
+funziona**, e il motivo per cui l'albero è rimasto compilante.
+
+Prima di fermarsi ha letto abbastanza da trovare una cosa che nessuno aveva visto, e che ho
+**verificato io** prima di scriverla qui.
+
+**In `src/sim/horde.gd` la miscela di specie vale per un cammino solo.**
+
+| cammino | riga | da dove prende la specie |
+|---|---|---|
+| popolazione iniziale dell'onda | `685` `_pick_kind()` | `Spawner.pick_kind_with(_rng, _weights)`, cioè **`wave_weights(run.wave)`** |
+| **respawn durante l'onda** | `914` `_spawn_one()` | `Spawner.pick_kind(_rng)`, cioè **`KIND_WEIGHTS` piatto**, e **bypassa `_pick_kind()`** |
+
+Quindi **toccare solo `wave_weights` non leverebbe il boss dall'onda 1**: si leverebbe dal primo
+riempimento e il boss tornerebbe a ogni respawn, cioè subito. E il criterio «zero boss sull'onda 1»
+**nascerebbe verde per caso**, misurando solo la nascita iniziale: è la classe di difetto che questo
+progetto ha chiuso tre volte e che qui si sarebbe presentata con il nome giusto.
+
+**Come si chiude, e perché è un difetto di gioco prima che un difetto di test.** I due cammini
+devono passare dalla **stessa** funzione. `_spawn_one()` che chiama `pick_kind` attorno a
+`_pick_kind()` è il bug; dopo, un solo posto decide la specie e il criterio può guardarlo. Finché i
+due cammini sono due, la miscela dell'onda è una **metà di regola**.
+
+**Che cosa non è misurato, e non va scritto come risultato.** Nessuno ha ancora misurato quanto si
+guadagni con il boss fuori dall'onda 1: la stima per conti sul tavolo è che i morsi residui passino
+da ~9 hp a ~2 hp, ma **è un conto, non una misura**, e la sonda la deve dire. `POP_BASE = 25` e
+`POP_STEP` restano, e `POP_BASE = 6` resta **sospeso** per §1.14-dodicesima. Il **brute resta
+nell'onda 1**: a 13 e 25 nemici è lui il dominante, ma è una misura diversa e togliere due specie
+insieme non lascia sapere quale delle due ha fatto il lavoro.
+
+**Il blocco, che è di permesso e non di lavoro.** `-orda` non ha `shell` in questa sessione, ed è la
+**seconda volta** che succede. Non è un difetto dell'agente e non è rimedioabile da me:
+`.opencode/agents/**` è fuori dal mio scope di scrittura per costruzione. La riga che manca è un
+`allow` per `godot *` sul file di `-orda`, e senza quella `-orda` continua a poter solo leggere.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

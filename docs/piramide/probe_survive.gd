@@ -1,34 +1,36 @@
 extends SceneTree
-## MISURA DI m11 -- piano docs/piramide/piano.md sez. 1.14 e 1.14-quater
+## MISURA DI m11-ter -- piano docs/piramide/piano.md sez. 1.14-nona e 1.14-decima
 ##
 ##     godot --headless --path . --script res://docs/piramide/probe_survive.gd
 ##
-## Domanda: **al raggio consegnato, quanto vive un giocatore che schiva davvero,
-## e quanto arena gli serve per arrivare ai 600 s dell'utente?**
+## Domanda: **quanto deve scendere l'onda 1 perché il giocatore arrivi all'onda 2?**
 ##
-## ## Perche' questa sonda e' stata riscritta, e non aggiornata
+## ## Perché questa sonda, e non quella sul raggio
 ##
-## La prima versione sceglieva la direzione che **massimizza la distanza dal nemico
-## piu' vicino**, con otto raggi. Al variare del raggio dava 51,0 / 300,0 / 78,2 s
-## per R = 46 / 60 / 75: **non monotono**, con un numero migliore a 60 che a 46.
+## Il raggio e' gia' stato consegnato a 60,0 m e la tabella sul raggio e' in
+## 1.14-quinque e 1.14-seque. Ma li' si e' letto che **tutte le morti cadono
+## sull'onda 1 con 25 nemici vivi**, mai sulla 2, e che anche a 75 m il caso
+## peggiore muore a 123,13 s. Quindi **la mappa non e' il vincolo: l'apertura lo
+## e'**, e la leva dell'apertura e' `population_scale`, la cucitura di m11-ter.
 ##
-## La lettura corretta e' che **non era il raggio a decidere**: inseguendo la
-## lontananza dal nemico piu' vicino, lo schivatore si spinge **contro il muro**
-## (la lontananza e' dalla parte opposta all'orda) e li si fa chiudere in angolo.
-## Uno strumento che dà un numero migliore a una configurazione e peggiore a una
-## piu' grande **non sta misurando l'arena: sta misurando se stesso**.
+## ## La leva, e il suo caso a risposta nota
 ##
-## Quindi qui lo schivatore **guarda anche il muro**, non solo l'orda. E ha due
-## **casi a risposta nota**, senza i quali i numeri di qui non hanno diritto di
-## esistere:
+## `population_scale` ha default **1.0** e a 1.0 combacia con
+## `Run.population_of`, quindi **scala 1.00 e' il gioco di oggi**: la risposta e'
+## gia' nota, **82,03 s** sul caso peggiore.
 ##
-## 1. **R = 12 m**: un disco cosi' piccolo che non si puo' schivare, perche' il
-##    muro e' sempre dietro. **Lo strumento DEVE fallire.** Se sopravvive, lo
-##    strumento e' rotto e non si guarda nessun altro numero.
-## 2. **R = 46 m**: il raggio **consegnato**. La risposta **gia' nota** e gia'
-##    misurata con il vecchio strumento e' **51-124 s, morte sull'onda 1**. Il
-##    nuovo strumento deve **riprodurla**; se dà un numero cosi' diverso che non
-##    sta misurando la stessa cosa, e va detto perche'.
+## **Scala 0.00 e' il riferimento**: senza nemici il giocatore **non puo' morire**,
+## quindi lo strumento **DEVE arrivare al tetto**. Se non ci arriva, non sta
+## guardando la leva, e i numeri qui sotto non valgono niente: e' per questo che la
+## verifica sta sul riferimento e non in fondo, dove si legge per piacere.
+##
+## ## L'ordine che conta, e che e' costato un tentativo
+##
+## `population_scale` va scritto **PRIMA** che la scena entri nell'albero. La
+## popolazione dell'onda 1 e' decisa dentro `_build()`, che gira in `_ready()`,
+## che parte con `add_child`. Scriverlo dopo non cambia niente: e' il caso 1.0 che
+## si misura due volte. Quindi qui: `instantiate()`, si scrive sul nodo **non
+## ancora in albero**, e solo dopo `add_child`.
 ##
 ## ## Che cos'e' lo schivatore, e che cosa NON puo' dire
 ##
@@ -42,69 +44,56 @@ extends SceneTree
 ## Uno schivatore cosi' e' peggio di uno bravo, quindi il numero e' **basso**: se
 ## i 600 s sono raggiungibili cosi', lo sono anche per un giocatore vero.
 ##
-## ## Cosa NON e' misurato qui
+## ## I due termini che lo rendono uno strumento e non una sonda
 ##
-## Sotto il raggio di codice il **terreno e il muro disegnati** restano a 46 m,
-## perche' sono costruiti da `arena.gd` al proprio avvio. Qui si misura lo SPAZIO
-## che l'orda concede e la PISTA che il giocatore ha, non quello che si vede.
-## **La vita non viene alzata**: il tempo di morte e' il numero che si cerca, e
-## alzare la vita trasformerebbe la misura in una domanda diversa.
+## - **il muro**, con `EDGE_SAFE_M = 0.8` che e' il margine che `player.gd` usa
+##   gia', e `WALL_PENALTY = 3.0`;
+## - **gli ostacoli**, con `EDGE_OSTACOLO = 2.5` e `OSTACOLO_PENALITA = 4.0`.
+##   Il secondo e' arrivato dopo che la consegna del raggio avesse rivelato che il
+##   punteggio guardava il muro e i nemici e **ignorava i dischi**: uno strumento
+##   che non vede un ostacolo non puo' dire quanto e' grande un disco. E' la
+##   seconda volta che questo strumento misurava se stesso.
 
 const ARENA_SCENE := "res://scenes/arena_main.tscn"
 
 const DT := 1.0 / 60.0
-## Cinque minuti e un pezzo oltre. La domanda e' binaria («muore presto» oppure
-## «regge oltre i 5 minuti») e 720 s non aggiunge informazione a una risposta che
-## e' gia' arrivata al tetto.
+## Cinque minuti. La domanda e' binaria («muore presto» oppure «regge») e 720 s
+## non aggiunge informazione a una risposta che e' gia' arrivata al tetto.
 const TMAX := 300.0
 const REPORT_EVERY := 60.0
 
-## Sedici raggi e non otto: il costo raddoppia ma la stampa distingue la differenza,
-## e con otto il vuoto angolare da 45 gradi era abbastanza largo da far scegliere
-## al punto di schivarsi verso il muro. La misura del costo sta sulla riga di
-## `PROBE: costo` in fondo.
+## Sedici raggi. Con otto il vuoto angolare da 45 gradi era abbastanza largo da
+## far scegliere al punto di schivarsi verso il muro, che era il difetto della
+## prima versione.
 const RAYS := 16
 
 ## Quanto guarda avanti lo schivatore, in secondi di corsa. A 13,65 m/s, 1,5 s
-## sono ~20 m: abbastanza da vedere il muro *prima* di arrivarci, che e' tutto il
-## punto. `LOOKAHEAD_S` e' dichiarato in secondi e non in metri perche' il numero
-## che descrive e' «quanto tempo di corsa», e non cambia se la velocita' cambia.
+## sono ~20 m: abbastanza da vedere il muro *prima* di arrivarci. Dichiarato in
+## secondi e non in metri perche' descrive «quanto tempo di corsa».
 const LOOKAHEAD_S := 1.5
 
-## Metri di margine tenuti dal muro. 0,8 m e' il margine che `player.gd` usa
-## gia' per il clamp, quindi qui non si inventa un numero diverso: si riusa quello
-## che il gioco usa davvero.
+## Margine tenuto dal muro: 0,8 m e' il margine che `player.gd` usa gia' per il
+## clamp, quindi qui non si inventa un numero diverso.
 const EDGE_SAFE_M := 0.8
-
-## Quanto costa, in metri, superare `EDGE_SAFE_M` dal muro. Il termine e' in metri
-## e viene sottratto a un punteggio che e' in metri, quindi le due grandezze sono
-## confrontabili e la penalita' e' un numero che si puo' guardare.
 const WALL_PENALTY := 3.0
-
-## Sopra questa frazione del raggio lo schivatore torna verso il centro. Senza,
-## una volta vicino al bordo continua a scegliere la direzione piu' lontana
-## dall'orda, che e' verso il muro, e si chiude in angolo: era esattamente il
-## difetto dello strumento vecchio.
-const CENTRE_PULL := 0.70
-
-## Metri di distacco che lo schivatore vuole tenere da un disco di ostacolo, e la
-## penalita' con cui lo paga se ci finisce dentro. **Questa riga e' il rimedio alla
-## seconda volta che lo strumento misurava se stesso**: il punteggio guardava il muro
-## e i nemici e **ignorava gli ostacoli**, quindi alla consegna del raggio 60 i dischi
-## sono cresciuti da 2,99 a 3,90 m e lo schivatore si e' fatto fermare piu' spesso
-## senza che nessuno lo sapesse. Un punteggio che non vede un ostacolo non puo' dire
-## quanto e' grande un disco.
 const EDGE_OSTACOLO := 2.5
 const OSTACOLO_PENALITA := 4.0
 
-## I raggi su cui la stessa schivatrice viene misurata, **piu' i due casi a risposta
-## nota**. L'ordine mette prima il riferimento: se il riferimento passa, gli altri
-## numeri si possono guardare; se fallisce, gli altri non si guardano.
-const RAGGI := [12.0, 46.0, 60.0, 75.0]
+## Sopra questa frazione del raggio lo schivatore torna verso il centro: senza,
+## una volta vicino al bordo continua a scegliere la lontananza dall'orda, che e'
+## verso il muro, e si chiude in angolo.
+const CENTRE_PULL := 0.70
+
+## Il raggio **consegnato**: la mappa e' gia' stata portata a 60,0 m e qui non
+## si varya piu', perche' la domanda di questa sonda e' un'altra.
+const RAGGIO := 60.0
+
+## Le scale della leva. `0.00` e' il riferimento a risposta nota, `1.00` e' il
+## gioco di oggi. Le due in mezzo sono i passi che contano.
+const SCALE := [0.0, 0.25, 0.50, 1.00]
 
 ## Tre semi non fanno una media: fanno una **distribuzione**, e quello che si
-## riporta e' il **minimo**, che e' la partita peggiore ed e' l'unico numero che
-## dice se i 600 s sono lontani o vicini.
+## riporta e' il **minimo**, che e' la partita peggiore.
 const SEMI := [4242, 7311, 20260912]
 
 var _ran := false
@@ -117,60 +106,51 @@ func _process(_delta: float) -> bool:
 	return true
 
 func _run() -> void:
-	print("PROBE: m11, quanto arena serve per arrivare a 600 s. Schivatore con muro.")
-	print("PROBE: DT=%.5f, %d raggi, sguardo avanti %.1f s (%.1f m a 13,65 m/s), margine %.1f m, penalita' %.1f"
-		% [DT, RAYS, LOOKAHEAD_S, LOOKAHEAD_S * 13.65, EDGE_SAFE_M, WALL_PENALTY])
-	print("PROBE: sotto il raggio di codice il terreno e il muro DISEGNATI restano a 46 m:")
-	print("PROBE: qui si misura lo SPAZIO che l'orda concede e la PISTA che il giocatore ha.")
-	print("PROBE: R = 12 m e' un caso a risposta NOTA e deve FALLIRE: li' non si puo' schivare.")
+	print("PROBE: m11-ter, l'apertura. La leva e' population_scale, non il raggio.")
+	print("PROBE: DT=%.5f, %d raggi, sguardo avanti %.1f s (%.1f m a 13,65 m/s), margine %.1f m"
+		% [DT, RAYS, LOOKAHEAD_S, LOOKAHEAD_S * 13.65, EDGE_SAFE_M])
+	print("PROBE: raggio fisso a %.1f m, scena vera con i 27 ostacoli e l'arma vera" % RAGGIO)
+	print("PROBE: scala 0.00 e' un caso a risposta NOTA e deve SOPRAVVIVERE: senza nemici non si muore.")
+	print("PROBE: scala 1.00 e' il gioco di oggi, risposta gia' nota: 82,03 s sul caso peggiore.")
 
 	var risultati := PackedFloat32Array()
 	var riferimento_ok := false
-	for r in RAGGI:
+	for s in SCALE:
 		var campioni := PackedFloat32Array()
-		for s in SEMI:
-			campioni.append(_una_sessione(float(r), int(s)))
+		for sd in SEMI:
+			campioni.append(_una_sessione(float(sd), float(s)))
 		campioni.sort()
 		var peggiore: float = campioni[0]
 		var migliore: float = campioni[campioni.size() - 1]
 		risultati.append(peggiore)
 
-		print("PROBE: RISULTATO R %5.1f m | 3 semi: %s | MIN %6.2f s | MAX %6.2f s"
-			% [r, _lista(campioni), peggiore, migliore])
+		print("PROBE: RISULTATO scala %.2f | 3 semi: %s | MIN %6.2f s | MAX %6.2f s"
+			% [s, _lista(campioni), peggiore, migliore])
 
-		if is_equal_approx(float(r), 12.0):
-			# Caso a risposta nota: in 12 m il muro e' sempre dietro e lo strumento
-			# DEVE morire. Sopravvivere li' e' il sintomo che lo strumento sta
-			# misurando se stesso, quindi il verdetto si stampa qui, sul riferimento,
-			# e non in fondo dove si legge per piacere.
-			riferimento_ok = peggiore < TMAX
+		if is_zero_approx(float(s)):
+			riferimento_ok = peggiore >= TMAX
 			if riferimento_ok:
-				print("PROBE: RIFERIMENTO R 12 m: morto al %6.2f s COME DEVE, lo strumento e' in piedi"
+				print("PROBE: RIFERIMENTO scala 0.00: sopravvissuto a %6.2f s COME DEVE, lo strumento e' in piedi"
 					% peggiore)
 			else:
-				print("PROBE: RIFERIMENTO R 12 m HA SUPERATO IL tetto di %.0f s: strumento ROTTO" % TMAX)
+				print("PROBE: RIFERIMENTO scala 0.00 NON ha superato il tetto di %.0f s: strumento ROTTO" % TMAX)
 
-		if is_equal_approx(float(r), 46.0):
-			print("PROBE: R 46 m, risposta gia' nota col vecchio strumento: 50,98 / 108,95 / 124,18 s")
-			print("PROBE:   il minimo di adesso e' %.2f s: se e' lontano, lo strumento non e' lo stesso"
-				% peggiore)
+		if is_equal_approx(float(s), 1.0):
+			print("PROBE: scala 1.00, gioco di oggi: il minimo di adesso e' %.2f s contro gli 82,03 s noti" % peggiore)
 
 	print("PROBE: LETTURA")
 	if not riferimento_ok:
-		print("PROBE: NESSUNA LETTURA: il riferimento a 12 m non e' morto, quindi questi numeri")
-		print("PROBE:   non descrivono l'arena. Non li uso e non li riporto.")
+		print("PROBE: NESSUNA LETTURA: il riferimento a scala 0.00 non ha sopravvissuto, quindi")
+		print("PROBE:   questi numeri non descrivono l'apertura. Non li uso e non li riporto.")
 	else:
-		for i in RAGGI.size():
-			if i == 0:
+		for i in SCALE.size():
+			if is_zero_approx(float(SCALE[i])):
 				continue
-			print("PROBE:   da R %.0f a R %.0f il minimo passa da %.2f a %.2f s: fattore %.2f"
-				% [RAGGI[i - 1], RAGGI[i], risultati[i - 1], risultati[i],
+			print("PROBE:   da scala %.2f a %.2f il minimo passa da %.2f a %.2f s: fattore %.2f"
+				% [SCALE[i - 1], SCALE[i], risultati[i - 1], risultati[i],
 				   risultati[i] / maxf(risultati[i - 1], 0.001)])
-		# Il numero che conta per la decisione e' il raggio **consegnato**, che e'
-		# il secondo della lista perche' il primo e' il riferimento.
-		var consegnato: float = risultati[1]
-		print("PROBE: i 600 s dell'utente sono %5.2f volte il minimo al raggio CONSEGNATO di 46 m"
-			% (600.0 / maxf(consegnato, 0.001)))
+		print("PROBE: i 600 s dell'utente sono %5.2f volte il minimo al gioco di oggi (scala 1.00)"
+			% (600.0 / maxf(risultati[SCALE.size() - 1], 0.001)))
 	quit(0)
 
 func _lista(v: PackedFloat32Array) -> String:
@@ -181,24 +161,18 @@ func _lista(v: PackedFloat32Array) -> String:
 		s += "%.1f s" % v[i]
 	return s
 
-## Una sessione con l'orda e il giocatore veri, al raggio `R`.
-func _una_sessione(R: float, seme: int) -> float:
+## Una sessione con l'orda e il giocatore veri, alla scala `scala`.
+func _una_sessione(seme: int, scala: float) -> float:
 	var game := root.get_node_or_null("Game")
 	if game == null:
 		print("PROBE FAIL: l'autoload Game non c'e'")
 		return 0.0
 
-	# Il raggio e' **due** numeri, non uno: `arena.gd` registra 46.0 sul contratto
-	# nel proprio `_enter_tree()`, e quel valore finisce sia nel clamp del giocatore
-	# (letto vivo a ogni passo) sia nel fallback dell'orda. Impostando solo il campo
-	# dell'orda si avrebbe un'orda da 90 m dentro un disco dove il giocatore resta
-	# a 46: la misura sarebbe del muro, non della pista.
 	var res = load(ARENA_SCENE)
 	if not (res is PackedScene):
 		print("PROBE FAIL: %s non e' una PackedScene" % ARENA_SCENE)
 		return 0.0
 	var arena = (res as PackedScene).instantiate()
-	root.add_child(arena)
 
 	var horde = arena.get_node_or_null("Horde")
 	var player = arena.get_node_or_null("Player")
@@ -206,31 +180,41 @@ func _una_sessione(R: float, seme: int) -> float:
 		print("PROBE FAIL: la scena non ha Horde/Player")
 		return 0.0
 
-	game.arena_radius = R
-	horde.arena_radius = R
+	# **PRIMA** di entrare nell'albero. `_build()` gira in `_ready()` e la' decide la
+	# popolazione dell'onda 1: scriverlo dopo misurerebbe il caso 1.0 due volte.
+	horde.population_scale = scala
+
+	game.arena_radius = RAGGIO
+	root.add_child(arena)
+
+	# Il raggio e' **due** numeri: `arena.gd` registra il suo nel proprio
+	# `_enter_tree()` e quel valore finisce sia nel clamp del giocatore, sia nel
+	# fallback dell'orda. Impostando solo il campo dell'orda si avrebbe un'orda
+	# grande dentro un disco dove il giocatore resta piccolo.
+	horde.arena_radius = RAGGIO
 	horde.reseed(seme)
 
 	player.drive_manually()
 	player.position = Vector3.ZERO
 	player.velocity = Vector3.ZERO
 
+	# Gli ostacoli sono un **dato**, non una parte del raggio: vengono da
+	# `arena.gd` e sono gli stessi per tutti i semi e per tutte le scale. Li leggo
+	# una volta e li passo allo schivatore.
+	var ostacoli: PackedVector3Array = game.obstacles
+	print("PROBE:   scala %.2f seme %d | nemici all'avvio %3d | ostacoli %d, raggio massimo %.2f m"
+		% [scala, seme, horde.count, ostacoli.size(), _raggio_max(ostacoli)])
+
 	var t := 0.0
 	var next_report := REPORT_EVERY
-	# Gli ostacoli sono un **dato**, non una parte del raggio: vengono da
-	# `arena.gd` e sono gli stessi per tutti i semi. Li leggo una volta e li passo
-	# allo schivatore, che senza non sta misurando l'arena ma sta misurando quanto
-	# e' bravo a non finire dentro un disco.
-	var ostacoli: PackedVector3Array = game.obstacles
-	print("PROBE:   R %5.1f, ostacoli in contratto: %d, raggio massimo %.2f m"
-		% [R, ostacoli.size(), _raggio_max(ostacoli)])
 	while t < TMAX:
-		var direzione := _direzione(horde, player, R, ostacoli)
+		var direzione := _direzione(horde, player, ostacoli)
 		player.step(DT, Vector3(direzione.x, 0.0, direzione.y))
 		horde.step(DT)
 		t += DT
 		if t >= next_report:
-			print("PROBE:   R %5.1f | %5.0f s | hp %6.2f | vivi %3d | onda %2d | uccisi %4d"
-				% [R, t, player.hp, horde.count, horde.wave, horde.kills])
+			print("PROBE:     | %5.0f s | hp %6.2f | vivi %3d | onda %2d | uccisi %4d"
+				% [t, player.hp, horde.count, horde.wave, horde.kills])
 			next_report += REPORT_EVERY
 		if player.hp <= 0.0:
 			break
@@ -240,17 +224,23 @@ func _una_sessione(R: float, seme: int) -> float:
 	arena.free()
 	return t
 
-## La direzione: **sedici raggi**, e per ognuno un punto guardato avanti invece
-## che il punto stesso. Vince il punteggio piu' alto, e il punteggio ha tre
-## termini invece di uno.
-##
-## Il termine che manca allo strumento vecchio e' il **muro**. inseguire la
-## lontananza dal nemico spinge verso il bordo, e al bordo non si scappa: e' il
-## motivo per cui il numero vecchio non era monotono.
-func _direzione(horde, player, R: float, ostacoli: PackedVector3Array) -> Vector2:
+## Il disco di ostacolo piu' grosso, per stamparlo. Il raggio sta in `y` e non e'
+## un'altezza: e' la stessa forma del contratto, letta al contrario.
+func _raggio_max(ostacoli: PackedVector3Array) -> float:
+	var m := 0.0
+	for k in ostacoli.size():
+		m = maxf(m, ostacoli[k].y)
+	return m
+
+## Sedici raggi, e per ognuno un punto guardato avanti invece che il punto
+## stesso. Vince il punteggio piu' alto, e il punteggio ha **tre** termini
+## invece di uno: lontananza dal nemico piu' vicino guardata avanti, penalita' del
+## muro in metri, penalita' degli ostacoli in metri, e ritorno al centro quando e'
+## oltre `CENTRE_PULL`.
+func _direzione(horde, player, ostacoli: PackedVector3Array) -> Vector2:
 	var p := _flat(player.global_position)
 	var guarda := LOOKAHEAD_S * 13.65
-	var limite := maxf(R - EDGE_SAFE_M, 0.0)
+	var limite := maxf(RAGGIO - EDGE_SAFE_M, 0.0)
 
 	var meglio := Vector2(0.0, -1.0)
 	var miglior_punteggio := -INF
@@ -279,11 +269,8 @@ func _direzione(horde, player, R: float, ostacoli: PackedVector3Array) -> Vector
 			if dentro < 0.0:
 				punteggio -= OSTACOLO_PENALITA * (-dentro)
 
-		# 3. il ritorno al centro, che serve a sciogliere l'angolo: quando e' gia'
-		#    oltre la frazione dichiarata, ogni metro guadagnato verso il centro
-		#    vale meta' metro di punteggio. Il fattore 0,5 e' dichiarato perche' il
-		#    centro non deve valere come una fuga: il nemico e' spesso li'.
-		if p.length() > R * CENTRE_PULL:
+		# 3. il ritorno al centro, che serve a sciogliere l'angolo
+		if p.length() > RAGGIO * CENTRE_PULL:
 			punteggio += (limite - q.length()) * 0.5
 
 		if punteggio > miglior_punteggio:
@@ -291,17 +278,10 @@ func _direzione(horde, player, R: float, ostacoli: PackedVector3Array) -> Vector
 			meglio = d
 	return meglio
 
-## Il disco di ostacolo piu' grosso, per stamparlo. Il raggio sta in `y` e non e'
-## un'altezza: e' la stessa forma del contratto, letta al contrario.
-func _raggio_max(ostacoli: PackedVector3Array) -> float:
-	var m := 0.0
-	for k in ostacoli.size():
-		m = maxf(m, ostacoli[k].y)
-	return m
-
-## Distanza dal nemico piu' vicino: scansione lineare sul record, non sulla griglia.
-## Sono 200 nemici e la sonda gira fino a 43 000 volte: la griglia costerebbe di
-## piu' a costruirla che a leggerla, e qui non c'e' un criterio di prestazioni.
+## Distanza dal nemico piu' vicino: scansione lineare sul record, non sulla
+## griglia. Sono 200 nemici e la sonda gira fino a 43 000 volte: la griglia
+## costerebbe di piu' a costruirla che a leggerla, e qui non c'e' un criterio di
+## prestazioni da rispettare.
 func _distanza_minima(horde, p: Vector2) -> float:
 	var m := INF
 	var ts: PackedVector3Array = horde.transforms

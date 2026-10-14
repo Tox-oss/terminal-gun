@@ -2450,6 +2450,43 @@ lontano. **Tre proprietari, un concetto solo**: `RADIUS[kind]` (collisione, `-or
 potevano verificare: una riga non eseguita è una riga che non esiste. E il **terzo raggio**
 (`ENEMY_RADIUS`) è ancora lì, quindi metà del difetto — il lato dei proiettili — **resta aperto**.
 
+### 1.14-decima **L'apertura: la soglia sta fra 6 e 13 nemici, e i 600 s restano fuori portata**
+
+La leva è `population_scale`, la cucitura di m11-ter. Raggio **fisso a 60,0 m**, scena vera, tre
+semi per scala. **Strumento validato in due modi**, e senza i due non ci sarebbero numeri:
+
+| controllo | atteso | misurato |
+|---|---|---|
+| scala **0,00**, nessun nemico | il giocatore **non può morire**, quindi arriva al tetto | **300,00 s su 3 semi** |
+| scala **1,00**, il gioco di oggi | **82,03 s** già noti | **82,03 s** al secondo decimale |
+
+| scala | nemici nell'onda 1 | tre semi | **MIN** |
+|---|---|---|---|
+| 0,00 (riferimento) | 0 | 300 / 300 / 300 | **300,00 s** |
+| 0,25 | **6** | 300 / 300 / 300 | **300,00 s** |
+| 0,50 | 13 | 151,6 / 169,6 / 176,8 | **151,63 s** |
+| **1,00 (oggi)** | **25** | 82,0 / 96,4 / 155,6 | **82,03 s** |
+
+**Le tre cose che ne segue.**
+
+1. **La soglia è fra 6 e 13 nemici.** A **6** lo schivatore **non muore** in cinque minuti su tre
+   semi; a **13** muove a 151,63 s. Quindi `POP_BASE = 25` è circa il **doppio** del punto in cui
+   l'apertura smette di ammazzare, e il primo numero di `-orda` non è una scelta: è **fra 6 e 13**.
+2. **Il miglioramento è forte ma non chiude i 600 s.** Da 25 a 6 si passa da 82,03 s a **oltre 300 s**,
+   e i **600 s dell'utente sono 7,31 volte** il caso peggiore di oggi. Quindi **l'apertura va
+   sistemata e poi resta un altro lavoro**: nessuna scala di questa scansione arriva a 600 s dentro
+   il tetto di 300 s, quindi la rampa e il boss **non sono un consequences dell'apertura**, sono un
+   secondo intervento.
+3. **Il numero è un minimo, e il tetto lo tronca.** A scala 0,25 tutti e tre i semi arrivano a
+   **300,00 s** esattamente: la sonda ha smesso di misurare e sta solo dicendo «almeno 300». Per
+   separare 0,25 da 0,50 serve un `TMAX` più lungo, e **quello non l'ho fatto** — quindi la soglia è
+   **un intervallo**, non un punto, e nel piano resta scritto che è un intervallo.
+
+**Che cosa non è misurato qui.** Il numero è una **soglia di fattibilità**: lo schivatore è mio,
+guarda sedici raggi, ha memoria e previsione **zero**, e quindi è **peggiore** di un giocatore vero e
+il numero è **basso**. E non è un giudizio di giocabilità: «ti basta correre o serve una scorciatoia?»
+resta una domanda dell'utente, e l'avevo già dichiarata in §1.14.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

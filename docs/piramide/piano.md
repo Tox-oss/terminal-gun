@@ -2220,6 +2220,50 @@ giudizio di giocabilità: lo schivatore è mio, guarda sedici raggi e non ha mem
 **peggiore** di un giocatore vero e il numero è **basso**. E il terreno e il muro **disegnati**
 restano a 46 m in tutte le righe: qui si misura lo spazio che l'orda concede, non quello che si vede.
 
+### 1.14-seque **La verifica del raggio 60 NON conferma, e il motivo e' mio**
+
+Dopo che il raggio e' stato consegnato a 60,0 m (`d66aa20`), la **stessa sonda** e' stata
+rilanciata per verificare che il numero che aveva giustificato il cambio reggesse. **Non regge.**
+
+| R | prima della consegna | **dopo la consegna** | fattore |
+|---|---|---|---|
+| 12 m (riferimento) | 61,20 s | **22,25 s** | — |
+| **46 m** | 55,33 s | **106,20 s** | **1,92** |
+| **60 m (consegna)** | 146,72 s attesi | **79,23 s** | **0,54** |
+| 75 m | 156,33 s | **67,47 s** | **0,43** |
+
+**La tabella si e' invertita**: da 46 a 60 il fattore e' **0,75**, non 2,65. Il raggio maggiore ora
+e' **peggiore** per lo schivatore, mentre prima era migliore.
+
+**Il motivo e' che ho cambiato due variabili nella stessa onda, e non lo sapevo.** `-orda` ha
+mantenuto i 27 dischi degli ostacoli e li ha **riscalati di conseguenza**: `2,99 m` a 46 m diventano
+**`3,90 m`** a 60 m, cioe' esattamente proporzionali al raggio, con l'area coperta invariata al
+**11,4%**. Quindi «ho lasciato gli ostacoli come erano» **non era vero**: sono cresciuti del 30%.
+
+E il mio schivatore **non vede gli ostacoli**: guarda il muro e i nemici, e nulla altro. Con dischi
+piu' grossi da scavalcare e con la stessa logica, si fa fermare piu' spesso. Quindi il numero che
+scende non e' «l'arena grande e' peggio»: e' **lo strumento che non vede una delle due variabili**.
+
+**E' la seconda volta oggi che lo strumento misura se stesso.** La prima era il confronto fra
+raggi con uno schivatore che si chiudeva in angolo; questa e' uno schivatore che non conosce gli
+ostacoli. Due volte lo stesso errore, in due forme diverse, e in entrambe la cosa che l'aveva
+scoperto era una riga di codice che avevo scritto io.
+
+**Che cosa resta vero, e che cosa va sospeso.**
+
+| fatto | stato |
+|---|---|
+| i criteri di m10 reggono a 60 m: **0** nemici dentro un ostacolo, campo ricostruito **0** volte, **0/4800** spawn dentro un disco | **vero, misurato** |
+| `node_count` **45** con tetto 120, costo per passo 2,741 ms | **vero, misurato** |
+| il gioco consegnato e' **migliore** di prima per lo schivatore: **79,23 s** contro i **55,33 s** di prima | **vero, ma per il fattore sbagliato** |
+| **il ginocchio e' a 60 m** | **SOSPESO**: la tabella si e' invertita dopo la consegna e non ho ancora una misura che separi raggio e ostacoli |
+| **600 s sono da 5,65 volte** il caso peggiore al raggio consegnato | **vero**, e il divario e' **minore** di quando l'ho scritto |
+
+**La misura che scioglie il nodo, e non l'ho ancora fatta:** tenere gli ostacoli **costanti** e
+variare solo il raggio, poi tenerli **scalati** e variare solo il raggio. Due righe, due numeri, e
+si sa quale delle due leve pesa quanto. Finche' non esiste, la scelta fra 46 e 60 **non è
+giustificata**, e nel piano resta scritto che **non lo è**.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

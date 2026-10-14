@@ -2001,11 +2001,15 @@ sto dicendo che il conto del piano **non torna più**, e che finché non torna l
 **La conseguenza che blocca m11, e la dico perché è scomoda.** Un numero di durata che può valere
 **8,40 s o 28,20 s** a parità di input non può progettare una rampa da 600 s: significherebbe
 progettare su una sbarra d'errore più larga del progetto. **Quindi la prima milestone dopo m10
-non è m11: è rendere deterministico ciò che m11 deve misurare.** E questo vale anche per la mia
-sonda: i numeri che ho prodotto oggi (`163,77 s` e poi `124,18 s` sulla configurazione **identica**
-R=46) non sono due misure in contraddizione, sono **due campioni dello stesso dado**. Li avevo
-attribuiti all'ordine di montaggio della scena e non li avevo risolti: **era la pista giusta, e
-l'avevo scartata.**
+non è m11: è rendere deterministico ciò che m11 deve misurare.**
+
+**Correzione, e stavolta l'ho scritta io sbagliata in questo stesso piano.** Avevo aggiunto che la
+mia sonda avesse prodotto due campioni dello stesso dado (`163,77 s` e poi `124,18 s` su R=46
+identico). **È falso, e la misura lo ha detto:** rilanciata dopo il rimedio, la sonda **riproduce
+`124,18 s` al secondo decimale**, e anche `78,2 / 86,8 / 91,0` su R=75. La differenza fra i due
+giri non era il dado: era che la **prima versione della sonda era un file diverso**, e l'ho
+confrontata con la seconda come se fosse la stessa misura. È la terza volta oggi che una mia
+affermazione non regge, e le tre volte la correzione l'ha data una misura e non un ragionamento.
 
 **Che cosa serve per chiudere, e come lo si sa che è chiuso.** Un criterio con denti:
 **la stessa sezione, eseguita N volte nello stesso albero, stampa lo stesso numero**. Non «quasi
@@ -2107,6 +2111,51 @@ dimostra niente, e su questo progetto ne abbiamo già uno.
 | **m11-bis-b** | `-orda` ∥ `-arena` | il rimedio: `-orda` semantica del `seed` e reroll esplicito in `restart_run()`; `-arena` `seed` fisso sulla scena e RNG delle casse seminato |
 
 **Non nello stesso giro.** Il criterio che ha i denti si vede solo se c'è un prima e un dopo.
+
+### 1.14-quater **La prima misura di m11, e non dice quello che le avevo chiesto**
+
+Rilanciata la sonda **dopo** il rimedio, quindi su uno strumento che ha un caso a risposta nota.
+Stessa schivatrice, solo il raggio dell'orda che cambia, tre semi ciascuno, `TMAX` 300 s:
+
+| R | tre semi | **minimo** | vita durante la partita |
+|---|---|---|---|
+| **46,0 m** (il valore di codice) | 51,0 / 108,9 / 124,2 s | **50,98 s** | scende, il giocatore muore |
+| **60,0 m** | **300,0 / 300,0 / 300,0 s** | **300,00 s** | **100,00 a ogni stampa** |
+| 75,0 m | 78,2 / 86,8 / 91,0 s | 78,18 s | scende, il giocatore muore |
+
+**A R=60 lo schivatore non perde un solo punto di vita in cinque minuti, su tre semi diversi.** Non
+è fortuna e non è il layout: è **sistematico**, e il numero è riproducibile al secondo decimale.
+
+**La risposta alla domanda che avevo posto è: né la pista né la difficoltà dell'onda 1.** Il minimo
+non cresce **monotono** con il raggio — 50,98 → 300,00 → 78,18, con un fattore **0,26** fra 60 e 75.
+Quindi il raggio **non è la variabile**: la variabile è **se lo schivatore si fa chiudere in angolo**,
+e a 75 m il mio bot di otto raggi si chiude, a 60 m trova una linea di fuga e la mantiene.
+
+**E la causa è scritta in due numeri di `enemy.gd`, che è di `-orda`:**
+
+| | valore |
+|---|---|
+| `ARRIVE_RADIUS` — dove il nemico **si ferma** | **3,00 m** |
+| portata del morso, `RADIUS + TOUCH_REACH` | **0,90 / 1,05 / 1,45 / 2,35 m** |
+
+**Ogni specie si ferma più lontano di quanto possa mordere.** Un nemico che obbedisce alla propria
+regola di arrivo **non morde mai**: per farlo deve essere spinto dentro i 3 m dalla separazione o
+dalla folla. Quindi **se corri, non ti mordono** — e a 60 m la linea di fuga esiste, a 46 m il muro
+la chiude, e in entrambi i casi il numero che esce è quello del muro e non quello della difficoltà.
+
+**È la stessa classe del difetto di m7**, che dichiarai verde perché il criterio guardava
+`damage_player` e non guardava **chi arriva abbastanza vicino**. Stavolta la misura non è una
+sonda: è un rapporto fra due numeri di costanti, e si vede senza eseguire niente.
+
+**Che cosa ne segue, e l'ordine è mio.** I 600 s dell'utente sono **raggiungibili oggi**, ma per il
+motivo sbagliato: si raggiungono **perché il giocatore è invulnerabile finché corre**, non perché il
+gioco sia bilanciato. Nessuna mappa, grande o piccola, lo cambia: è un numero dentro `enemy.gd`.
+Quindi **il primo intervento di m11 non è la mappa**: è l'invariante
+
+> **`RADIUS + TOUCH_REACH > ARRIVE_RADIUS` per ogni specie**
+
+come **criterio con denti**, e la mappa più grande che l'utente ha chiesto resta al suo posto — ma
+diventa il **secondo** intervento, non il primo.
 
 ### Le onde della milestone 3
 

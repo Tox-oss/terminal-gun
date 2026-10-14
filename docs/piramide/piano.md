@@ -778,6 +778,47 @@ Quindi **`GATE` non è rosso per un difetto: tira i dadi.** È la prima volta ch
 progetto è non deterministica, ed è esattamente ciò che §11 vieta: *«una porta la cui rossa non
 distingue “difetto” da “dado”»*.
 
+### Il leak del 2026-10-14: **non era `bonk.wav`**, e il rimedio non è quello che sembra
+
+Il 2026-10-14 `test_ui` è tornato rosso **due volte di fila**, e il debito dichiarato sopra diceva
+`bonk.wav` in `src/weapons/weapon_base.gd:194`. **È sbagliato**, e l'avevo scritto io senza misurarlo:
+l'avevo dedotto dal nome del suono che il motore segnalava.
+
+**Misurato con `--verbose`, che è l'unico modo giusto:** il leak è un `AudioStreamPlaybackWAV` che
+tiene `AudioStreamWAV` **`res://assets/sfx/levelup.wav`**, e chi lo suona è
+`src/player/player.gd:637` (`_on_leveled_up` → `_sfx_levelup.play()`), che è di **`-gameplay`**.
+`bonk.wav` **non parte mai** in `test_ui`: nessun proiettile torna indietro.
+
+| quello che scrivevo | quello che è misurato |
+|---|---|
+| il leak è `bonk.wav` | il leak è **`levelup.wav`** |
+| il pezzo è `weapon_base.gd:194` | il pezzo è **`player.gd:637`** |
+| `-gameplay` lo corregge, e `-ui` è esonerata | `-gameplay` lo corregge, **e `-ui` esonerata lo era per il motivo sbagliato** |
+
+**Due fatti che la foglia ha misurato e che cambiano il rimedio.**
+
+1. **`stop()` non chiude niente** se il nodo è ancora nell'albero: stesse due righe del motore, stessa
+   risorsa. Non è un handle appeso, è **l'ordine di smontaggio**: chiude un mix dell'`AudioServer`
+   **dopo** che il nodo è stato liberato.
+2. Il rimedio che ha funzionato è **nel test**, non nel gioco: `tests/test_ui.gd` scarica l'audio
+   aspettando il prossimo mix sull'orologio di `AudioServer` (misurati 5 e 13 frame, 20-71 ms),
+   e asserisce **stato** — 0 nodi audio sotto root, 0 `Hud` dopo la partita, nodi tornati a 2 come
+   all'avvio, oggetti vivi `1551 -> 1549`. Denti provati: senza lo scarico il delta è `0` e la porta va
+   rossa con `atteso -2, ottenuto 0`.
+
+**E qui devo dire la cosa scomoda, perché è esattamente la classe di difetto che questo progetto
+chiude.** Il verde così ottenuto è un verde **che vale meno di quanto sembra**: il gioco continua a
+tenere `levelup.wav` all'uscita, e il criterio che ora è verde verifica **lo scarico del test**, non
+l'assenza del leak nel gioco. `-ui` l'ha detto da sola nel rapporto e l'ha dichiarato aperto: il
+posto vero è `player.gd::_on_leveled_up`, che è di `-gameplay`, e **non è stato fatto**.
+
+**Il `-ui` ha anche tolto un'asserzione invece di tenerla.** `Performance.OBJECT_RESOURCE_COUNT` si
+è rivelato insensibile — 22 sia con scarico sia senza — e l'asserzione è stata **messa via** perché
+sarebbe stata decorativa o rossa per il motivo sbagliato. È la scelta giusta e la registro: **un
+criterio che non può fallire non è un criterio.**
+
+`GATE: 8/8` misurato dal vertice dopo il lavoro. `PERM: 15/15`.
+
 ### Il debito del leak, chiuso come **debito** e non come rimedio
 
 **Decisione dell'utente il 2026-10-13: «debito».** Perché il leak è un messaggio **all'uscita**,

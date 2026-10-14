@@ -197,6 +197,11 @@ func _run() -> void:
 		quit(h.finish("test_ui"))
 		return
 
+	# Il numero di nodi sotto `root` **prima** che questo test apra qualcosa:
+	# e' il numero a cui l'uscita deve tornare, e lo dichiara il test stesso
+	# invece di un letterale scritto qui dentro.
+	_nodes_at_boot = _count_nodes(root)
+
 	_hud_alone(h)
 	# Senza tipo: `_open_arena` restituisce un Variant (il risultato di
 	# `instantiate()`), e `:=` su un Variant non compila. Con `:` dichiarato
@@ -228,8 +233,182 @@ func _run() -> void:
 
 	await _upgrade_flow(h, game)
 
+	var costo_uscita := await _exit_section(h)
+	print("test_ui: sezione di uscita: %d ms" % costo_uscita)
+
 	_done = true
 	quit(h.finish("test_ui"))
+
+# --- Parte 4: l'uscita ----------------------------------------------------------
+#
+# ## Cosa c'era qui e cosa c'e' adesso
+#
+# Prima di questa sezione il test finiva con `quit()` **nello stesso istante**
+# in cui aveva liberato l'ultima scena, e il motore usciva con
+# `WARNING: 2 ObjectDB instances were leaked at exit` e
+# `ERROR: 1 resources still in use at exit` **dopo** il `PASS`. La porta legge
+# l'uscita e su quel rosso rifiuta il verde: un test che dice PASS e poi lascia
+# un errore non puo' aver girato tutto, e ha ragione.
+#
+# ## Chi e' il colpevole, misurato e non indovinato
+#
+# `--verbose` dice i due oggetti e la risorsa: `AudioStreamPlaybackWAV` e
+# `AudioStreamWAV`, e la risorsa in uso e' `res://assets/sfx/levelup.wav`. Sono
+# **un solo leak in tre righe**, non due: il playback tiene il riferimento alla
+# risorsa che sta suonando. Non e' `bonk.wav`, che era il sospetto dichiarato
+# il 2026-10-13: in questo test `bonk` non parte mai, perche' nessun proiettile
+# torna indietro (l'uccisione la provoca il test con `damage_enemy`).
+#
+# Chi suona `levelup.wav` e' `src/player/player.gd::_on_leveled_up` (riga 637),
+# che e' di **`-gameplay`**: questa sezione non puo' chiuderlo e non finge di
+# averlo chiuso.
+#
+# ## Perche' pero' il vuoto e' qui, e misurato
+#
+# Tre fatti, ognuno con il numero accanto, e non una spiegazione:
+#
+# 1. **non resta nessun nodo**: all'uscita sotto `root` ci sono `0` nodi
+#    `AudioStreamPlayer3D`. Il nodo che suona e' gia' stato liberato con la
+#    scena: non e' un nodo appeso, quindi non si chiude liberandolo.
+# 2. **`stop()` non chiude niente**: chiamato mentre il nodo e' ancora
+#    nell'albero, il leak resta identico (due righe di ObjectDB, una di
+#    risorsa). Non e' l'ipotesi del piano ("fermare il suono prima dello
+#    smontaggio"): e' misurata e falsa.
+# 3. **un mix del server audio chiude tutto**: le due istanze e la risorsa
+#    spariscono quando `AudioServer` mescola una volta dopo la liberazione.
+#
+# Quindi il vuoto e' **l'ordine di smontamento del motore**, non un oggetto
+# appeso: `ObjectDB::cleanup()` passa prima dell'ultimo mix e trova il playback
+# ancora registrato. Il gioco continua a suonare (`levelup`, `hurt`, `bonk`
+# suonano come prima, nessuna riga di `src/**` e' stata toccata) e questa
+# sezione **non chiama l'audio**: aspetta che il motore smonti come smonta.
+
+## La classe dei nodi che suonano. Per nome di classe, non per nome di nodo:
+## i tre suoni del giocatore hanno tre nomi diversi (`Sfx` dalla scena, `hurt` e
+## `levelup` creati a runtime da `player.gd::_sound`) e nessuno di quei nomi e'
+## di questa foglia. La classe e' di tutte e tre.
+const AUDIO_CLASS := "AudioStreamPlayer3D"
+
+## Quante istanze ObjectDB il leak tiene appese: e' il numero che il motore
+## stampa all'uscita. E' **la specifica** di quello che lo svuotamento deve
+## liberare, non una copia di un risultato: senza questo criterio l'attesa qui
+## sotto sarebbe una riga che non verifica niente, e l'errore lo vedrebbe solo il
+## motore, che e' esattamente il difetto che questa sezione chiude.
+const LEAKED_OBJECTS := 2
+
+## Quanti frame di processo si aspettano prima di dire "il server audio non ha
+## mescolato". E' un tetto, non un'attesa infinita: se il server non mescolasse
+## il test si bloccherebbe e la porta lo ucciderebbe fra 120 s dicendo "timeout",
+## che e' un fatto diverso da "l'attesa non serve".
+const AUDIO_MIX_WAIT_CAP := 600
+
+## Quanti nodi sotto `root` ci sono **all'avvio del test**, prima che questa
+## sezione apra qualunque cosa. E' il numero a cui l'uscita deve tornare: se la
+## partita lascia qualcosa appeso, il numero resta piu' alto.
+var _nodes_at_boot: int = -1
+
+## ## Lo stato che si asserisce, e perche' non basta «l'uscita e' pulita»
+##
+## Il difetto che questa sezione chiude si vede **solo** nelle righe che il
+## motore stampa dopo il `PASS`, e un test che guarda la propria uscita non le
+## vede: direi `PASS` e basta lascerebbe il difetto esattamente dove sta. Quindi
+## qui si asserisce **lo stato**, non l'assenza di rumore:
+##
+##   - sotto `root` non resta **nessun** nodo audio, ne' nessun `Hud`, e il
+##     numero di nodi e' tornato a quello di avvio;
+##   - e il numero di oggetti e di risorse vive **scende** delle due istanze e
+##     della risorsa che il leak teneva appese.
+##
+## Il secondo punto e' quello con i denti: senza lo svuotamento i numeri non
+## scendono e qui va rosso.
+func _exit_section(h) -> int:
+	var t0 := Time.get_ticks_msec()
+
+	var audio := _count_class(root, AUDIO_CLASS)
+	h.eq(audio, 0,
+		"chiusa la partita non deve restare nessun nodo \"%s\" sotto root, e ne restano %d: il suono della partita e' rimasto appeso" % [AUDIO_CLASS, audio])
+	h.eq(_count_named(root, HUD_NODE), 0,
+		"chiusa la partita non deve restare nessun nodo \"%s\" sotto root: l'HUD che ha aperto la partita deve uscire con lei" % HUD_NODE)
+	h.eq(_count_nodes(root), _nodes_at_boot,
+		"sotto root devono restare i nodi di avvio e non uno di piu': una partita che non si svuota e' una partita che la riaperta moltiplica")
+
+	var prima := _live_objects()
+	var scarico := await _drain_audio()
+	var dopo := _live_objects()
+
+	print("test_ui: uscita: nodi sotto root %d (avvio %d), audio %d, scarico audio %d frame"
+		% [_count_nodes(root), _nodes_at_boot, audio, scarico])
+	print("test_ui: uscita: oggetti vivi %d -> %d, risorse vive %d -> %d"
+		% [int(prima[0]), int(dopo[0]), int(prima[1]), int(dopo[1])])
+
+	# ## Il numero che il leak muove, e perche' uno solo
+	#
+	# Il motore stampa **due** righe (`2 ObjectDB instances`, `1 resources`) ma
+	# sono lo stesso evento: il playback tiene il riferimento alla risorsa che
+	# sta suonando, quindi liberare il playback libera anche la risorsa. Ed e'
+	# per questo qui sotto c'e' **una** asserzione e non due:
+	# `Performance.OBJECT_COUNT` e' l'unico dei due conti che si muove. La
+	# risorsa e' stata misurata e `OBJECT_RESOURCE_COUNT` non cambia **neanche
+	# di uno**, con lo scarico e senza: asserirci sopra produrrebbe un criterio
+	# che va rosso per il motivo sbagliato, o peggio uno verde che non ha
+	# guardato niente. Un numero che non si muove non e' un criterio.
+	h.eq(dopo[0] - prima[0], -LEAKED_OBJECTS,
+		"l'uscita deve liberare le %d istanze ObjectDB che il suono teneva appese: sono scese %d. Se questo numero e' 0, il playback della partita e' ancora registrato nel server audio quando il motore esce, ed e' quello che fa scrivere al motore `2 ObjectDB instances were leaked at exit` e `1 resources still in use at exit`"
+			% [LEAKED_OBJECTS, int(prima[0] - dopo[0])])
+	# E lo scarico e' avvenuto: se il tetto di attesa fosse scaduto, il numero
+	# sopra andrebbe rosso ma per un motivo che qui si dice. Sono due fatti, non
+	# uno, e il secondo e' quello che rende leggibile il primo.
+	h.check(scarico < AUDIO_MIX_WAIT_CAP,
+		"il server audio non ha mescolato entro %d frame di processo: l'attesa non ha potuto provare niente e il numero di oggetti qui sopra non significa niente" % AUDIO_MIX_WAIT_CAP)
+
+	return Time.get_ticks_msec() - t0
+
+## Quante istanze `ObjectDB` e quante risorse sono vive adesso.
+##
+## Sono **gli stessi due conti** sui quali il motore fonda i due messaggi
+## all'uscita (`ObjectDB::cleanup()` e `Resource::clear()`): non e' un modo
+## furbo di contare qualcos'altro, e' il numero che il difetto muove. Non si
+## toccano: si leggono, e il test dichiara quanto devono scendere.
+func _live_objects() -> Array[int]:
+	return [
+		int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),
+	]
+
+## Aspetta che il server audio **mescoli una volta**.
+##
+## Il tempo dalla partita si ricava dall'orologio del server audio e non da un
+## numero di frame: si aspetta che `get_time_since_last_mix()` torni indietro,
+## il che vuol dire che un mix nuovo e' passato. Il tetto `AUDIO_MIX_WAIT_CAP`
+## e' un tetto: se il server non mescolasse, l'attesa finisce e sono le due
+## asserzioni di `_exit_section` a dire che non e' successo.
+##
+## Non e' un'attesa per far passare un errore: e' l'attesa con cui il motore
+## smonta come smonta, e senza la quale si misura **quando** il motore libera e
+## non **se** lo libera. Il numero di frame che serve e' stampato.
+func _drain_audio() -> int:
+	var frames := 1
+	await process_frame
+	var prima := AudioServer.get_time_since_last_mix()
+	while frames < AUDIO_MIX_WAIT_CAP:
+		if AudioServer.get_time_since_last_mix() < prima:
+			return frames
+		frames += 1
+		await process_frame
+	return frames
+
+## Quanti nodi della classe `cls` ci sono sotto `node`, ricorsivamente.
+##
+## `is_class` e' la classe **del motore**, quindi vale per i figli creati a
+## runtime come per quelli della scena: `AudioStreamPlayer3D` non discende da
+## `AudioStreamPlayer` e cercarli per il nome della classe sbagliata darebbe
+## sempre zero, che e' un criterio verde senza aver guardato niente.
+func _count_class(node: Node, cls: String) -> int:
+	var total := 1 if node.is_class(cls) else 0
+	for child in node.get_children():
+		total += _count_class(child, cls)
+	return total
+
 
 # --- Parte 1: l'HUD da solo ---------------------------------------------------
 

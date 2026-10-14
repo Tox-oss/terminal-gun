@@ -2487,6 +2487,39 @@ guarda sedici raggi, ha memoria e previsione **zero**, e quindi è **peggiore** 
 il numero è **basso**. E non è un giudizio di giocabilità: «ti basta correre o serve una scorciatoia?»
 resta una domanda dell'utente, e l'avevo già dichiarata in §1.14.
 
+### 1.14-undicesima **Correzione del vertice: `POP_BASE` e `POP_STEP` non si possono muovere separati**
+
+Nel brief a `-orda` avevo scritto che con `POP_BASE = 6` la curva avrebbe stampato
+`6/12/18/24/...`, e nello stesso brief gli avevo detto **«non anticipare la rampa»**. Sono due
+istruzioni **in contraddizione**, perché `POP_STEP` **è** la rampa. `-orda` me l'ha detto prima di
+toccare niente, e ha ragione:
+
+| scelta | curva di `population_of` per le onde 1..10 |
+|---|---|
+| `POP_BASE = 6`, `POP_STEP = 25` (la mia istruzione) | **6 / 31 / 56 / 81 / 106 / 131 / 156 / 200** — l'onda 2 fa un balzo di **5 volte** |
+| `POP_BASE = 6`, `POP_STEP = 6` | 6 / 12 / 18 / 24 / 30 / 36 / 42 / 48 / 54 / 60 |
+
+La prima è un **gradino**, non una rampa: l'utente chiede un mondo facile, e un balzo da 6 a 31
+nemici alla seconda onda non è un mondo facile, è un mondo che uccide al primo cambio di ritmo.
+Quindi **la decisione del vertice è: i due numeri si muovono insieme, `POP_BASE = 6` e `POP_STEP = 6`,
+e la rampa diventa parte di questa correzione e non un intervento dopo.**
+
+**E questa cambia l'ordine che avevo dichiarato.** Avevo scritto che l'apertura e la rampa erano
+«due interventi, non uno». È **falso**: abbassare la base senza abbassare il passo spacca la curva,
+quindi sono **uno**. Il che è meno male di quanto sembri, perché `POP_STEP = 6` porta a 200 nemici
+all'**onda 34** invece che all'onda 8, e il tempo per arrivarci è proprio il numero che manca per i
+600 s dell'utente.
+
+**Quello che va misurato, e che nessuno ha misurato:** con `POP_BASE = POP_STEP = 6` quanto tempo
+serve per arrivare a 200 nemici, e quanto sopravvive lo schivatore prima. Il primo è aritmetica
+sulla curva più il tempo di uccisione, il secondo è la sonda. **Nessuno dei due è scritto qui**, e
+il piano vieta di scriverlo prima della misura.
+
+**Nota di processo, che vale più del numero.** La foglia ha ricevuto due istruzioni in
+contraddizione, le ha viste, e **non ha toccato niente**. Ha chiesto prima. È il comportamento
+giusto e la ragione per cui l'albero è intatto: una foglia che ferma e chiede vale più di una che
+esegue e indovina.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

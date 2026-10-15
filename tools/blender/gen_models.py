@@ -25,6 +25,22 @@ COLORS = {
 
 NAMES = ["enemy_small", "enemy_big", "enemy_boss", "player", "ground_tile", "crate"]
 
+# Cosa questo file produce davvero. I tre nemici sono **fuori** di proposito:
+# dal 2026-10-15 i modelli dei nemici sono di un artista e vengono consegnati
+# come GLB. Se questo generatore continuasse a produrli, il prossimo
+# `tools/convert_assets.sh` rigenererebbe una icosfera e un cubo **sopra** il
+# lavoro dell'artista, e nessuno se ne accorgerebbe fino a metta' partita.
+#
+# `NAMES` pero' **resta intera**, e non per pigrizia: il seme di ogni modello e'
+# `SEED + NAMES.index(name)`, quindi togliere le voci da `NAMES` sposterebbe
+# gli indici di `player`, `ground_tile` e `crate` e cambierebbe i loro byte. Il
+# progetto ha scelto che stesso comando produca gli stessi byte, e questo e' il
+# prezzo per rispettarlo.
+GENERA = ["player", "ground_tile", "crate"]
+
+# Le tre voci nemico restano in `COLORS` e in `NAMES` per l'indice e per
+# documentazione: nessun codice le usa piu', e non vengono prodotte.
+
 
 def parse_out():
     argv = sys.argv
@@ -170,7 +186,10 @@ def export_one(name, out_dir):
 def main():
     out_dir = parse_out()
     os.makedirs(out_dir, exist_ok=True)
-    for name in NAMES:
+    # `GENERA`, non `NAMES`: vedi la nota accanto alla lista. I nemici non
+    # vengono prodotti, e i loro file esistenti in `assets/models/` non vengono
+    # toccati — questo script scrive solo quello che mette in `GENERA`.
+    for name in GENERA:
         export_one(name, out_dir)
 
 

@@ -1303,6 +1303,12 @@ criterio.
 | m17 | `-orda` | **`Run.elapsed_s`**: il terzo minuto è un orologio, non un numero d'onda; fermata `3 x blast`; peso `6,0 → 3,0` | 8/8 | **verde** |
 | m18 | `-arena` | **la traiettoria**: il colpo parte dal mortar e arriva alla cupola | 8/8 | **verde** |
 
+**m12 APERTA, 2026-10-15** — mappa 4x procedurale con 4 biomi, nascita radiale fuori schermo, sistema
+a comandi al posto dell'arma, casse apribili con `E`, cinque nuove specie. Specifica e conflitti in
+**§1.14-ventiquarta**. **Nessuna foglia lanciata**: manca il numero della regione fuori schermo, e
+`src/core/contracts.gd` deve crescere di un campo per Ransomware **prima** che `-orda` lo trovi
+mancante.
+
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | w0 | vertice | Godot 4.7.2 + Blender 5.2.2 installati, `tools/env.sh` scritto, `git init` + LFS su `*.glb`/`*.wav`/`*.ogg`, identità git impostata **localmente** (`bisco <bisco@localhost>`: non c'era nessuna, né locale né globale) | — | **verde** |
@@ -3447,6 +3453,74 @@ peso di produzione era 0,0 ed e' diventata falsa quando `-orda` lo ha portato a 
 (8 secondi invece dei 3 minuti della porta intera) e rimanda la riga. Da quel momento i round sono
 costati secondi e la foglia ha potuto iterare. La divisione che funziona, quando una foglia non puo'
 eseguire, e' **la foglia scrive e il vertice misura** — e non l'inverso.
+
+### 1.14-ventiquarta **m12: la mappa 4x e il passaggio ai comandi**
+
+Cinque decisioni dell'utente (2026-10-15), prese sul gioco giocato:
+
+1. mappa **almeno 4 volte piu' grande**, **generata casualmente**, con **4 biomi** sparsi;
+2. i nemici **appaiono a un raggio determinato dal giocatore, fuori dallo schermo, gia' ingaggiati**
+   (rif. Megabonk);
+3. i cinque comandi con flag e operatori **sostituiscono** l'arma attuale;
+4. i 27 ostacoli diventano **casse apribili con `E`**, bottino casuale fra **potenziamenti, XP, medikit**;
+5. per biomio cambiano **densita', terreno e potenziamenti**.
+
+#### Un conflitto che si chiude, e uno che sembrava e non era
+
+**Chiuso: la mappa 4x contro la densita'.** Il numero di nemici **non e' piu' legato all'area**. La
+nascita e' radiale rispetto al giocatore, quindi la densita' non e' piu' una proprieta' dell'arena ma
+del giocatore. Il criterio di densita' — `min 2, mediana 3, max 4` per cella, 24 semi, 0 traboccamenti,
+griglia 69x69 = 4761 celle — **non sopravvive alla regola nuova e va sostituito**, non allargato.
+`MAX_ENEMIES = 200` resta un tetto di **vivi contemporanei**, che e' una cosa diversa da una densita'.
+
+**Non era un conflitto: determinismo e «casuale».** Sono compatibili: il layout e' funzione di
+`reseed`. Pero' `src/sim/obstacles.gd` oggi restituisce **27 dischi fissi** e tre criteri sono misurati
+su quel layout fisso, quindi vanno **riderivati per seme**.
+
+#### Tre cose che la decisione 2 rende necessarie e che nessuno ha ancora misurato
+
+1. **«Fuori dallo schermo» e' una regione, non un numero.** Il `41,6 m` dichiarati sono il caso
+   peggiore del giocatore **al muro**: la camera vede molto da un lato e poco dall'altro, quindi un
+   raggio costante nasconderebbe i nemici su meta' dello schermo. La regola giusta e' **fuori
+   dall'impronta a terra del frustum**, e quel numero va **misurato**, non dichiarato — cambia con la
+   posizione del giocatore e con l'angolo della camera.
+2. **Il flow field cambia mestiere.** Esiste per instradare 200 nemici **attraverso** l'arena verso un
+   punto. Con la nascita radiale gli enemy sono **gia' vicini**: il campo serve ancora per aggirare gli
+   ostacoli — che adesso sono **apribili** — o diventa lavoro sprecato. Si decide con una misura.
+3. **Densita' e tempo di reazione diventano due grandezze diverse.** Oggi il criterio di densita' e il
+   tempo di arrivo sono la stessa cosa misurata due volte; con la nascita radiale vanno asseriti
+   separatamente.
+
+#### I tre criteri di m10 che vanno riscritti, non allentati
+
+| criterio oggi | con denti | cosa diventa |
+|---|---|---|
+| campo non ricostruito mai, 2400 passi | — | **falso per costruzione**: aprire una cassa cambia il campo |
+| 0 nemici dentro un ostacolo in 30 s a 200 vivi | spento: **19.947** | va riscritto perche' la cassa non c'e' piu' |
+| 24 semi, 4800 spawn, nessuno dentro un disco | — | va riderivato per seme sul layout nuovo |
+
+#### Tre fatti nuovi che nessuna foglia possiede oggi
+
+- **`E` e' un verbo nuovo**: input di `-gameplay`, prompt di `-ui`, e un canale che nessuna foglia ha.
+- **`medikit` e' una terza via**: oggi `hp` va da 0 a 100 e **non esiste nessuna guarigione**.
+- **due vie di potenziamento**: le carte a livello (8 carte, `test_upgrades` verde) e il bottino delle
+  casse. Stanno nello stesso sistema o no, e va deciso **prima** di scrivere il bottino.
+
+#### Due collisioni con roba appena costruita
+
+- **Il Wurm rompe `kinds`/`transforms`.** `mortar_shot_renderer.gd` sceglie il lancio leggendo le due
+  tabelle e sottintende **un corpo per nemico**; una catena di N segmenti o occupa N voci — e allora
+  `kinds[i]` deve dire `MORTAR` per ogni segmento — o ha bisogno di una struttura nuova.
+- **Ransomware e' il primo canale orda -> giocatore.** Oggi la freccia e' giocatore -> orda. Serve un
+  campo nuovo in `src/core/contracts.gd`, **del vertice**, scritto **prima** che `-orda` lo trovi
+  mancante.
+
+#### L'ordine, e la ragione per cui e' questo
+
+**La regola di nascita prima di tutto il resto.** Bestiario e loot si tarano sul ritmo con cui i
+nemici arrivano: tararli sulla regola vecchia significa tararli su numeri che non esisteranno piu'. Il
+riferimento a 600 s (26,42 s) e' gia' vecchio di tre onde e diventa inutile quando la mappa raddoppia
+il raggio: **la curva si rimisura sulla mappa nuova, non su quella vecchia**.
 
 ### Le onde della milestone 3
 

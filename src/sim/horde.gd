@@ -265,7 +265,51 @@ var timers: PackedFloat32Array = PackedFloat32Array()
 # morderci contemporanei e si chiama il contratto.
 
 var bite_timers: PackedFloat32Array = PackedFloat32Array()
+## ## m12: `bite_latch`, i due bit del **rientro**, e perche' un array parallelo
+##
+## `bite_latch[i]` e' un intero con due soli bit possibili:
+##
+##   - `E.BITE_IN_PORTATA` — **il passo scorso** questo nemico era a portata di
+##     morso. E' il bordo in salita della portata, cioe' il contatto come causa.
+##   - `E.BITE_SPENT` — ha gia' morso e **non puo' ripetere finche' non esce
+##     dalla portata**. E' l'unico limite sul morso di un singolo nemico.
+##
+## **Perche' serve e non basta `bites`.** `bites[i]` dice «morde in questo
+## passo» e viene azzerato ogni passo: da solo non distingue *sta morendo per la
+## prima volta* da *sta morendo di nuovo*, che e' esattamente la distinzione che
+## il rientro deve fare. E non puo' derivarsi dalla posizione, perche' «era a
+## portata al passo scorso» e' un fatto **del nemico**, non della sua distanza di
+## adesso: uno che entra ed esce dalla portata a ogni passo ha la stessa distanza
+## di uno che ci sta fermo, e i due devono comportarsi in modo opposto.
+##
+## Vive e muore negli stessi quattro punti degli altri array paralleli
+## (`_resize_arrays`, `_apply_spawn`, `_kill`, e da li' `_populate`,
+## `restart_run` e `reseed`), e `tests/test_orda.gd` asserisce
+## `bite_latch.size() == count` per la stessa ragione per cui lo fa su
+## `bite_timers`: un array parallelo disallineato e' un nemico che morde con lo
+## stato di un altro.
+var bite_latch: PackedInt32Array = PackedInt32Array()
 var bites: PackedInt32Array = PackedInt32Array()
+
+## ## m12: `bite_mode`, e perche' e' un campo **pubblico e dichiarato**
+##
+## Il gioco gira su `E.BITE_CONTACT`: **il contatto e' la causa del morso**. Un
+## nemico che entra nella sua portata e il passo prima non c'era morde, e non puo'
+## ripetere finche' non ne esce.
+##
+## L'altro valore, `E.BITE_TIMER`, e' il morso **schedulato a timer** di prima:
+## entra solo se il nemico e' a portata da un periodo intero (1,00 s sul runner).
+## **Non e' mai quello di partita.** Vive perche' `tests/test_orda.gd` deve poter
+## rimetterlo, girare il gioco vecchio e riportare i numeri di prima accanto a
+## quelli di adesso: un rimedio che si puo' solo descrivere e non misurare non
+## e' un rimedio verificato.
+##
+## Perche' un campo e non un `static var` dentro `enemy.gd`: un `static var` e'
+## una superficie che qualunque file puo' cambiare in qualunque momento, e
+## quindi una superficie che il gioco non controlla. Qui il valore vive nell'ordine
+## ed e' dichiarato qui sotto, e `tests/test_orda.gd` conta le occorrenze **di
+## codice** di questo nome in `res://src` e va rossa se compare in un terzo punto.
+var bite_mode: int = E.BITE_CONTACT
 
 ## Quanti secondi devono passare fra due morsi **che arrivano addosso**, di
 ## qualunque specie. E' il tetto che tiene insieme la m7, ed e' nato da una
@@ -293,7 +337,49 @@ var bites: PackedInt32Array = PackedInt32Array()
 ## misurato lo stesso campione (contatto 3.3 volte x morso medio 1.7 volte, perche'
 ## a 200 vivi l'anello intorno al giocatore e' fatto di nemici piu' grossi). In
 ## secondi da fermo al centro: **6.5 s** con 200 vivi, **16.5 s** con 25.
-const TOUCH_INTERVAL := 0.40
+## ## m12: il tetto e' passato da **0,40 s a 0,15 s**, e perche' e' un vincolo
+##
+## Il tetto **non** e' un numero di difficolta' scelto a occhio: e' una condizione
+## che il gioco **non puo' violare**, e il numero che la impone e' il **tempo di
+## contatto misurato** (`tests/test_orda.gd`, sezione 11-z: il giocatore che
+## attraversa l'orda a 13,65 m/s e quanto resta dentro la portata di morso di
+## ciascuna specie).
+##
+##     TOUCH_INTERVAL  <  contatto peggiore del runner   =  0,233 s (14 passi)
+##
+## **Se il tetto fosse piu' lungo del contatto, il difetto di oggi tornerebbe con
+## un tetto nuovo**: il nemico entra in portata mentre il tetto e' ancora
+## scarico, il morso verrebbe rimandato di qualche decimo di secondo, e il
+## nemico uscirebbe dalla portata senza aver mai morso. E' esattamente la
+## segnalazione dell'utente del 2026-10-15 («se i nemici mi toccano mi
+## danneggiano»), riprodotta da un tetto invece che da un periodo.
+##
+## **Il prima e il dopo, nella stessa frase.**
+##
+## | | prima (m7) | dopo (m12) |
+## |---|---|---|
+## | `TOUCH_INTERVAL` | **0,40 s** (massimo 2,50 morsi/s) | **0,15 s** (massimo **6,67 morsi/s**) |
+## | contatto misurato del runner | non misurato | **0,233 s** (14 passi), caso peggiore su 3 geometrie |
+##
+## **Il tetto piu' corto non vuol dire piu' danni: vuol dire che il tetto
+## smettere di essere la cosa che decide se un morso arriva addosso.** Con 0,40 s
+## il tetto era 1,7 volte il contatto del runner e la **speranza** di morso del
+## nemico attraversato era zero; con 0,15 s il tetto e' 0,64 volte il contatto e
+## **un morso che arriva al passo giusto arriva davvero**, perche' il tetto si
+## scarica dentro la finestra. Il massimo teorico sale da 2,50 a 6,67 morsi/s, ma
+## e' un tetto che il contatto **raggiunge** solo con l'orda addosso: la cadenza
+## **misurata** resta quella che la sezione 11 stampa a ogni lancio, e quei
+## numeri sono la realta' del gioco, non questo massimo.
+##
+## **Perche' 0,15 e non 0,20, che basterebbe.** 0,20 s e' sotto lo 0,233 s misurato
+## di appena 0,033 s: il numero che lo giustifica e' il **minimo su tre
+## geometrie**, non il minimo vero, e con un margine del 14% la finestra puo'
+## chiudersi per una disposizione che non e' stata campionata. 0,15 s lascia il
+## 36% di margine e resta sotto il tetto del giocatore vero, che scarta i morsi
+## per `INVULN_AFTER_HIT = 0,7 s`: sotto 0,7 s il tetto dell'ordine non e' mai
+## quello che limita il giocatore, quindi questo numero **non e' un tetto sul
+## giocatore** e non sposta la difficolta' per meta'.
+const TOUCH_INTERVAL := 0.15
 ## Danno consegnato al giocatore nell'ultimo passo. Telemetria: serve a un
 ## test per guardare l'economia del morso e a un eventuale HUD per il lampo,
 ## e non e' un secondo posto dove il danno e' scritto (criterio n. 6 di m7).
@@ -659,6 +745,7 @@ func _resize_arrays(n: int) -> void:
 	kinds.resize(n)
 	timers.resize(n)
 	bite_timers.resize(n)
+	bite_latch.resize(n)
 	bites.resize(n)
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
@@ -701,6 +788,7 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	hp[i] = E.hp_of(kind) * _hp_scale()
 	timers[i] = 0.0
 	bite_timers[i] = 0.0
+	bite_latch[i] = 0
 	bites[i] = 0
 	colors[i] = E.color_of(kind)
 	# Il raggio del corpo, dalla tabella delle specie: un posto solo (criterio
@@ -747,7 +835,8 @@ func step(delta: float) -> void:
 	var ha_giocatore := _has_player()
 	for i in count:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
-			kinds, arena_radius, bite_timers, bites, ha_giocatore, body_scale, flow_field)
+			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
+			body_scale, bite_mode, flow_field)
 	_apply_bites(delta)
 	_sweep_dead()
 	_wave_tick(delta)
@@ -773,10 +862,33 @@ func step(delta: float) -> void:
 ##
 ## `TOUCH_INTERVAL` e' il tetto dichiarato in testa al file. Il giro parte dal
 ## primo nemico che morde in ordine d'indice: con un tetto a intervallo il
-##Nemico che vince e' quello con l'indice piu' basso fra quelli pronti, e gli
+## nemico che vince e' quello con l'indice piu' basso fra quelli pronti, e gli
 ## indici cambiano a ogni morte (scambio-ultimo), quindi non e' sempre lo stesso.
-## Gli altri segnali restano accesi fino al passo dopo, dove `enemy.gd` li
-## azzera: chi non ha vinto semplicemente aspetta il suo prossimo periodo.
+##
+## ## m12: **una richiesta rimandata NON e' una richiesta persa**
+##
+## `bites[i]` e' la richiesta del passo e resta accesa finche' non e' consegnata
+## (vedi `enemy.gd`). Prima di m12 chi perde la gara vedeva il proprio segnale
+## azzerato al passo dopo e aspettava un **periodo intero** di timer: in una
+## folla di venti nemici che entrano in portata nello stesso passo, diciannove
+## non avrebbero morso mai, e il difetto che l'utente ha segnalato sarebbe
+## sopravvissuto al rimedio. Quindi qui:
+##
+##   - tetto **scarico**: si consegna e si arma il tetto;
+##   - tetto **carico**: si **lascia il segnale acceso** e si va avanti.
+##
+## Il tetto cosi' **limita la cadenza** e non **sceglie chi sopravvive**: il primo
+## segnale in ordine d'indice vince, e gli altri riprovano al passo seguente,
+## dentro la stessa finestra di contatto.
+##
+## ## m12: il rientro si arma **qui**, e non in `enemy.gd`
+##
+## `BITE_SPENT` lo mette la **consegna**, non la richiesta. La differenza non e'
+## una sfumatura: se lo mettesse `enemy.gd`, un nemico che chiede il morso al
+## passo 40 e lo riceve al passo 42 risulterebbe "speso" dal passo 40, cioe'
+## consumerebbe il rientro **senza aver morso**, e un rientro consumato per niente
+## e' un nemico che non morde. Chi ha mordo e' `horde.gd`, quindi il rientro si
+## arma dove il morso e' avvenuto.
 ##
 ## Nessuna allocazione: si scrive dentro array gia' di capienza e si chiama un
 ## metodo del contratto. Niente `new()`, niente `instantiate()`, niente
@@ -787,7 +899,7 @@ func _apply_bites(delta: float) -> void:
 	# L'intervallo si scarica **prima** del controllo: cosi' un morso non puo'
 	# costare un passo extra di attesa a ogni fine intervallo.
 	_bite_interval_left = maxf(0.0, _bite_interval_left - delta)
-	if count == 0 or _bite_interval_left > 0.0:
+	if count == 0:
 		return
 	var game := _contract()
 	if game == null:
@@ -795,11 +907,18 @@ func _apply_bites(delta: float) -> void:
 	for i in count:
 		if bites[i] == 0:
 			continue
+		if _bite_interval_left > 0.0:
+			# tetto scarico: la richiesta **resta accesa** e il nemico riprova
+			# al passo dopo, dentro la stessa finestra di contatto
+			continue
 		bites[i] = 0
+		# il rientro comincia qui: questo nemico non ripete fino a che non
+		# esce dalla portata (`enemy.gd` lo riarma in un passo)
+		bite_latch[i] |= E.BITE_SPENT
 		var danno := E.touch_damage_of(kinds[i])
 		game.damage_player(danno)
 		touch_damage_last = danno
-		touch_bites_last = 1
+		touch_bites_last += 1
 		_bite_interval_left = TOUCH_INTERVAL
 		return
 
@@ -953,6 +1072,7 @@ func _kill(i: int) -> void:
 		hp[i] = hp[last]
 		timers[i] = timers[last]
 		bite_timers[i] = bite_timers[last]
+		bite_latch[i] = bite_latch[last]
 		bites[i] = bites[last]
 	count = last
 	_resize_arrays(count)

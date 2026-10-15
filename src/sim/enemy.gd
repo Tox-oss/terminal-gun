@@ -229,6 +229,60 @@ const TOUCH_DAMAGE_BASE := 1.6
 ## ricava da `MASS` con la radice quadrata (vedi sopra).
 const TOUCH_PERIOD := 1.0
 
+# --- m12: COME nasce un morso, e perche' il contatto e' la causa ----------------
+#
+# ## Il difetto che questo blocco chiude, in numeri
+#
+# Il morso era **schedulato a timer**: entrava solo se `bite_timers[i]`, che
+# contava i secondi di contatto, aveva raggiunto `TOUCH_PERIOD` (1,00 s sul
+# runner, 3,16 s sul boss). Ma il tempo che il giocatore resta dentro la portata
+# di morso **attraversando l'orda** e' molto piu' corto di un periodo: misurato
+# in `tests/test_orda.gd` sezione 11-z, treno a 13,65 m/s, caso peggiore
+#
+# | specie | portata | contatto misurato | periodo di prima | morsi per attraversamento, prima |
+# |---|---|---|---|---|
+# | runner | 1,98 m | **0,233 s** (14 passi) | 1,000 s | **0** |
+# | grunt | 2,49 m | **0,333 s** (20 passi) | 1,198 s | **0** |
+# | brute | 3,85 m | **0,533 s** (32 passi) | 1,969 s | **0** |
+# | boss | 6,91 m | **1,000 s** (60 passi) | 3,162 s | **0** |
+#
+# Il contatto non era la causa del morso, era solo il permesso: il nemico ti
+# arrivava addosso e non mordeva, e la ragione non era ne' la distanza ne' il
+# danno. Era il timer.
+#
+# ## Il rimedio, e il **solo** limite che si tiene
+#
+#     entra in portata e il passo prima non c'era  ->  morde
+#
+# e poi **un** limite, che serve per non uccidere a 60 Hz: **lo stesso nemico non
+# può mordere due volte senza che il contatto si sia interrotto**. Il modo più
+# semplice è il **rientro**: morde una volta, e non ripete finché non è uscito
+# dalla portata. Un passo solo fuori è sufficiente, e questo è il numero che
+## rende possibile il criterio «ogni nemico attraversato morde almeno una volta»:
+## un nemico che il giocatore attraversa esce sempre dalla portata, quindi è
+## sempre riarmaato al prossimo attraversamento.
+#
+# ## Perche' questo e' un **flag**, e non un periodo
+#
+# Un periodo e' un tempo che passa **anche senza contatto**: e' esattamente il
+# difetto di prima, riscritto. Il rientro è invece legato al contatto, quindi
+# sta in due bit e non in un float. `TOUCH_PERIOD` resta dichiarato e resta
+# assertato perche' è la tabella della cadenza di m7: non e' piu' il gate del
+# morso (lo è `TOUCH_INTERVAL` in `horde.gd`, tarato sul contatto **misurato**),
+# ma resta la derivazione della tabella che questa sezione stampa.
+
+## Il morso è causato dal **contatto**, cioè dal bordo in salita della portata.
+const BITE_CONTACT := 0
+## Il morso è schedulato a timer: la forma di **prima**. Vive solo per il dente di
+## `tests/test_orda.gd` (che deve poter girare il gioco vecchio e misurarne i
+## numeri) e non è mai quello di partita: `horde.bite_mode` vale `BITE_CONTACT`
+## dal primo passo e nessuna riga di `src/` lo cambia.
+const BITE_TIMER := 1
+
+## `bite_latch` — due bit per nemico, e nulla altro.
+const BITE_IN_PORTATA := 1  ## il passo scorso era a portata: il contatto è **vecchio**
+const BITE_SPENT := 2  ## ha morso: non ripete finché non esce dalla portata (rientro)
+
 static func clamp_kind(kind: int) -> int:
 	return clampi(kind, 0, KIND_COUNT - 1)
 
@@ -286,20 +340,34 @@ static func touch_period_of(kind: int) -> float:
 ## il numero che si vede e quello che morde non possono divergere (vedi
 ## `bite_range_of` piu' in alto).
 ##
-## `bite_timers` e `bites` sono due array paralleli in scrittura: il primo
-## tiene da quanto tempo questa specie e' in contatto, il secondo dice "questo
-## passo morde" (1) o no (0). **La decisione del morso e' qui dentro**, dove
-## stanno le specie; a chi tocca applicarlo (`horde.gd`) spetta solo il tetto
-## dei morderci contemporanei e la chiamata al contratto.
+## `bite_timers`, `bite_latch` e `bites` sono tre array paralleli in scrittura:
+## il primo tiene da quanti secondi il nemico e' in contatto, il secondo porta i
+## due bit del **rientro** (`BITE_IN_PORTATA`, `BITE_SPENT`) e il terzo dice se
+## il nemico chiede di mordere in questo passo (1) o no (0). **La decisione del
+## morso e' qui dentro**, dove stanno le specie; a chi tocca applicarlo
+## (`horde.gd`) spetta solo il tetto di cadenza e la chiamata al contratto.
 ##
 ## Tutti gli array sono paralleli e lunghi `count`: scrive solo `positions[i]`,
-## `velocities[i]`, `timers[i]`, `bite_timers[i]` e `bites[i]`. Nessuna
-## allocazione.
+## `velocities[i]`, `timers[i]`, `bite_timers[i]`, `bite_latch[i]` e `bites[i]`.
+## Nessuna allocazione.
+##
+## `bite_latch` serve perche' **senza di lui il contatto non puo' essere la
+## causa del morso**: per morso all'ingresso occorre sapere se il passo scorso il
+## nemico era gia' a portata, e quello e' un fatto del nemico (il suo stato), non
+## della sua posizione.
+##
+## `bite_mode` e' `BITE_CONTACT` (il contatto e' la causa) oppure `BITE_TIMER`
+## (la forma di prima, che vive solo per il dente di `tests/test_orda.gd`). Lo
+## passa `horde.gd` dal suo campo pubblico, che vale `BITE_CONTACT` dal primo
+## passo: un `static var` qui dentro sarebbe una superficie che `src/` puo'
+## cambiare senza passare dall'ordine, che e' la strada che questo progetto vieta
+## di continuo.
 static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		positions: PackedVector3Array, velocities: PackedVector3Array,
 		timers: PackedFloat32Array, kinds: PackedInt32Array,
 		arena_radius: float, bite_timers: PackedFloat32Array,
-		bites: PackedInt32Array, has_target: bool, body_scale: float, flow = null) -> void:
+		bite_latch: PackedInt32Array, bites: PackedInt32Array, has_target: bool,
+		body_scale: float, bite_mode: int, flow = null) -> void:
 	var kind := clamp_kind(kinds[i])
 	var pos := positions[i]
 	var to_target := target - pos
@@ -343,21 +411,42 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		vel -= Vector3(flat.x, 0.0, flat.y) / maxf(r, 0.001) * (r - limit) * EDGE_PUSH
 
 	timers[i] = maxf(0.0, timers[i] - delta)
-	# Il morso riparte da zero quando il contatto si perde: una specie deve
-	# restare addosso per un periodo **intero** prima di mordere, altrimenti un
-	# nemico che sbatte sul bordo del contatto azzererebbe il timer ogni passo e
-	# non morderebbe mai. E il prezzo e' dichiarato: chi entra ed esce spesso
-	# non morde affatto.
+	# ## Il morso: il contatto e' la causa (m12)
+	#
+	# `bite_latch` e' di due bit: `BITE_IN_PORTATA` dice che **il passo scorso**
+	# il nemico era a portata, e `BITE_SPENT` che ha gia' morso e non puo'
+	# ripetere finche' non esce. `bites[i]` e' la **richiesta**: resta 1 fino a
+	# che `horde.gd` la consegna, e per questo un morso trattenuto dal tetto di
+	# cadenza non e' un morso perso (vedi `_apply_bites`).
 	bites[i] = 0
-	if has_target and dist <= bite_range_of(kind, body_scale):
+	if not (has_target and dist <= bite_range_of(kind, body_scale)):
+		# **Uscito**: il rientro e' automatico e costa un passo solo. E' qui che
+		# il nemico attraversato diventa capace di mordere di nuovo, ed e'
+		# l'unico posto del file in cui il rientro si arma.
+		bite_latch[i] = 0
+		bite_timers[i] = 0.0
+	elif bite_mode == BITE_TIMER:
+		# La forma di prima, tenuta **fuori dal percorso di partita**: serve al
+		# dente di `tests/test_orda.gd`, che la riattiva per una corsa e
+		# rimostra i numeri di prima. Se questa riga sparisse, il dente
+		# misurerebbe il rimedio e chiamerebbe "prima" un numero che non e' mai
+		# esistito.
 		var atteso := bite_timers[i] + delta
 		if atteso >= touch_period_of(kind):
 			bites[i] = 1
 			bite_timers[i] = 0.0
 		else:
 			bite_timers[i] = atteso
+		bite_latch[i] = BITE_IN_PORTATA
 	else:
-		bite_timers[i] = 0.0
+		var f: int = bite_latch[i]
+		if (f & BITE_IN_PORTATA) == 0 and (f & BITE_SPENT) == 0:
+			# Bordo in salita della portata, e rientro armato: **morde**.
+			bites[i] = 1
+		bite_latch[i] = f | BITE_IN_PORTATA
+		# `bite_timers` resta il contatore di secondi di contatto, ed e' il
+		# numero che la sezione 11-z stampa: e' la telemetria di questa riga.
+		bite_timers[i] += delta
 	velocities[i] = vel
 	if flow == null:
 		positions[i] = pos + vel * delta

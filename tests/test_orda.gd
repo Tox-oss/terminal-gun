@@ -286,6 +286,13 @@ func _run() -> void:
 	# precedente invece che in quello dichiarato.
 	_raggio_60(h, horde)
 	_touch(h, horde)
+	# m12: il tempo di contatto per specie. Sta **subito dopo** `_touch` perche'
+	# il morso si accende solo con un giocatore registrato, e lo spia di `_touch`
+	# e' l'unico che questo file abbia. Sta **prima** di `_banda_morso` perche'
+	# quella sezione asserisce il comportamento del morso, e il numero del tempo
+	# di contatto e' la cosa che decide con quale tetto quel comportamento e'
+	# confrontabile.
+	_attraversamento(h, horde)
 	# m11-quarta: il morso e la taglia disegnata. Sta **dopo** `_touch` perche'
 	# la condizione del morso si accende solo con un giocatore registrato, e lo
 	# spia di `_touch` e' l'unico che questo file abbia: prima di lui nessun
@@ -447,8 +454,28 @@ const PLAYER_HP_REFERENCE := 100.0
 ## del rapporto e' un quarto sopra il massimo misurato. Restano tetr**i** lo stesso:
 ## un morso che sparisce del tutto, un tetto a intervallo che non tiene e un'orda
 ## piena che diventa cinque volte la piccola vanno rossi tutti e tre.
+## La cadenza: sotto `BITE_RATE_MIN` nessuno morderebbe (e il chiamante di m7
+## sarebbe sparito senza che nessuno se ne accorga), sopra `BITE_RATE_MAX` il
+## tetto `TOUCH_INTERVAL` non terrebbe, perche' `1/0.15 = 6.67`.
+##
+## ## m12: `BITE_RATE_MAX` non e' piu' un numero scritto a mano
+##
+## Era **2.5**, cioe' `1/0.40`: il letterale del tetto di allora. Con
+## `TOUCH_INTERVAL` sceso a 0,15 s il letterale sarebbe rimasto **sotto** la
+## misura (4,83 morsi/s a 200 vivi) e la porta sarebbe andata rossa per un
+## numero che non era piu' un tetto ma il ricordo di uno. Quindi adesso e'
+## **derivato**: `BITE_RATE_MAX = 1 / TOUCH_INTERVAL`, cioe' il tetto e' il tetto,
+## e l'unica cosa che questa sezione controlla e' che la misura ci stia sotto.
+## Derivare non e' spostare: il tetto di cadenza e' salito di 2,67 volte perche'
+## il tetto di cadenza e' sceso di 2,67 volte, e i due numeri sono la stessa
+## cosa scritta in due posti.
+##
+## Il pavimento `BITE_RATE_MIN` **non si e' mosso**, e non per pigrizia: il
+## difetto che questa sezione chiude era proprio un morso che non arriva, e un
+## pavimento che si alza ogni volta che la cadenza scende smetterebbe di essere
+## la difesa contro il difetto.
 const BITE_RATE_MIN := 0.25
-const BITE_RATE_MAX := 2.5
+const BITE_RATE_MAX := 1.0 / HORDE.TOUCH_INTERVAL
 ## Secondi che un giocatore regge **fermo al centro dell'orda** con 100 hp.
 const SURVIVAL_MIN := 5.0
 const SURVIVAL_MAX := 50.0
@@ -506,8 +533,213 @@ func _spia_damage_player(amount: float) -> bool:
 	return true
 
 ## La posizione del giocatore finto, letta dal contratto come in partita.
+##
+## Non e' una `const`: e' un campo perche' la sezione 18 **muove** il giocatore
+## (misura dell'attraversamento) e deve poterlo rimettere al punto di prima. Un
+## percorso che modifica la posizione del giocatore e' la cosa che rende
+## misurabile «quanto tempo il giocatore resta entro la portata di morso», e il
+## numero che ne esce decide il tetto di cadenza: vedi `_attraversamento`.
+var _player_via := FAKE_PLAYER
+
 func _spia_player_position() -> Vector3:
-	return FAKE_PLAYER
+	return _player_via
+
+# --- 11-z. m12: il tempo di CONTATTO, e perche' decide il tetto di cadenza -----
+#
+# ## Il difetto che questa sezione misura, in una riga
+#
+# Il morso era **schedulato a timer**: un nemico che ti arriva addosso centinaia
+# di volte non mordeva quasi mai, perche' il periodo (`TOUCH_PERIOD` = 1,00 s sul
+# runner) non era mai pronto quando il contatto c'era. Il contatto non era la
+# causa del morso, era solo il permesso.
+#
+# ## Il numero che decide tutto, e perche' va **misurato** e non calcolato
+#
+#     tempo di contatto = 2 x portata / velocita' del giocatore
+#
+# Con `CROSS_SPEED` = 13,65 m/s e le portate di oggi (1,98 / 2,49 / 3,85 / 6,91
+# m) il conto a mano dà 0,29 / 0,36 / 0,56 / 1,01 s. Quel conto e' il **limite
+# inferiore**: il nemico insegue, la separazione lo sposta, il campo lo devia, e
+# tutto questo puo' allungare la finestra. Percio' il numero che sceglie il tetto
+# non e' quello del conto ma quello che esce da qui sotto.
+#
+# ## La regola che ne discende, e che e' scritta in `src/sim/horde.gd`
+#
+#     TOUCH_INTERVAL < tempo di contatto del runner
+#
+# Se il tetto di cadenza fosse **piu' lungo** del contatto, un nemico
+# attraversato entrerebbe in portata mentre il tetto e' ancora scarico, il morso
+# verrebbe rimandato, e il nemico uscirebbe dalla portata senza aver mai morso:
+# cioe' esattamente il difetto di prima, con un tetto nuovo. Percio' questo e'
+# un **vincolo**, non una scelta di stile, ed e' asserito sotto.
+
+## Velocita' di attraversamento del giocatore, in m/s. Numero dichiarato e non
+## scritto dentro una formula: il conto `2 x portata / CROSS_SPEED` deve poter
+## essere ricalcolato a mano leggendo questa riga.
+const CROSS_SPEED := 13.65
+## La linea di attraversamento non passa per l'origine. `_player_focus()` rifiuta
+## un bersaglio a distanza quasi nulla e ripiega sul fuoco dell'orda: un percorso
+## che attraversa il centro misurerebbe l'orda ferma al centro, che e' un'altra
+## misura, e non un attraversamento.
+const CROSS_Z := -8.0
+## Passi percorri dal `-14 m` (ben fuori da qualunque portata: la piu' lunga e'
+## 6,91 m) fino a che il nemico e' ben passato. 150 passi sono 2,50 s, cioe'
+## 34,1 m: piu' dei 26 m che servono a entrare e uscire di tutte e quattro le
+## specie.
+const CROSS_STEPS := 150
+## Tre posizioni iniziali del nemico sulla linea: l'attraversamento **centrale**
+## e due sfalsati, cosi' il numero non e' la misura di una sola geometria.
+const CROSS_OFFSET := [-4.0, 0.0, 4.0]
+
+## Mette **un** nemico di specie `kind` sulla linea di attraversamento, lontano
+## dalla portata, e lascia scaricare il tetto di cadenza. `true` se ce n'e' uno.
+##
+## ## Perche' il nemico viene prima mandato lontano
+##
+## Il tetto a intervallo si scarica **fuori** dalla portata: se l'ingresso in
+## portata accadesse mentre il tetto e' a meta' carica, la risposta sarebbe «no»
+## perche' il tetto scatta e non perche' la distanza e' quella giusta. Un test che
+## misura il tetto quando vuole misurare la distanza e' un test che non misura
+## niente.
+func _prepara_attraversamento(horde: HORDE, kind: int, offset: float) -> bool:
+	while horde.count > 0:
+		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+	horde.population = 1
+	horde.auto_respawn = true
+	var passi := 0
+	while horde.count < 1 and passi < 120:
+		horde.step(DT)
+		passi += 1
+	if horde.count != 1:
+		return false
+	horde.kinds[0] = kind
+	horde.radii[0] = ENEMY.RADIUS[kind]
+	horde.hp[0] = ENEMY.hp_of(kind)
+	# 34 m stanno dentro l'arena da 60 m anche muovendosi di qualche metro.
+	_player_via = Vector3(offset + 34.0, 0.0, CROSS_Z)
+	for _i in int(ceil(HORDE.TOUCH_INTERVAL / DT)) + 4:
+		horde.transforms[0] = Vector3(offset, 0.0, CROSS_Z)
+		horde.velocities[0] = Vector3.ZERO
+		horde.step(DT)
+	return true
+
+## Una corsa di attraversamento: il giocatore passa a `CROSS_SPEED` accanto a un
+## nemico di specie `kind` e si conta quanto tempo resta entro la sua portata.
+##
+## `fermo` = il nemico e' inchiodato alla sua posizione (il conto geometrico
+## `2 x portata / velocita'`); `libero` = il nemico insegue davvero, con
+## separazione e campo. **Il numero che sceglie il tetto e' quello `libero`**:
+## il conto a mano e' il caso migliore, e scegliere il tetto sul caso migliore e'
+## sceglierlo su un numero che non esiste in partita.
+func _misura_attraversamento(horde: HORDE, kind: int, fermo: bool, offset: float) -> Dictionary:
+	var morsi_prima := _morsi
+	if not _prepara_attraversamento(horde, kind, offset):
+		return {"morsi": -1, "passi": 0, "episodi": 0, "primo": -1}
+	var portata := horde.bite_range_of(kind)
+	var x := offset - 14.0
+	_player_via = Vector3(x, 0.0, CROSS_Z)
+	var contatto_passi := 0
+	var episodi := 0
+	var dentro := false
+	var primo_contatto := -1
+	for s in CROSS_STEPS:
+		# La distanza **prima** del passo: e' la stessa che `enemy.gd` guarda per
+		# decidere il morso, quindi il numero qui e quello che il codice vede.
+		var p := horde.transforms[0]
+		if Vector2(p.x - x, p.z - CROSS_Z).length() <= portata:
+			contatto_passi += 1
+			if not dentro:
+				dentro = true
+				episodi += 1
+				if primo_contatto < 0:
+					primo_contatto = s
+		else:
+			dentro = false
+		x += CROSS_SPEED * DT
+		_player_via = Vector3(x, 0.0, CROSS_Z)
+		if fermo:
+			horde.velocities[0] = Vector3.ZERO
+			horde.transforms[0] = Vector3(offset, 0.0, CROSS_Z)
+		horde.step(DT)
+	return {
+		"morsi": _morsi - morsi_prima,
+		"passi": contatto_passi,
+		"episodi": episodi,
+		"primo": primo_contatto,
+	}
+
+## La sezione 18 per intero: il tempo di contatto per specie, e i morsi per
+## attraversamento. Gira **prima** di qualunque decisione sul tetto di cadenza,
+## perche' il tetto e' una funzione di questi numeri e non il contrario.
+func _attraversamento(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var auto_respawn := horde.auto_respawn
+	var popolazione := horde.population
+	var righe := ""
+	for k in ENEMY.KIND_COUNT:
+		var nome: String = ENEMY.KIND_NAMES[k]
+		var portata := horde.bite_range_of(k)
+		var conto := 2.0 * portata / CROSS_SPEED
+		var min_libero := 1.0e9
+		var min_fermo := 1.0e9
+		var episodi := 0
+		var morsi := 0
+		var prove := 0
+		for offset in CROSS_OFFSET:
+			var libero := _misura_attraversamento(horde, k, false, offset)
+			if int(libero["morsi"]) < 0:
+				continue
+			prove += 1
+			morsi += int(libero["morsi"])
+			episodi += int(libero["episodi"])
+			min_libero = minf(min_libero, float(libero["passi"]) * DT)
+			var fermo := _misura_attraversamento(horde, k, true, offset)
+			min_fermo = minf(min_fermo, float(fermo["passi"]) * DT)
+		if prove == 0:
+			h.fail("attraversamento %s: nessun nemico e' sopravvissuto alla preparazione" % nome)
+			continue
+		righe += "\n  %s: portata %.2f m | contatto libero min %.3f s (%.1f passi) | contatto fermo min %.3f s (%.1f passi) | episodi %d su %d attraversamenti | morsi %d | conto a mano 2xR/v %.3f s" \
+			% [nome, portata, min_libero, min_libero / DT, min_fermo, min_fermo / DT,
+				episodi, prove, morsi, conto]
+		print("orda: contatto per specie, treno a %.2f m/s (il minimo e' il caso peggiore):%s"
+			% [CROSS_SPEED, righe])
+		righe = ""
+	# Il tetto di cadenza non puo' essere piu' lungo del contatto **peggiore** del
+	# runner: se lo fosse, un runner attraversato entrerebbe in portata col tetto
+	# scarico, il morso verrebbe rimandato fuori portata, e il difetto di oggi
+	# tornerebbe con un tetto diverso. Questa e' l'unica asserzione sul tetto, e
+	# il numero che la decide e' quello stampato sopra.
+	var peggiore := _contatto_peggiore(horde, ENEMY.RUNNER)
+	h.check(peggiore > 0.0, "contatto runner misurato")
+	h.check(HORDE.TOUCH_INTERVAL < peggiore,
+		"il tetto di cadenza (%.3f s) e' piu' corto del contatto peggiore del runner "
+			% HORDE.TOUCH_INTERVAL
+			+ "(%.3f s = %.1f passi): altrimenti un runner attraversato aspetterebbe "
+				% [peggiore, peggiore / DT]
+			+ "il tetto fuori portata e non morderebbe mai")
+	# il campo torna com'era
+	horde.auto_respawn = auto_respawn
+	horde.population = popolazione
+	_player_via = FAKE_PLAYER
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	h.eq(horde.count, RUN.population_of(1),
+		"attraversamento: la sezione rimette l'orda alla popolazione della curva")
+	print("orda: contatto: sezione intera in %d us, tetto di cadenza %.3f s contro %.3f s di contatto runner misurati"
+		% [Time.get_ticks_usec() - t0, HORDE.TOUCH_INTERVAL, peggiore])
+
+## Il contatto peggiore (il minimo) del runner, in secondi. Isolato in una
+## funzione perche' e' il numero che il tetto di cadenza deve tenere sotto, e un
+## numero usato in due asserzioni dentro due righe diverse puo' essere diverso
+## dalle due.
+func _contatto_peggiore(horde: HORDE, kind: int) -> float:
+	var peggiore := 1.0e9
+	for offset in CROSS_OFFSET:
+		var m := _misura_attraversamento(horde, kind, false, offset)
+		if int(m["morsi"]) < 0:
+			continue
+		peggiore = minf(peggiore, float(m["passi"]) * DT)
+	return peggiore
 
 func _touch(h, horde: HORDE) -> void:
 	_touch_table(h)

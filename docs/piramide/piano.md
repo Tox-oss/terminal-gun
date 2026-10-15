@@ -2827,6 +2827,62 @@ misurata **oggi**, non quella troncata di §1.14-dodicesima.
 
 `GATE: 8/8` · `PERM: 15/15`.
 
+### 1.14-ottavadecima **«Prendo danno solo quando sto fermo»: il difetto è che il morso era un timer, non il contatto**
+
+L'utente, dopo aver provato l'eseguibile, 2026-10-15: *«prendo danno solo quando sto fermo, posso
+correre attraverso orde di nemici senza problemi»*. E la sua richiesta, testuale: *«ho bisogno che se i
+nemici mi toccano mi danneggiano, la probabilità di schivare deve essere bassissima»*.
+
+**Non era un'impressione, ed era un difetto vero, ma non quello che sembrava.** Prima la domanda
+aveva due risposte opposte — *design* (meno occasioni) o *difetto* (danno non applicato) — e la misura
+le separa. `probe_bocca_mossa.gd`: tre semi, 25 nemici, 30 s. «Occasione» = un passo con almeno un
+nemico entro la propria portata dal giocatore.
+
+| condizione | occasioni | morsi | % che mordono | hp perso (prima → dopo) |
+|---|---|---|---|---|
+| fermo | 4068 | 60 → **74** | 1,5% → **1,8%** | 203,89 → **154,06** |
+| **gira** (schivi) | 1568 | 2 → **39** | **0,1% → 2,5%** | **4,57 → 115,43** |
+| dritta | 2490 | 30 → **33** | 1,2% → **1,3%** | 81,14 → **74,74** |
+
+**Le occasioni in corsa non erano mai state zero**, quindi non era «il danno non parte»: era che **il
+morso non era legato al contatto ma a un timer**, e il timer quasi mai era pronto quando il contatto
+c'era. Da fermo mordeva una volta ogni ~66 contatti; schivando **una volta ogni mille**.
+
+**Il rimedio, e la misura che lo governa.** Un nuovo array parallelo `bite_latch` in `horde.gd`: il morso
+è sul **bordo in salita** della portata, con un rientro per nemico. Il tetto di rientro è sceso da
+**0,400 s a 0,150 s**, e la ragione è una misura: **tempo di contatto misurato** con un treno a
+13,65 m/s, caso peggiore su tre geometrie, nemico libero e nemico inchiodato.
+
+| specie | portata | contatto **misurato** | conto `2R/v` | episodi / morsi su 3 attraversamenti |
+|---|---|---|---|---|
+| runner | 1,98 m | **0,233 s** (14 passi) | 0,290 s | **3/3 → 3 morsi** |
+| grunt | 2,49 m | 0,333 s (20) | 0,365 s | **3/3 → 3 morsi** |
+| brute | 3,85 m | 0,533 s (32) | 0,564 s | **3/3 → 3 morsi** |
+| boss | 6,91 m | 1,000 s (60) | 1,012 s | **3/3 → 3 morsi** |
+
+**Il tetto di 0,400 s era 1,7 volte il contatto del runner**: avrebbe affamato il rimedio
+esattamente come faceva il periodo. **Ogni nemico attraversato ora morde almeno una volta**, in tutte
+e quattro le specie.
+
+**Il numero che dice che la richiesta è stata soddisfatta.** Il rapporto fra danno da fermo e danno
+schivando era **45 : 1** (203,89 contro 4,57) ed è ora **1,3 : 1** (154,06 contro 115,43). Schivare non
+vale più quasi nulla: chi schiva a 13,65 m/s in 30 s perde **da 29 a 53 hp**, cioè **un terzo della
+barra**. La differenza fra «stare fermo» e «scappare» è passata da **quarantacinque volte** a **una
+volte e un terzo**.
+
+**Una cosa che il rimedio NON ha fatto, e va detta perché la foglia l'ha dichiarata per prima.** La
+previsione della consegna — «più difficile, secondi da fermo che scendono» — **non si è avverata**:
+sulla scena vera fermo al centro con 200 vivi la sopravvivenza è **salita** da 22,62 a **28,28 s**, e
+l'hp per morso **accettato** è sceso da 4,34 a **2,65**. Il motivo è nel **mix di specie**: col morso
+sul contatto entrano per primi i runner da 1,60 hp, e 105 morsi su 144 vengono scartati
+dall'invulnerabilità. La cadenza è salita più della media è scesa, e la **media ha vinto**.
+
+**I denti del timer non ci sono ancora**: `E.BITE_TIMER` esiste ed è commentato per il dente, ma nessuna
+sezione lo riattiva. **Dichiarato aperto**, non dato per chiuso.
+
+**I 600 s.** Il numero di ieri **non regge più** e va rilanciato: era 600,02 s a sei nemici con un
+morso che non era quello disegnato.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

@@ -1274,6 +1274,7 @@ Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
 | **600 s a 6 nemici** | **misurati** | `bf0e4fc`, §1.14-settadecima |
 | **mortar: simulazione, contratto, criteri** | **chiuso** | `00a3677`, §1.14-diciassettesima |
 | **mortar: la cupola rossa** | **chiusa**, 8/8 | `-arena`, m13-w3 |
+| **bug dell'utente, metà proiettile** (`ENEMY_RADIUS` 0,55) | **chiusa**, 8/8, banda 0,0000 | `-gameplay`, m14-a |
 | peso del mortar `0 → basso` | **prossima onda** | `-orda` |
 | danno per specie | **deciso: dopo il mortar** | utente, 2026-10-15 |
 | vista isometrica 2D | **mai fatta**, fuori strada critica | `-arena` |
@@ -1292,7 +1293,8 @@ criterio.
 | m13-w1 | `-ui` | leak audio, poi pool su giocatore e arma | 8/8 | **verde** |
 | m13-w2 | `-orda` ∥ `-arena` | quinta specie e criterio a cinque specie | 8/8 | **verde** |
 | m13-w3 | `-arena` | **la cupola rossa del mortar** | 8/8 | **verde** |
-| m13-w4 | `-orda` | peso del mortar `0 → basso` | — | **prossima onda** |
+| m14-a | `-gameplay` | **l'involucro del proiettile**, l'altra metà del bug segnalato | 8/8 | **verde** |
+| m14-b | `-orda` ∥ `-arena` | peso del mortar `0 → basso` | — | **prossima onda** |
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
@@ -3070,6 +3072,60 @@ lo era.
 `export_filter="all_resources"`, quindi i 8 test, `tools/gate.gdc`, le 5 sonde e i due file di
 debris entrano nell'eseguibile. I due script `_probe_obstacles.gd` e `_tmp_rng_probe.gd` sono
 **non tracciati e nessuno li può cancellare**: sono nel suo scope, non nel mio. Restano aperti.
+
+### 1.14-diciannovesima **m14-a: la mezza proiettile del bug che l'utente aveva segnalato**
+
+Il difetto segnalato all'inizio — *«alcuni nemici non riescono a farmi danno»* — aveva due metà.
+Quella del morso è chiusa da m11-quarta (`90d9b9a`). Questa è l'altra, ed era **il numero più
+vecchio del progetto**: `src/weapons/projectile_pool.gd:89`, `const ENEMY_RADIUS := 0.55`.
+
+**Un solo valore per cinque specie**, mentre i corpi che si vedono sono `3,4 × RADIUS[k]`:
+
+| specie | `RADIUS[k]` | disegnato | lo prendeva entro | banda col morso |
+|---|---|---|---|---|
+| runner | 0,45 | 1,53 m | 0,55 m | **0,0000** |
+| grunt | 0,60 | 2,04 m | 0,55 m | **0,0000** |
+| brute | 1,00 | 3,40 m | 0,55 m | **0,0000** |
+| mortar | 1,40 | **4,76 m** | 0,55 m | **0,0000** |
+| boss | 1,90 | **6,46 m** | 0,55 m | **0,0000** |
+
+Il commento sopra la riga diceva *«il raggio della capsula a terra dei modelli low-poly»*: è un
+numero **rimasto indietro di m8**, quando `SIZE_FACTOR = 3,4` ha triplicato i corpi e nessuno ha
+moltiplicato questa riga. Su un runner era 3,6 volte più piccolo del visibile, sul boss **11,7**.
+Il commento prevedeva già il rimedio — *«se l'orda lo espone, si legge da lì»* — e quel canale è
+arrivato solo dopo, in m11-quarta.
+
+**La specifica, che è una riga:** l'involucro del proiettile è **lo stesso del morso**, letto dallo
+stesso canale, `Game.enemy_body_scale × Enemy.RADIUS[k]`, senza il `TOUCH_REACH` (che è uno sconto
+del morso) e senza una copia del 3,4. Vincolo a un senso solo: **mai più grande del corpo
+disegnato**, perché colpire cose invisibili è peggio che non colpire cose visibili.
+
+**Denti, misurati e poi tolti.** Contratto avvelenato a 99,0: `44,5500 / 59,4000 / 99,0000 /
+188,1000 / 138,6000` — entrambi gli involucri moltiplicati per 29,1 e **identici fra loro**. Se uno
+dei due fosse una copia, l'altro non l'avrebbe seguito.
+
+**La conseguenza che nessuno si aspettava, e che la foglia ha dichiarato assente.**
+
+`-gameplay` ha scritto che la previsione «non si è materializzata su questi file». **Non è vero**, e
+la misura lo dice:
+
+```
+progression: l'onda 1 si e' chiusa in 2751 passi (45.85 s)   era 3407 passi (56.78 s)
+```
+
+**−19% sul tempo di chiusura dell'onda 1.** Nessun criterio è andato rosso, e per questo la foglia
+l'ha letta come «nessun effetto». La lezione non è che la foglia abbia misurato male: è che **aveva
+confrontato i numeri che si ricordava e non la riga**, e che una misura senza il confronto con la
+baseline è una misura a cui non si può dire se è cambiata. Le altre due righe che si muovono nella
+stessa direzione: `dist_min` al primo montaggio da **0,247000 a 0,109180 m**, e `m7 criterio 2` da
+**10 a 12 colpi** sulla stessa traiettoria.
+
+**La regola che questa sezione stabilisce, e che è più larga del mortar:**
+
+> **Una costante che descrive un corpo non può sopravvivere alla calibrazione che ha cambiato il
+> corpo.** `ENEMY_RADIUS` era la copia incrociata di `SIZE_FACTOR` di otto milestone prima, e nessuna
+> porta la guardava perché passava: un proiettile che centrava 0,55 m di un corpo da 4,76 m non
+> falliva nessuna asserzione, semplicemente nessuno chiedeva se quella era la distanza giusta.
 
 ### Le onde della milestone 3
 

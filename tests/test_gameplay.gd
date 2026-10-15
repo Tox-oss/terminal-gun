@@ -88,6 +88,17 @@ extends SceneTree
 ##      e la metà dei proiettili resta verde; con il proiettile che si ferma al
 ##      muro il colpo si ferma a **2,300 m** dal centro (0,300 m fuori dal disco),
 ##      il nemico dietro prende **0** colpi e la metà del giocatore resta verde.
+##  18. **m14-a**, l'altra meta' della stessa segnalazione dell'utente («alcuni
+##      nemici non riescono a farmi danno»): `projectile_pool.gd` aveva
+##      `ENEMY_RADIUS = 0.55` per **tutte e cinque** le specie, cioe' un numero
+##      rimasto indietro di `SIZE_FACTOR = 3.4`, e il mortar — 4,76 m a schermo,
+##      primo nemico che devi uccidere **mentre ti spara da 10,42 m** — era un
+##      bersaglio da 0,55 m. L'involucro del proiettile ora è lo **stesso** del
+##      morso, letto dallo **stesso** canale `Game.enemy_body_scale`
+##      (`_m14a_involucro`): banda **0,0000** su cinque specie, mai più grande
+##      del corpo disegnato, e due denti (il contratto avvelenato a 99,0 muove
+##      **entrambi** gli involucri, poi la sonda tolta e il canale rifunziona).
+##      I dieci tiri di quella sezione non leggono una formula: fanno sparare.
 ##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
@@ -104,7 +115,9 @@ extends SceneTree
 ## `src/sim/horde.gd`: questo test non deve aspettare che -orda abbia finito.
 ## Il finto implementa esattamente la superficie che -gameplay puo' usare del
 ## contratto, e nient'altro:
-##   - `Game.horde = self` con i due campi pubblici `count` e `transforms`;
+##   - `Game.horde = self` con i campi pubblici `count`, `transforms` e
+##     `kinds` (l'ultimo dal 2026-10-15: e' la specie, e senza di essa il
+##     proiettile non puo' sapere quanto e' grande il corpo che deve prendere);
 ##   - `Game.register_impl("damage_enemy", ...)`, che applica `amount` agli HP,
 ##     **somma** alla velocita' del nemico `knockback * (1 - resist)` e risponde
 ##     `true` se l'ha ucciso (e' da quel `true` che nasce l'XP: vedi
@@ -121,6 +134,18 @@ extends SceneTree
 ## caricano a **runtime**, dentro `_process()`, e i valori di gioco si leggono
 ## dai **campi delle istanze vive** (`player.accel`, `player.move_speed`,
 ## `weapon.damage`), non dalle costanti degli script.
+##
+## ## L'eccezione di `src/sim/enemy.gd`, e perche' e' sicura
+##
+## `ENEMY` **e'** un `const preload`, ed e' lecito perche' `enemy.gd` non
+## usa l'identificatore nudo `Game` da nessuna parte del codice: e' un
+## `RefCounted` fatto di tabelle `static`, e l'unico nome che usa e' il suo
+## (`E` dentro `horde.gd`). Quindi compilarlo qui non cambia niente rispetto a
+## compilarlo a runtime, e la tabella dei raggi viene letta **dalla fonte** — che
+## e' il punto della sezione 18: se il numero fosse messo qui dentro, questa sezione
+## confronterebbe una copia con una copia e non saprebbe dire quale sia giusta.
+## Se un giorno `enemy.gd` prendesse `Game`, questa riga va spostata a runtime
+## insieme alle altre, e va detto qui perche' il difetto sarebbe silenzioso.
 
 const H = preload("res://tools/test_harness.gd")
 
@@ -136,6 +161,11 @@ const ARENA_SCENE := "res://scenes/arena_main.tscn"
 ## percorso vero che questo test usa senza `scenes/arena_main.tscn`, che
 ## `tests/test_progression.gd` e `tests/test_upgrades.gd` caricano per intero.
 const HORDE_SCRIPT := "res://src/sim/horde.gd"
+## Le specie del nemico, **lette**: `src/sim/enemy.gd` e' di `-orda` e questa
+## sezione non lo tocca. `RADIUS` e' la tabella dei corpi e `TOUCH_REACH` e' il
+## raggio del corpo del giocatore: due numeri che stanno li' e che il progetto
+## ha gia' legato per iscritto (m8 criterio n. 2, m11-quarta criterio 1b).
+const ENEMY := preload("res://src/sim/enemy.gd")
 ## La resistenza al knockback del boss: 0.90 in `src/sim/enemy.gd`. Serve alla
 ## sezione `_knockback_impulse` per provare che e' **il contratto** a decidere
 ## quanto il colpo sposta, e non -gameplay a pre-scalare l'impulso.
@@ -335,6 +365,13 @@ class FakeHorde extends Node:
 	var hp := PackedFloat32Array()
 	var hits := PackedInt32Array()
 	var vel := PackedVector3Array()
+	## La **specie** di ogni nemico, allineata come gli altri. Non e' decorativa:
+	## dal 2026-10-15 il proiettile prende il nemico con il raggio del **corpo
+	## che si vede**, e il corpo dipende dalla specie (`src/sim/enemy.gd:RADIUS`
+	## per l'attore). Un doppio che non pubblicasse `kinds` farebbe cadere il
+	## pool nel suo ripiego — il raggio piu' piccolo della tabella — e la sezione
+	## che segue misurerebbe il ripiego invece del gioco.
+	var kinds := PackedInt32Array()
 	## Quanto knockback il nemico si mangia, come fa `damage_enemy` in -orda:
 	## `vel += knockback * (1 - resist)`. Le resistenze vere sono 0 / 0.20 /
 	## 0.55 / 0.90 per runner, grunt, brute, boss (`Enemy.KNOCKBACK_RESIST`), e
@@ -386,11 +423,12 @@ class FakeHorde extends Node:
 		game.register_impl("damage_enemy", self._damage_enemy)
 		game.register_impl("nearest_enemy", self._nearest_enemy)
 
-	func add(pos: Vector3, hp_value: float = 1000.0) -> int:
+	func add(pos: Vector3, hp_value: float = 1000.0, kind: int = 0) -> int:
 		transforms.append(pos)
 		hp.append(hp_value)
 		hits.append(0)
 		vel.append(Vector3.ZERO)
+		kinds.append(kind)
 		resist.append(0.0)
 		count += 1
 		return count - 1
@@ -401,6 +439,7 @@ class FakeHorde extends Node:
 		hp = PackedFloat32Array()
 		hits = PackedInt32Array()
 		vel = PackedVector3Array()
+		kinds = PackedInt32Array()
 		resist = PackedFloat32Array()
 		damage_calls = 0
 		kill_signals = 0
@@ -505,6 +544,7 @@ class FakeHorde extends Node:
 		hp[index] = hp[count]
 		hits[index] = hits[count]
 		vel[index] = vel[count]
+		kinds[index] = kinds[count]
 		resist[index] = resist[count]
 
 # --- Stato del test ------------------------------------------------------------
@@ -571,6 +611,12 @@ func _process(_delta: float) -> bool:
 		# misurerebbe la muzzle di un giocatore che non e' il suo.
 		_m10_giocatore_solido(h)
 		_m10_proiettili_passano(h)
+		# m14-a: l'involucro di contatto del proiettile. Va **qui**, dopo le due
+		# sezioni di m10 e prima del restart: ha bisogno del doppio finto sul
+		# contratto (per i tiri di prova) e monta e libera ordi vere solo per
+		# chiedere a `-orda` la portata del morso, quindi non puo' stare dopo
+		# `_restart_run`, che installa l'orda vera e non restituisce il contratto.
+		_m14a_involucro(h)
 		# Criterio n. 4 di m2, meta' di -gameplay. Instala l'orda **vera** di
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
@@ -2495,6 +2541,255 @@ func _m10_proiettili_passano(h) -> void:
 	_ripristina_ostacoli(ostacoli_originali, ostacoli_del_giocatore)
 	print("m10 meta' 2: il proiettile ha attraversato il disco fino a %.3f m dal centro (raggio %.2f) e ha colpito il nemico a %.1f m dal centro del disco: %d hit"
 		% [minima_missile, OST_RAGGIO, nemico_al_colpo, horde.hits_of(0)])
+
+# --- 18. m14-a: l'involucro del proiettile e' quello del morso --------------------
+#
+# ## Il difetto che questa sezione chiude, in numeri
+#
+# `src/weapons/projectile_pool.gd` aveva `const ENEMY_RADIUS := 0.55`: **un solo
+# raggio per tutte e cinque le specie**. Ma i corpi che il giocatore vede sono
+# `SIZE_FACTOR * RADIUS[k]` e `SIZE_FACTOR` era `3.4` dal 2026-10-14, quindi:
+#
+#   specie   RADIUS   disegnato   il proiettile lo prendeva entro
+#   runner    0,45      1,53 m        0,55 m
+#   grunt     0,60      2,04 m        0,55 m
+#   brute     1,00      3,40 m        0,55 m
+#   mortar    1,40      4,76 m        0,55 m
+#   boss      1,90      6,46 m        0,55 m
+#
+# Il numero era rimasto indietro di `SIZE_FACTOR`: il commento sopra la riga lo
+# ammetteva («se l'orda lo espone, si legge da li' e basta cambiare questa
+# riga») e l'orda **non** lo esponeva, quindi nessuno lo aveva cambiato. Fino al
+# mortar non si notava — il runner ti arriva addosso e un raggio piccolo si vede
+# lo stesso — ma il mortar e' il primo nemico che devi uccidere **mentre ti
+# spara da 10,42 m**, e lo vedi largo 4,76 m: un proiettile che deve centrare
+# 0,55 m dentro un corpo da 4,76 m e' un colpo invisibile. E' la meta' della
+# segnalazione dell'utente, «alcuni nemici non riescono a farmi danno», quella
+# che non era il morso (chiusa da m11-quarta).
+#
+# ## La regola, che e' di m11-quarta e non di questa sezione
+#
+#     morse_entro(k) = Game.enemy_body_scale * Enemy.RADIUS[k] + TOUCH_REACH
+#
+# e quindi l'involucro del proiettile e' lo **stesso** involucro, letto dallo
+# **stesso** canale:
+#
+#     contatto_proiettile(k) = Game.enemy_body_scale * Enemy.RADIUS[k]
+#
+# Il `TOUCH_REACH` **non** c'e': quegli 0,45 m sono il corpo del **giocatore**,
+# cioe' lo sconto che il morso ha per arrivare addosso a te. Copiarli qui
+# significherebbe colpire mezzo metro oltre il bordo che si vede.
+#
+# ## Perche' i tre criteri sono tre e non uno
+#
+#   1. **la banda e' zero**, su cinque specie: e' il criterio che chiude il
+#      bug, perche' mette nello stesso fatto due numeri che oggi sono discordi;
+#   2. **mai piu' grande del corpo disegnato**: il vincolo forte e' a un senso
+#      solo. Se tornasse minore la riga lo segnalerebbe, perche' un involucro
+#      piu' piccolo e' un'altra banda, e la banda che m11-quarta ha chiuso a zero
+#      si riaprirebbe dall'altra parte;
+#   3. **i denti**: il contratto viene avvelenato a `SCALA_AVVELENATA` e si
+#      guarda che **entrambi** gli involucri si spostino insieme. Una copia — un
+#      `3.4` scritto qui, o un `0.55` rimasto indietro — passerebbe il confronto
+#      numero-contra-numero e non cambierebbe mai niente.
+#
+# ## E la parola «combaciare» vuol dire anche **comportamento**
+#
+# Sotto la banda ci sono dieci prove che non leggono una formula ma fanno
+# **sparare**: per ogni specie un tiro che passa a meta' dell'involucro deve
+# colpire, e uno che passa mezzo metro oltre l'involucro **non** deve colpire.
+# Il numero da solo potrebbe essere giusto e il contatto sbagliato; il tiro
+# passa o non passa.
+
+## Il fattore corpo avvelenato sul contratto, e poi tolto. Stessa tecnica di
+## `enemy_body_scale` in `tests/test_orda.gd` e di `mortar_telegraph_s`: si
+## sposta il numero nel canale e si guarda che chi lo legge si sposti con lui.
+const SCALA_AVVELENATA := 99.0
+## La banda che deve restare **zero**, non «piccola». Due numeri che vengono
+## dalla stessa identita' non possono discostarsi ne' di un float: la banda e'
+## esattamente 0,0000 e questa soglia dice solo quanto `float32` puo' vibrare.
+const BANDA := 0.000001
+## Quanti frame si lascia volare un proiettile di prova. A 26 m/s e 60 Hz fa
+## 0,433 m per frame, e il nemico e' a 8 m dalla canna: 60 frame sono 26 m,
+## cioe' il triplo del viaggio e tutta la vita del proiettile (1,4 s = 84
+## frame). Non e' un numero che aspetta: e' il sovrappasso.
+const M14_PASSI := 60
+## Quanto oltre l'involucro il tiro di controllo passa: mezzo metro, che e'
+## piu' della larghezza del proiettile (0,16 m) e piu' di qualunque banda che
+## una taratura potrebbe nascondere.
+const M14_FUORI := 0.5
+
+func _m14a_involucro(h) -> void:
+	var t0 := Time.get_ticks_usec()
+	var scala := _scala_corpo()
+	if not h.check(scala > 0.0,
+		"m14-a: il contratto dichiara Game.enemy_body_scale, il fattore con cui il renderer disegna il corpo"):
+		return
+	# L'orda **vera**, montata adesso: e' lei che espone `bite_range_of`, cioe' il
+	# numero che il morso usa davvero in gioco. Il doppio finto qui sopra non ha
+	# un morso, quindi non puo' dire niente su questa riga.
+	var sonda = _monta_sonda(h, "OrdaSondaM14")
+	if sonda == null:
+		return
+	var corpo := float(ENEMY.TOUCH_REACH)
+
+	var righe := ""
+	var proiettili := PackedFloat32Array()
+	for k in ENEMY.KIND_COUNT:
+		proiettili.append(float(pool.enemy_contact_radius(k)))
+	for k in ENEMY.KIND_COUNT:
+		var proiettile: float = proiettili[k]
+		var morse_entro: float = float(sonda.bite_range_of(k))
+		var disegnato: float = scala * float(ENEMY.RADIUS[k])
+		# Criterio 1: due fatti che oggi sono discordi diventano uno.
+		var banda: float = morse_entro - corpo - proiettile
+		righe += " %s=%.4f/%.4f" % [ENEMY.KIND_NAMES[k], proiettile, banda]
+		h.near(banda, 0.0, BANDA,
+			"m14-a criterio 1: l'involucro del proiettile e' quello del morso sul %s: morse_entro %.4f - corpo %.4f = %.4f contro un proiettile di %.4f m (scala %.2f)"
+				% [ENEMY.KIND_NAMES[k], morse_entro, corpo, morse_entro - corpo, proiettile, scala])
+		# Criterio 2: il vincolo forte e' a un senso solo, e se tornasse minore la
+		# riga lo dice. Il `<=` e' scritto per intero anche se oggi e' un'ugua-
+		# glianza: e' la forma che resta giusta se il fattore corpo scende.
+		h.check(proiettile <= disegnato + BANDA,
+			"m14-a criterio 2: l'involucro del %s non e' mai piu' grande del corpo che si vede: %.4f contro %.4f m (scala %.2f x RADIUS %.2f)"
+				% [ENEMY.KIND_NAMES[k], proiettile, disegnato, scala, ENEMY.RADIUS[k]])
+		h.near(proiettile, disegnato, BANDA,
+			"m14-a criterio 2: e tornando **minore** la banda si riaprirebbe dall'altra parte; il %s e' a %.4f m contro i %.4f m disegnati: la banda e' zero anche qui"
+				% [ENEMY.KIND_NAMES[k], proiettile, disegnato])
+
+	_libera_sonda(sonda)
+	_riordina_orda_finta()
+
+	# ## I dieci tiri, e **dopo** che la sonda e' stata libera
+	#
+	# Una sonda montata prende il contratto nel proprio `_ready()` (`Game.horde =
+	# self`, `-orda`), quindi mentre e' in piedi i proiettili del test colpirebbero
+	# **quella**, e non il nemico che questa sezione ha appena messo nel doppio
+	# finto: i dieci tiri passerebbero sul vuoto, o peggio — passerebbero rossi
+	# senza che nessuno capisca perche'. Percio' le due righe sopra liberano la
+	# sonda **prima** di sparare, e `hits_of` guarda il nemico giusto.
+	for k in ENEMY.KIND_COUNT:
+		# dentro: a meta' dell'involucro il colpo **deve** arrivare.
+		_m14a_tiro(h, k, proiettili[k] * 0.5, true)
+		# fuori: mezzo metro oltre l'involucro il colpo **non** deve arrivare.
+		_m14a_tiro(h, k, proiettili[k] + M14_FUORI, false)
+
+	# ## I denti: il canale avvelenato, e poi tolto
+	#
+	# Il confronto numero-contra-numero qui sopra passerebbe anche con due copie
+	# che non cambiano mai. Quindi il contratto viene portato a `SCALA_AVVELENATA`
+	# e si guarda che i **due** numeri — quello del pool e quello del morso —
+	# escano entrambi dalla scala nuova, e che la banda fra loro resti zero. Poi
+	# il contratto torna indietro e una terza orda montata li rivede: «ripristinato»
+	# senza questa terza lettura e' una parola.
+	var prima := scala
+	game.set("enemy_body_scale", SCALA_AVVELENATA)
+	h.eq(float(game.get("enemy_body_scale")), SCALA_AVVELENATA,
+		"m14-a denti: sul contratto c'e' il numero di prova, %.1f" % SCALA_AVVELENATA)
+	var sonda_avvelenata = _monta_sonda(h, "OrdaSondaM14Avvelenata")
+	var righe_avv := ""
+	if sonda_avvelenata != null:
+		for k in ENEMY.KIND_COUNT:
+			var proiettile_avv: float = float(pool.enemy_contact_radius(k))
+			var morse_avv: float = float(sonda_avvelenata.bite_range_of(k))
+			righe_avv += " %s=%.4f/%.4f" % [ENEMY.KIND_NAMES[k], proiettile_avv, morse_avv - corpo]
+			h.check(proiettile_avv > proiettili[k] * 10.0,
+				"m14-a denti: l'involucro del proiettile sul %s si e' spostato con il canale, da %.4f a %.4f m: non era una copia"
+					% [ENEMY.KIND_NAMES[k], proiettili[k], proiettile_avv])
+			h.check(morse_avv > proiettili[k] * 10.0 + corpo,
+				"m14-a denti: e la portata del morso sul %s e' passata da %.4f a %.4f m"
+					% [ENEMY.KIND_NAMES[k], proiettili[k] + corpo, morse_avv])
+			h.near(morse_avv - corpo - proiettile_avv, 0.0, BANDA,
+				"m14-a denti: col canale avvelenato i due involucri combaciano ancora sul %s (banda %.7f m): combaciavano per costruzione, non per tariffa"
+					% [ENEMY.KIND_NAMES[k], morse_avv - corpo - proiettile_avv])
+		_libera_sonda(sonda_avvelenata)
+	game.set("enemy_body_scale", prima)
+	h.eq(float(game.get("enemy_body_scale")), prima,
+		"m14-a denti: ripristino 1, il contratto torna a %.4f" % prima)
+	var sonda_dopo = _monta_sonda(h, "OrdaSondaM14Dopo")
+	if sonda_dopo != null:
+		h.near(float(sonda_dopo.bite_range_of(ENEMY.BOSS)) - corpo,
+			float(pool.enemy_contact_radius(ENEMY.BOSS)), BANDA,
+			"m14-a denti: ripristino 2, un'altra orda montata adesso rivede il fattore vero (%.4f) e i due involucri tornano a combaciare sul boss"
+				% prima)
+		_libera_sonda(sonda_dopo)
+	_riordina_orda_finta()
+
+	print("m14-a: involucro del proiettile / banda col morso, per specie (scala %.2f, corpo del giocatore %.2f tolto dal morso):%s"
+		% [scala, corpo, righe])
+	print("m14-a denti: col contratto avvelenato a %.1f gli stessi cinque numeri diventano:%s (il canale si sposta, quindi nessuno dei due era una copia)"
+		% [SCALA_AVVELENATA, righe_avv])
+	print("m14-a: sezione intera in %d us, %d specie x 2 numeri + %d specie x 2 tiri"
+		% [Time.get_ticks_usec() - t0, ENEMY.KIND_COUNT, ENEMY.KIND_COUNT])
+
+## Un tiro di prova: un proiettile sparato **lungo -z dalla canna** con un solo
+## nemico a `distanza` metri di scarto laterale. Il nemico non si muove (l'orda
+## non viene stepsata in questa prova) e la sua distanza minima dal percorso e'
+## esattamente `distanza`: il test di contatto e' sul segmento del frame, e la
+## distanza laterale e' costante lungo tutta la traiettoria.
+##
+## `atteso_colpo` dice che cosa la sezione **dimostra**: `true` vuol dire «a
+## meta' dell'involucro il colpo arriva», cioe' il difetto di ieri; `false` vuol
+## dire «mezzo metro oltre l'involucro il colpo non arriva», cioe' che l'involucro
+## non e' diventato piu' grande del corpo che si vede.
+func _m14a_tiro(h, kind: int, distanza: float, atteso_colpo: bool) -> void:
+	_reset(Vector3.ZERO)
+	var i := horde.add(Vector3(distanza, 0.9, -8.0), TOUGH, kind)
+	var partito: bool = game.spawn_projectile(Vector3(0.0, 0.9, -0.5),
+		Vector3(0.0, 0.0, -1.0), float(weapon.projectile_speed))
+	if not h.check(partito,
+		"m14-a: il tiro di prova e' partito (il contratto spawn_projectile ha ceduto un slot)"):
+		return
+	var p = pool.active_at(0)
+	if not h.check(p != null, "m14-a: il tiro di prova e' in volo"):
+		return
+	for f in M14_PASSI:
+		pool.step(DT)
+	var colpito := horde.hits_of(i)
+	var nome: String = ENEMY.KIND_NAMES[kind]
+	var involucro := float(pool.enemy_contact_radius(kind))
+	if atteso_colpo:
+		h.eq(colpito, 1,
+			"m14-a: un %s che si vede largo %.2f m e viene traversato a %.2f m di scarto prende il colpo (%d): il difetto di ieri era 0,55 m per tutte e cinque"
+				% [nome, involucro, distanza, colpito])
+	else:
+		h.eq(colpito, 0,
+			"m14-a: e mezzo metro oltre l'involucro il %s NON prende il colpo (%d): l'involucro non e' diventato piu' grande del corpo che si vede (scarto %.2f m contro un involucro di %.2f m)"
+				% [nome, colpito, distanza, involucro])
+
+## Il fattore corpo, **dal contratto**. Come in `src/sim/horde.gd::_load_body_scale`
+## e come fa `tests/test_orda.gd`: `get`/`set` e non `Game.campo`, perche' il
+## contratto qui e' un nodo preso a runtime e non un tipo noto.
+func _scala_corpo() -> float:
+	var v: Variant = game.get("enemy_body_scale")
+	if v == null:
+		return -1.0
+	return float(v)
+
+## Monta un'orda **vera** per una sola lettura e la libera subito dopo: serve a
+## chiedere a `-orda` la portata del morso senza toccare `src/sim/`. Il seme e'
+## dichiarato perche' `_reroll()` con `seed = 0` chiamerebbe `randomize()` e la
+## sonda sporcherebbe il flusso di numeri casuali delle sezioni che vengono.
+func _monta_sonda(h, nome: String):
+	var scr = load(HORDE_SCRIPT)
+	if not h.check(scr is Script, "m14-a: src/sim/horde.gd deve caricare a runtime"):
+		return null
+	var sonda = (scr as Script).new()
+	sonda.name = nome
+	sonda.set_physics_process(false)
+	sonda.seed = 4242
+	root.add_child(sonda)
+	# La riga che distingue «canale usato» da «canale mai scritto»: senza di
+	# questa, un fallback silenzioso passerebbe tutte le righe sotto.
+	h.eq(sonda.body_scale_source, "contratto",
+		"m14-a: %s dichiara body_scale_source 'contratto': l'involucro e' letto dal canale, non da un ripiego" % nome)
+	return sonda
+
+func _libera_sonda(sonda) -> void:
+	if sonda == null:
+		return
+	root.remove_child(sonda)
+	sonda.queue_free()
 
 func _m10_ostacoli_del_contratto(h) -> void:
 	# Il punto 5 della semantica: un insieme vuoto non e' un mondo senza muri, e'

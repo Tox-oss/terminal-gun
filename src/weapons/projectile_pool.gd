@@ -47,8 +47,24 @@ extends Node3D
 ##    motivo (un muro che blocca anche i proiettili rende al sicuro e
 ##    irraggiungibile per sempre il giocatore che ci si mette dietro) sta per
 ##    esteso accanto alla costante.
+##
+## 6. **L'involucro di contatto e' il corpo che si vede, per specie.**
+##    `enemy_contact_radius(kind) = Game.enemy_body_scale * Enemy.RADIUS[kind]`,
+##    letto dal contratto e dalla tabella di `-orda`: e' la stessa identita' che
+##    governa il morso dal 2026-10-14 (m11-quarta), quindi i due fatti non
+##    possono divergere. Il numero che stava qui prima — `ENEMY_RADIUS = 0.55`
+##    per tutte e cinque le specie — era rimasto indietro di `SIZE_FACTOR = 3.4`
+##    e rendeva il mortar, largo 4,76 m a schermo, un bersaglio da 0,55 m: la
+##    meta' della segnalazione «alcuni nemici non riescono a farmi danno». Il
+##    blocco lungo accanto alla costante spiega perche' non c'e' piu' un numero
+##    scritto qui.
 
 const ProjectileScript := preload("res://src/weapons/projectile.gd")
+## Le specie del nemico, **lette**: `Enemy.RADIUS` e' la tabella dei corpi
+## (`src/sim/enemy.gd:51`) ed e' una `static var` di un file che non e' mio.
+## Leggerla non e' scriverci: il difetto era una **copia** di un numero che
+## un'altra foglia poteva cambiare, non il fatto che la tabella stia li'.
+const EnemyScript := preload("res://src/sim/enemy.gd")
 
 ## ## m10: cosa fa un ostacolo a un proiettile
 ##
@@ -83,10 +99,53 @@ const PROJECTILE_SCENE := "res://scenes/projectile.tscn"
 ## Quanti proiettili esistono, per sempre. Assegnati una volta sola all'avvio.
 const CAPACITY := 100
 
-## Raggio di contatto del nemico, in metri. **Il contratto non lo espone**:
-## è il raggio della capsula a terra dei modelli low-poly. Se l'orda lo
-## espone, si legge da lì e basta cambiare questa riga.
-const ENEMY_RADIUS := 0.55
+## ## m14-a: il raggio di contatto **non e' piu' un numero scritto qui**
+##
+## Il difetto che questa sezione chiude, in una riga. Qui sotto stava
+##
+##     const ENEMY_RADIUS := 0.55
+##
+## e quel numero era nato quando il nemico si disegnava `RADIUS[kind]` cioe'
+## 0,45 m per il runner. Poi `SIZE_FACTOR = 3.4` ha triplicato i corpi e questa
+## riga e' rimasta indietro: il proiettile prendeva il runner a 0,55 m e il
+## **mortar a 0,55 m dentro un corpo che si vede largo 4,76 m**. Per il mortar —
+## il primo nemico che devi uccidere mentre ti spara da 10,42 m — il colpo che
+## arriva e' «invisibile colpisce»: passa accanto a una sagoma enorme e non
+## succede niente. E' la segnalazione dell'utente, «alcuni nemici non riescono a
+## farmi danno», nella sua meta' che non era il morso (chiusa da m11-quarta).
+##
+## ## La regola, che e' di m11-quarta e non di questo file
+##
+##     morse_entro(k) = Game.enemy_body_scale * Enemy.RADIUS[k] + TOUCH_REACH
+##
+## e l'involucro del proiettile e' **lo stesso involucro**, letto dallo stesso
+## canale:
+##
+##     contatto_proiettile(k) = Game.enemy_body_scale * Enemy.RADIUS[k]
+##
+## Due fatti che oggi sono discordi diventano uno, e la banda va a **0,0000 per
+## costruzione**, non per taratura. Il `TOUCH_REACH` **non** c'e': quegli 0,45 m
+## sono il corpo del **giocatore**, cioe' lo sconto che il morso ha per
+## arrivare addosso a te, e non un involucro del nemico. Copiarli qui
+## significa che il proiettile colpisce mezzo metro oltre il bordo che si vede.
+##
+## ## Il vincolo forte e' a un senso solo
+##
+## L'involucro **non puo' mai essere piu' grande del corpo che si vede**: colpire
+## cose invisibili e' peggio che non colpire cose visibili. Quindi il fattore si
+## legge **dal contratto ogni volta che serve** (`Game.enemy_body_scale`, che
+## `-arena` registra da `SIZE_FACTOR`) e non si copia da nessuna parte: e' la
+## lezione delle sei copie di m9, gia' pagata una volta con questo numero.
+##
+## ## Il ripiego, e perche' e' `1.0`
+##
+## Se il contratto non dichiara il campo (un'orda montata senza autoload) il
+## fattore non e' noto, e il unico valore che **non mente verso il grande** e'
+## `1.0`: l'involuclo resta `RADIUS[k]`, cioe' il corpo nudo, che e' sempre
+## piu' piccolo di quello disegnato. Non si scrive qui `3.4` nemmeno come
+## riserva: il ripiego avvisa **una volta** e chi legge sa che il canale non e'
+## arrivato, esattamente come `horde.body_scale_source` in `src/sim/horde.gd`.
+const BODY_SCALE_FALLBACK := 1.0
 
 ## Nodo che disegna i proiettili: UNO solo, per 100 proiettili. Nessun nodo per
 ## proiettile, quindi il conteggio dei nodi non cresce sparando.
@@ -125,6 +184,12 @@ var _count: int = 0
 ## sempre: è il contatore che il test usa per dire "300 colpi, zero allocazioni".
 var _created: int = 0
 var _warned_no_horde: bool = false
+## I due ripieghi di m14-a avvisano **una volta sola**, perche' un avviso per
+## frame riempirebbe la console di un gioco che funziona. Vedi `BODY_SCALE_FALLBACK`
+## in testa al file per la regola che li governa: quando il canale non arriva,
+## si sceglie sempre il valore che **non** fa sembrare il nemico piu' grande.
+var _warned_no_body_scale: bool = false
+var _warned_no_kinds: bool = false
 
 func _ready() -> void:
 	_build_items()
@@ -141,6 +206,73 @@ func active_count() -> int:
 ## allocato nel ciclo di gioco.
 func ever_created() -> int:
 	return _created
+
+## ## m14-a: l'involucro di contatto, e la sua unica formula
+##
+## `Game.enemy_body_scale * Enemy.RADIUS[kind]`: il fattore **dal contratto** e
+## la tabella delle specie **da `src/sim/enemy.gd`**. Nessuna copia di nessuno
+## dei due, e nessun `TOUCH_REACH`: vedi il blocco lungo in testa al file.
+##
+## E' pubblico perche' e' la misura del criterio, non un dettaglio: il test
+## confronta questo numero con la portata del morso che l'orda espone
+## (`horde.bite_range_of`), e i due devono combaciare su cinque specie.
+func enemy_contact_radius(kind: int) -> float:
+	return _body_scale() * _species_radius(kind)
+
+## Il fattore di calibrazione del corpo, **letto adesso** dal contratto. Non e'
+## messo in campo all'avvio come in `src/sim/horde.gd`: qui non costa niente
+## (una lettura di un float per frame) e la lettura per volta e' cio' che rende
+## il canale un canale — un avvelenamento del contratto si vede subito, senza
+## rimontare niente.
+func _body_scale() -> float:
+	var v: Variant = Game.get("enemy_body_scale")
+	if v == null:
+		_warn_no_body_scale()
+		return BODY_SCALE_FALLBACK
+	var s := float(v)
+	if s <= 0.0:
+		_warn_no_body_scale()
+		return BODY_SCALE_FALLBACK
+	return s
+
+func _warn_no_body_scale() -> void:
+	if _warned_no_body_scale:
+		return
+	_warned_no_body_scale = true
+	push_warning("projectile_pool: il contratto non espone `enemy_body_scale`, quindi l'involucro di contatto ripiega su %.1f (corpo nudo, mai piu' grande del disegnato). tocca a terminal-gun-arena registrare il fattore." % BODY_SCALE_FALLBACK)
+
+## Il raggio di specie `kind`, dalla tabella di `src/sim/enemy.gd`. Il clamp e'
+## qui, in una riga, ed e' la stessa regola di `Enemy.clamp_kind`, cioe' limitare
+## a `KIND_COUNT - 1`: la tabella non e' di questa foglia e non ci si accede
+## fuori dai suoi indici.
+func _species_radius(kind: int) -> float:
+	var k: int = clampi(kind, 0, EnemyScript.KIND_COUNT - 1)
+	return float(EnemyScript.RADIUS[k])
+
+## Le specie dei nemici vivi, dall'orda. `kinds` e' un campo **pubblico** di
+## `src/sim/horde.gd` come `transforms` e `count`: e' la stessa lettura di dati
+## pubblici che questo file fa gia' da due milestone, non un pezzo di orda che
+## qui si possiede.
+func _kinds() -> PackedInt32Array:
+	var horde: Node = Game.horde
+	if horde == null:
+		return PackedInt32Array()
+	var v: Variant = horde.get("kinds")
+	if not (v is PackedInt32Array):
+		if not _warned_no_kinds:
+			_warned_no_kinds = true
+			push_warning("Game.horde non espone `kinds`: il proiettile non puo' sapere la specie e prende il raggio piu' piccolo della tabella, cioe' colpisce meno di quanto si vede. tocca a terminal-gun-orda.")
+		return PackedInt32Array()
+	return v
+
+## Il raggio del nemico `i`: quello della sua specie, e **il piu' piccolo della
+## tabella** quando l'orda non dice quale e'. Il ripiego e' dichiarato perche' il
+## vincolo forte e' a un senso solo (l'involucro non puo' essere piu' grande del
+## corpo che si vede) e questa e' l'unica direzione che gli e' concessa.
+func _radius_at(kinds: PackedInt32Array, i: int) -> float:
+	if kinds.is_empty() or i < 0 or i >= kinds.size():
+		return _species_radius(EnemyScript.RUNNER)
+	return _species_radius(int(kinds[i]))
 
 ## Il proiettile attivo numero `i` (0 <= i < `active_count()`).
 func active_at(i: int):
@@ -250,6 +382,16 @@ func nearest_enemy(from: Vector3, radius: float) -> int:
 ## Qui dentro non c'e' nessun ostacolo, e `OBSTACLES_BLOCK_PROJECTILES` in testa
 ## al file e' il perche'. Il contatto e' **nemico per nemico**: quello che si
 ## attraversa e' l'orda.
+##
+## ## m14-a: il raggio e' **per nemico**, non un numero unico
+##
+## Il reach non si calcola piu' una volta sola per tutti: si calcola dentro il
+## ciclo, per ciascun nemico, dalla **sua** specie. Un nemico grosso e' un disco
+## piu' grande, ed e' la sua taglia che il giocatore vede: e' l'unico modo che
+## «il colpo arriva quando tocca quello che vedi» sia un fatto e non una
+## convinzione. Il fattore e' letto una volta per `step()` (fuori dal ciclo dei
+## nemici) perche' nel frame non cambia, e perche' rileggere il contratto 200
+## volte sarebbe sprecato; la specie la da l'orda, che e' la sua.
 func _collide(p, index: int) -> void:
 	var tr := _transforms()
 	if tr.is_empty():
@@ -257,14 +399,15 @@ func _collide(p, index: int) -> void:
 	var n := mini(_live_count(tr), tr.size())
 	if n <= 0:
 		return
-	var reach: float = p.radius + ENEMY_RADIUS
-	var radius2 := reach * reach
+	var scala := _body_scale()
+	var kinds := _kinds()
 	var best := -1
 	var best_t := 2.0
 	for e in n:
 		if p.has_hit(e):
 			continue
-		var t := _segment_hit(p.prev_pos, p.pos, tr[e], radius2)
+		var reach: float = p.radius + scala * _radius_at(kinds, e)
+		var t := _segment_hit(p.prev_pos, p.pos, tr[e], reach * reach)
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = e

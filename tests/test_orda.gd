@@ -3627,6 +3627,36 @@ func _morde_a_distanza(h, horde: HORDE, kind: int, distanza: float) -> bool:
 # diretta a `Spawner.pick_kind(_rng)` questa sezione va **rossa** sull'onda 8
 # (le frazioni scendono a quelle piatte) e resta **verde** sull'onda 1, che e'
 # esattamente la coppia di comportamenti che la distingue dal difetto.
+#
+# ## Cosa c'e' dentro adesso: il boss esce dall'onda 1
+#
+# Il difetto di sopra e' chiuso, e questa sezione misura adesso un'altra cosa,
+# che e' **una sola variabile**: il peso del boss sull'onda 1 va a **0,0**.
+# Prima valeva `3,0`, il boss era il 3% delle nascite della prima onda (145 su
+# 4800 iniziali e 143 su 4800 respawn), e in un'onda in cui compare uccide:
+# insegue a 1,7 m/s, ha 6,91 m di portata e 13,71 hp a morso, e con dieci morsi
+# fa 137 hp contro i 100 del giocatore.
+#
+# Il criterio nuovo e' `_zero_boss`, ed e' scritto sul **conteggio** e non sulla
+# frazione dentro banda per un motivo che va detto adesso e non dopo: la banda
+# di questa sezione (`TOLERANZA_MISELA = 0,05`) **non lo prenderebbe**. Il difetto
+# di prima produceva una frazione di boss di **0,030**, e `0,030` sta dentro
+# `0,050`: un criterio `near(0,030, 0,0, 0,05)` sarebbe verde con il difetto
+# dentro, cioe' nato verde. Quindi il numero atteso e' zero esatto e il numero
+# confrontato e' il conteggio. E' l'unico caso della sezione in cui la banda non
+# si usa, ed e' dichiarato perche' la banda si usa.
+#
+# I denti di questo criterio sono dentro il file: `_denti_zero_boss` rimette
+# `BOSS_WAVE1` a 3,0, rimisura, e lo rimette a 0,0 asserendo il ripristino.
+# Un criterio che nessuno ha mai visto andare rosso e' un numero che il prossimo
+# legge come se fosse vivo, quindi il rosso va provocato e il numero va stampato
+# con e senza. I due numeri: coi denti fuori **0 su 4800** e **0 su 4800**; coi
+# denti dentro, in fondo a questa stampa, quello che esce.
+#
+# Le onde da 2 in poi non si toccano, e non e' una promessa: `wave_weights(2)` e'
+# dichiarato qui dentro, voce per voce, in `PackedFloat32Array`, e confrontato
+# bit per bit. Una leva che si rovescia sulle onde che non deve toccare non e'
+# una leva.
 
 ## I semi della misura, dichiarati. Quattro, e nessuno e' "quello di prima".
 const SEMI_MISELA := [4242, 7311, 20260912, 13579]
@@ -3675,25 +3705,28 @@ func _miscela_respawn(h, horde: HORDE) -> void:
 	horde.restart_run()
 	_porta_onda(h, horde, 1)
 
-	# ## L'onda 1: la misura richiesta, e il fatto per cui resta verde comunque
+	# ## L'onda 1: cosa le e' stato cambiato, e cosa no
+	#
+	# Il peso del boss sull'onda 1 e' **0,0**; le altre tre specie valgono ancora
+	# `KIND_WEIGHTS` voce per voce. Il confronto e' voce per voce e non "la somma
+	# torna": una somma che torna con le specie sbagliate dentro e' un numero che
+	# sembra a posto e non lo e'.
+	_pesi_onda1(h)
+	# ## Le onde da 2 in poi non si toccano
+	_onde_2_e_avanti(h)
+
 	var uno := _due_cammini(h, horde, 1)
-	var piatte := SPAWNER.KIND_WEIGHTS
-	var dell_onda := SPAWNER.wave_weights(1)
-	var stesse := true
-	for k in ENEMY.KIND_COUNT:
-		if absf(piatte[k] - dell_onda[k]) > 0.000001:
-			stesse = false
-	h.check(stesse,
-		"sull'onda 1 wave_weights(1) e' KIND_WEIGHTS voce per voce (%s): i due cammini "
-			% _pesi(dell_onda)
-			+ "sono lo stesso numero, quindi qui il criterio non puo' distinguere nulla "
-			+ "ed e' per questo che la misesta' e' sull'onda %d" % ONDA_MISELA)
 	_confronta_cammini(h, 1, uno[0], uno[1])
+	_zero_boss(h, 1, uno[0], uno[1])
 
 	# ## L'onda `ONDA_MISELA`: il criterio che ha i denti
 	_porta_onda(h, horde, ONDA_MISELA)
 	var otto := _due_cammini(h, horde, ONDA_MISELA)
 	_confronta_cammini(h, ONDA_MISELA, otto[0], otto[1])
+
+	# ## I denti del criterio di sopra: il difetto acceso e spento nella stessa
+	# sezione, cosi' il numero che va letto e' un numero che i denti hanno preso.
+	_denti_zero_boss(h, horde)
 
 	# ## L'orda torna com'era
 	#
@@ -3807,6 +3840,178 @@ func _confronta_cammini(h, w: int, iniziale: PackedInt32Array, respawn: PackedIn
 	print("orda: miscela onda %d, respawn   (n=%d):%s | pesi dell'onda:%s | pesi piatti:%s"
 		% [w, nr, _riga_specie(respawn), _pesi(SPAWNER.wave_weights(w)),
 			_pesi(SPAWNER.KIND_WEIGHTS)])
+
+## ## L'onda 1, voce per voce: il boss a zero e le altre tre come prima
+##
+## Il confronto e' voce per voce e non "la somma delle frazioni torna": una somma
+## che torna con le specie sbagliate dentro e' un numero che sembra a posto e non
+## lo e', ed e' il caso che si vede solo se si guarda la voce che e' cambiata.
+func _pesi_onda1(h) -> void:
+	var w := SPAWNER.wave_weights(1)
+	for k in ENEMY.KIND_COUNT:
+		if k == ENEMY.BOSS:
+			h.eq(w[k], 0.0,
+				"onda 1, boss: il peso deve essere 0.0 (il boss esce dall'onda 1), ottenuto %.1f"
+					% w[k])
+		else:
+			h.eq(w[k], SPAWNER.KIND_WEIGHTS[k],
+				"onda 1, %s: questa specie non e' stata toccata, il peso deve valere ancora %.1f, ottenuto %.1f"
+					% [ENEMY.KIND_NAMES[k], SPAWNER.KIND_WEIGHTS[k], w[k]])
+	print("orda: pesi onda 1 %s | pesi piatti %s | la varianta e' il solo boss, e vale 0.0"
+		% [_pesi(w), _pesi(SPAWNER.KIND_WEIGHTS)])
+
+## ## Le onde da 2 in poi: dichiarate qui, confrontate voce per voce, **bit per bit**
+##
+## Il numero e' scritto dentro il test perche' la domanda "le onde >= 2 sono cambiate
+## qualcosa?" non si puo' porre guardando il peso: il peso puo' essere cambiato e
+## restare uguale, e allora si risponde "no" a qualcosa che e' si'. L'unico confronto
+## che regge e' fra il numero di adesso e il numero di prima, scritto.
+##
+## Il confronto e' fra due voci di `PackedFloat32Array`, quindi e' `==` su due
+## `float32`: identici vuol dire davvero gli stessi 32 bit, non "abbastanza vicini".
+## Scrivere `18.8` in un confronto `float` darebbe un numero diverso per il solo
+## fatto di averlo scritto in `float64`: e' il motivo per cui qui non compare un
+## numero esadecimale scritto a mano.
+static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0])
+
+func _onde_2_e_avanti(h) -> void:
+	var due := SPAWNER.wave_weights(2)
+	for k in ENEMY.KIND_COUNT:
+		h.eq(due[k], PESI_ONDA2_DICHIARATI[k],
+			"onda 2, %s: il peso deve essere bit-identico a com'era prima di togliere il boss dall'onda 1, dichiarato %.1f, ottenuto %.1f"
+				% [ENEMY.KIND_NAMES[k], PESI_ONDA2_DICHIARATI[k], due[k]])
+	print("orda: onde >= 2 -- wave_weights(2) %s, dichiarato %s: bit per bit"
+		% [_pesi(due), _pesi(PESI_ONDA2_DICHIARATI)])
+	# L'onda `ONDA_MISELA` e' la stampa e non il criterio: il criterio e' la prima
+	# onda che non si toccava, la 2, e questa e' quella coi denti. Il numero viene
+	# stampato comunque a ogni lancio, perche' se qualcuno muove la rampa e' qui che
+	# il cambio si vede per primo.
+	print("orda: onde >= 2 -- la rampa oltre la 2: onda 3 %s | onda 4 %s | onda %d %s"
+		% [_pesi(SPAWNER.wave_weights(3)), _pesi(SPAWNER.wave_weights(4)),
+			ONDA_MISELA, _pesi(SPAWNER.wave_weights(ONDA_MISELA))])
+
+## ## Zero boss sull'onda 1, e perche' qui la banda non c'e'
+##
+## Il numero atteso e' **zero**, e si asserisce il **conteggio**, non la frazione
+## entro `TOLERANZA_MISELA = 0,05`. Non e' pignoleria: con la banda di questa
+## sezione il criterio di questo difetto **nasce verde**.
+##
+## Con il peso di prima (boss 3,0 sull'onda 1) la frazione di boss misurata era
+## **0,030** sul cammino iniziale e **0,030** sui respawn, e `|0,030 - 0,000| =
+## 0,030` sta dentro `0,050`. Quindi `near(0,030, 0,0, 0,05)` dice "passa" **col
+## difetto dentro**: verde per costruzione, cioe' un criterio decorativo travestito
+## da criterio. Per questo la banda non viene usata qui e non viene neppure
+## citata come scusatorio: il numero giusto e' zero e uno zero non ha banda.
+##
+## Zero e' anche l'unico numero che si puo' pretendere: con un peso a `0,0`
+## `pick_kind_with` non puo' restituire il boss in nessun caso, perche' l'accumulo
+## degli altri tre pesi raggiunge gia' il totale. Quindi un boss ne' uno e' gia'
+## un difetto, e il criterio ha denti a `1`, non a `31`.
+##
+## Il campione e' dichiarato e asserito: sotto `CAMPIONE_MISELA` il numero non e'
+## piu' confrontabile con niente, e un criterio che non puo' fallire perche' non ha
+## abbastanza numeri e' un criterio che non e' un criterio.
+func _zero_boss(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Array) -> void:
+	var coppie := [
+		["popolazione iniziale", iniziale],
+		["respawn durante l'onda", respawn],
+	]
+	for coppia in coppie:
+		var nome: String = coppia[0]
+		var a: PackedInt32Array = coppia[1]
+		var n := 0
+		for v in a:
+			n += v
+		h.check(n >= CAMPIONE_MISELA,
+			"onda %d, %s: il campione deve valere almeno %d perche' il numero sia confrontabile, ottenuto %d"
+				% [w, nome, CAMPIONE_MISELA, n])
+		h.eq(a[ENEMY.BOSS], 0,
+			"onda %d, %s: **zero boss**, atteso 0, ottenuto %d su %d (frazione %.3f; la banda 0,05 non lo prenderebbe, perche' 0,030 ci sta dentro, quindi qui il numero e' il conteggio e non la frazione)"
+				% [w, nome, a[ENEMY.BOSS], n, float(a[ENEMY.BOSS]) / maxf(1.0, float(n))])
+	print("orda: zero boss onda %d -- iniziale %d/%d, respawn %d/%d (atteso 0 su entrambi i cammini)"
+		% [w, iniziale[ENEMY.BOSS], _totale(iniziale), respawn[ENEMY.BOSS], _totale(respawn)])
+
+func _totale(a: PackedInt32Array) -> int:
+	var n := 0
+	for v in a:
+		n += v
+	return n
+
+## ## I denti: il difetto acceso nella stessa sezione e poi spento
+##
+## Qui dentro il peso del boss sull'onda 1 torna a **3,0** -- il difetto di prima,
+## il 3% delle nascite della prima onda -- si rimisura, e poi torna a **0,0**.
+## Non e' un blocco di prova buttato dentro e da buttare fuori: e' l'asserzione
+## che il criterio di sopra **ha denti**, e resta nel file perche' un criterio che
+## nessuno ha mai visto andare rosso e' un numero che il prossimo legge come se
+## fosse vivo.
+##
+## Il ripristino non e' una cortesia e' un criterio: se il peso non tornasse a
+## `0,0`, o se tornasse a `0,0` senza che l'orda lo rilegga, la sezione va
+## rossa invece di lasciare un gioco col boss a zero che nessuno ha riaperto.
+## Per questo il peso si rimette **e poi** si chiama `restart_run()`, che e' la
+## cosa che fa `_sync_weights()`: `reseed()` da solo riscrive la disposizione e
+## **non** rilegge i pesi (vedi il punto 4 del suo contratto in horde.gd).
+##
+## Il numero che esce e' stampato due volte, coi denti fuori e coi denti dentro,
+## cosi' chi legge non deve fidarsi della parola "zero" e puo' fare la differenza
+## da solo. Quello dei denti fuori e' il `145/4800` iniziale e `143/4800` respawn
+## che la sezione principale misura con `BOSS_WAVE1 = 0,0`.
+func _denti_zero_boss(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var respawn_precedente := horde.auto_respawn
+	horde.auto_respawn = true
+	horde.population = RUN.population_of(1)
+
+	# Il difetto acceso: il peso torna a 3,0, cioe' il 3% delle nascite.
+	SPAWNER.BOSS_WAVE1 = 3.0
+	horde.restart_run()
+	_porta_onda(h, horde, 1)
+	var coi_denti := SPAWNER.wave_weights(1)
+	h.eq(coi_denti[ENEMY.BOSS], 3.0,
+		"denti: il peso del boss sull'onda 1 deve essere tornato a 3.0, altrimenti la misura qui sotto non dimostra niente, ottenuto %.1f"
+			% coi_denti[ENEMY.BOSS])
+	var coi := _due_cammini(h, horde, 1)
+	var ci := _totale(coi[0])
+	var cr := _totale(coi[1])
+	print("orda: denti, boss a 3.0 -- iniziale %d/%d | respawn %d/%d (fra le frazioni %.3f e %.3f)"
+		% [coi[0][ENEMY.BOSS], ci, coi[1][ENEMY.BOSS], cr,
+			float(coi[0][ENEMY.BOSS]) / maxf(1.0, float(ci)),
+			float(coi[1][ENEMY.BOSS]) / maxf(1.0, float(cr))])
+	# Il criterio di sopra, applicato al difetto acceso: **deve** andare rosso, e
+	# questi due `h.check` sono l'attesa di quel rosso scritta come numero.
+	h.check(coi[0][ENEMY.BOSS] > 0,
+		"denti: col peso a 3.0 la popolazione iniziale deve tirare fuori boss (ne' uno significherebbe che la misura non sta guardando il posto giusto), ottenuto %d su %d"
+			% [coi[0][ENEMY.BOSS], ci])
+	h.check(coi[1][ENEMY.BOSS] > 0,
+		"denti: col peso a 3.0 i respawn devono tirare fuori boss (ne' uno significherebbe che la misura non sta guardando il posto giusto), ottenuto %d su %d"
+			% [coi[1][ENEMY.BOSS], cr])
+
+	# Il difetto spento, e l'orda che lo rilegge davvero.
+	SPAWNER.BOSS_WAVE1 = 0.0
+	horde.restart_run()
+	_porta_onda(h, horde, 1)
+	var senza := SPAWNER.wave_weights(1)
+	h.eq(senza[ENEMY.BOSS], 0.0,
+		"denti: il peso del boss sull'onda 1 deve essere tornato a 0.0 prima di uscire dalla sezione, ottenuto %.1f"
+			% senza[ENEMY.BOSS])
+	h.eq(SPAWNER.BOSS_WAVE1, 0.0,
+		"denti: e la costante di sorgente deve essere 0.0, non solo i pesi ricalcolati")
+	# Una popolazione sola, per vedere che il gioco e' tornato a zero e non solo la
+	# tabella. `reseed` non rilegge i pesi, quindi qui i pesi sono quelli messi da
+	# `restart_run` e il numero che esce e' quello del gioco.
+	horde.reseed(int(SEMI_MISELA[0]))
+	var adesso := _conta_specie(horde)
+	h.eq(adesso[ENEMY.BOSS], 0,
+		"denti: spento il difetto, una popolazione nuova non deve avere boss, ottenuto %d su %d (%s)"
+			% [adesso[ENEMY.BOSS], _totale(adesso), _riga_specie(adesso)])
+
+	# L'orda torna com'era, come fa la sezione principale.
+	horde.auto_respawn = respawn_precedente
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	print("orda: denti, sezione in %d us, peso tornato a 0.0 e orda rimessa all'onda 1"
+		% (Time.get_ticks_usec() - t0))
 
 func _zero_specie() -> PackedInt32Array:
 	var out := PackedInt32Array()

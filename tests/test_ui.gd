@@ -289,11 +289,34 @@ func _run() -> void:
 ## di questa foglia. La classe e' di tutte e tre.
 const AUDIO_CLASS := "AudioStreamPlayer3D"
 
-## Quante istanze ObjectDB il leak tiene appese: e' il numero che il motore
-## stampa all'uscita. E' **la specifica** di quello che lo svuotamento deve
-## liberare, non una copia di un risultato: senza questo criterio l'attesa qui
-## sotto sarebbe una riga che non verifica niente, e l'errore lo vedrebbe solo il
-## motore, che e' esattamente il difetto che questa sezione chiude.
+## Quante istanze ObjectDB il leak tiene appese: e' il **minimo** che lo
+## svuotamento deve liberare, non una copia di un risultato. Senza questo
+## criterio l'attesa qui sotto sarebbe una riga che non verifica niente, e
+## l'errore lo vedrebbe solo il motore, che e' esattamente il difetto che
+## questa sezione chiude.
+##
+## ## Perche' un minimo e non un numero esatto
+##
+## Il numero che il motore stampa **cresce** quando la partita suona di piu' e
+## non e' fermo. Misurato, due volte, sulla stessa riga di codice:
+##
+##   - col morso a intervallo (pochi `hurt` in volo) lo scarico aspetta 5-16
+##     frame e libera due istanze: `1551 -> 1549`, risorse `22 -> 22`;
+##   - col morso sul contatto il giocatore viene morso molto piu' spesso, lo
+##     scarico aspetta 43 frame e libera **quattro** istanze: `1551 -> 1547`,
+##     risorse `22 -> 21`.
+##
+## Quattro invece di due non e' un difetto: e' il rimedio che funziona, e il
+## piu' suona e' il piu' che c'e' da liberare. Un criterio che fissasse `-4`
+## andrebbe rosso il giorno che `-orda` tocca di nuovo il passo di simulazione
+## e i suoni tornano a essere meno: il numero di oggi e' una fotografia, non una
+## specifica.
+##
+## Quindi qui si asserisce il **minimo**: almeno due. Che abbia denti: a `-1` e a
+## `0` va rosso, perche' sono i due numeri che vuol dire che il playback e'
+## ancora registrato nel server audio quando il motore esce. Il numero vero
+## viene stampato accanto al minimo, altrimenti «almeno due» nasconderebbe che
+## ne libera quattro e chi legge dopo lo prenderebbe per un due fisso.
 const LEAKED_OBJECTS := 2
 
 ## Quanti frame di processo si aspettano prima di dire "il server audio non ha
@@ -316,8 +339,12 @@ var _nodes_at_boot: int = -1
 ##
 ##   - sotto `root` non resta **nessun** nodo audio, ne' nessun `Hud`, e il
 ##     numero di nodi e' tornato a quello di avvio;
-##   - e il numero di oggetti e di risorse vive **scende** delle due istanze e
-##     della risorsa che il leak teneva appese.
+##   - e il numero di istanze vive **scende di almeno due**: e' il minimo che il
+##     difetto richiedeva (vedi `LEAKED_OBJECTS`), non una fotografia del
+##     numero di oggi. Il numero vero viene stampato accanto, perche' un
+##     criterio che dicesse solo «almeno due» nasconderebbe che ne libera
+##     quattro quando i suoni sono molti, e chi legge dopo prenderebbe il
+##     minimo per il conteggio.
 ##
 ## Il secondo punto e' quello con i denti: senza lo svuotamento i numeri non
 ## scendono e qui va rosso.
@@ -335,26 +362,42 @@ func _exit_section(h) -> int:
 	var prima := _live_objects()
 	var scarico := await _drain_audio()
 	var dopo := _live_objects()
+	# Quante istanze sono state **liberalte**: e' il numero che il motore
+	# stampa all'uscita, preso col segno giusto. Sottraendo in due passi si
+	# potrebbe scrivere l'asserzione al contrario senza accorgersene.
+	var scesi: int = int(prima[0]) - int(dopo[0])
 
 	print("test_ui: uscita: nodi sotto root %d (avvio %d), audio %d, scarico audio %d frame"
 		% [_count_nodes(root), _nodes_at_boot, audio, scarico])
-	print("test_ui: uscita: oggetti vivi %d -> %d, risorse vive %d -> %d"
-		% [int(prima[0]), int(dopo[0]), int(prima[1]), int(dopo[1])])
+	print("test_ui: uscita: istanze ObjectDB %d -> %d, liberate %d (minimo asserito %d); risorse vive %d -> %d"
+		% [int(prima[0]), int(dopo[0]), scesi, LEAKED_OBJECTS, int(prima[1]), int(dopo[1])])
 
-	# ## Il numero che il leak muove, e perche' uno solo
+	# ## Il numero che il leak muove, e perche' un **minimo** e non una
+	# ## uguaglianza
 	#
-	# Il motore stampa **due** righe (`2 ObjectDB instances`, `1 resources`) ma
-	# sono lo stesso evento: il playback tiene il riferimento alla risorsa che
-	# sta suonando, quindi liberare il playback libera anche la risorsa. Ed e'
-	# per questo qui sotto c'e' **una** asserzione e non due:
-	# `Performance.OBJECT_COUNT` e' l'unico dei due conti che si muove. La
-	# risorsa e' stata misurata e `OBJECT_RESOURCE_COUNT` non cambia **neanche
-	# di uno**, con lo scarico e senza: asserirci sopra produrrebbe un criterio
-	# che va rosso per il motivo sbagliato, o peggio uno verde che non ha
-	# guardato niente. Un numero che non si muove non e' un criterio.
-	h.eq(dopo[0] - prima[0], -LEAKED_OBJECTS,
-		"l'uscita deve liberare le %d istanze ObjectDB che il suono teneva appese: sono scese %d. Se questo numero e' 0, il playback della partita e' ancora registrato nel server audio quando il motore esce, ed e' quello che fa scrivere al motore `2 ObjectDB instances were leaked at exit` e `1 resources still in use at exit`"
-			% [LEAKED_OBJECTS, int(prima[0] - dopo[0])])
+	# Il motore stampa due righe (`N ObjectDB instances`, `M resources`) ma sono
+	# lo stesso evento: il playback tiene il riferimento alla risorsa che sta
+	# suonando, quindi liberare il playback libera anche la risorsa. Ed e' per
+	# questo qui sotto c'e' **una** asserzione e non due.
+	#
+	# `OBJECT_RESOURCE_COUNT` non e' un secondo criterio: e' stato misurato due
+	# volte sulla stessa riga e **non e' stabile**. Con lo scarico che libera due
+	# istanze la risorsa resta `22 -> 22`; con lo scarico che ne libera quattro
+	# scende `22 -> 21`. Il conto della risorsa dipende da quale suono resta
+	# appeso in quel momento, quindi asserirci sopra produrrebbe un criterio che
+	# va rosso o verde per il caso, non per il difetto. Va stampato accanto al
+	# numero vero, che e' dove serve: per vedere **che e' sceso** insieme alle
+	# istanze.
+	#
+	# Sulle istanze il criterio e' invece un **minimo**, `LEAKED_OBJECTS`, e non
+	# il numero di oggi: il numero vero cresce col numero di suoni in volo e non
+	# e' fermo (vedi la nota sopra `LEAKED_OBJECTS`). Un minimo ha denti: a 1 e a
+	# 0 istanze liberate va rosso, e quei due numeri sono proprio il difetto.
+	# Fissare il numero vero non avrebbe denti verso il basso e mentirebbe
+	# domani, quando `-orda` tocca di nuovo il passo di simulazione.
+	h.check(scesi >= LEAKED_OBJECTS,
+		"l'uscita deve liberare almeno le %d istanze ObjectDB che il suono teneva appese: ne sono state liberate %d. Se questo numero e' 0 o 1, il playback della partita e' ancora registrato nel server audio quando il motore esce, ed e' quello che fa scrivere al motore `N ObjectDB instances were leaked at exit` e `M resources still in use at exit`. Se il numero e' maggiore del minimo, non e' un difetto: e' piu' suono da liberare, e il minimo resta quello che il difetto richiedeva"
+			% [LEAKED_OBJECTS, scesi])
 	# E lo scarico e' avvenuto: se il tetto di attesa fosse scaduto, il numero
 	# sopra andrebbe rosso ma per un motivo che qui si dice. Sono due fatti, non
 	# uno, e il secondo e' quello che rende leggibile il primo.
@@ -386,6 +429,29 @@ func _live_objects() -> Array[int]:
 ## Non e' un'attesa per far passare un errore: e' l'attesa con cui il motore
 ## smonta come smonta, e senza la quale si misura **quando** il motore libera e
 ## non **se** lo libera. Il numero di frame che serve e' stampato.
+##
+## ## I denti, misurati e tolti (2026-10-15)
+##
+## Tolta questa riga per un giro, eseguito, e rimessa. Cosa ne ha fuori il
+## criterio di sopra, che senza questa prova sarebbe un numero che nessuno ha
+## guardato:
+##
+##   - `libera 0` (nessuna istanza scende: `1551 -> 1551`), e la riga di
+##     `FAIL test_ui` dice il motivo giusto, non un altro;
+##   - e il motore scrive **esattamente i due messaggi che questa sezione
+##     chiude**: `WARNING: 2 ObjectDB instances were leaked at exit` e
+##     `ERROR: 1 resources still in use at exit`.
+##
+## Quindi la risposta e' **sila rete serve**: lo svuotamento e' cio' che fa
+## sparire i due messaggi del motore, non una formalita'. Il minimo di due
+## istanze non e' un numero che «va bene cosi'»: e' il numero sotto il quale i
+## due messaggi ricompaiono.
+##
+## E un fatto che spiega perche' il criterio guarda un **conteggio** e non un
+## numero esatto: senza scarico il motore dice `2`, e sono le due che il
+## criterio qui sotto non riesce a liberare. Il numero che arriva all'uscita non
+## e' fissato dal codice di questa sezione, ma da quanti suoni erano in volo in
+## quel momento.
 func _drain_audio() -> int:
 	var frames := 1
 	await process_frame

@@ -49,7 +49,22 @@ const PLACEMENT_TRIES := 8
 ## questo giro ha cambiato, sta in `BOSS_WAVE1` qui sotto.
 ## `static var` e non `const`: su Godot 4.7 un array compattato non e' un'espressione
 ## costante (vedi src/sim/enemy.gd, stessa cosa).
-static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0])
+##
+## ## m13: la quinta voce, e perche' il suo peso e' **0,0** in ogni onda
+##
+## Il mortar esiste — la specie, le tabelle, il comportamento, il canale sul
+## contratto — ma **non nasce**, e il peso e' dichiarato a zero qui dentro per
+##che' non e' un ripiego:
+##
+## **Un mortar senza cupola e' un danno senza preavviso**, cioe' esattamente il
+## difetto che il gioco ha appena chiuso girato al contrario. `-orda` sa *quando*
+## il colpo cade, ma chi lo disegna e' `-arena`, e finche' la cupola non c'e' il
+## giocatore vede un danno improvviso senza sapere da dove arriva: peggio di non
+## avere il nemico. Quindi il peso sale **dopo**, in un'onda separata, quando la
+## cupola e' sul tavolo — e quel giorno e' una riga sola, questa.
+static var MORTAR_WEIGHT := 0.0
+
+static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0, MORTAR_WEIGHT])
 
 ## ## Il boss esce dall'onda 1
 ##
@@ -291,6 +306,14 @@ static func wave_weights(wave: int) -> PackedFloat32Array:
 	# esattamente quello che vuol dire -- sull'onda 1 il boss e' a zero, da `w = 2`
 	# in poi la rampa e' quella di prima, termine per termine.
 	out[E.BOSS] = BOSS_WAVE1 if n <= 0.0 else KIND_WEIGHTS[E.BOSS] + minf(27.0, 2.0 * n)
+	# ## m13: il mortar a zero in **tutte** le onde, non solo sull'onda 1
+	#
+	# `BOSS_WAVE1` e' una soglia per onda e il mortar no: lui e' a zero in ogni
+	# onda di questo giro, perche' la ragione non e' «non e' ancora l'onda sua» ma
+	# «manca la cupola che lo rende schivabile» (vedi `MORTAR_WEIGHT`). Per
+	# questo non e' dentro la rampa e non e' derivato da `n`: e' la costante
+	# dichiarata, e il criterio ne verifica tutte le onde campionate.
+	out[E.MORTAR] = MORTAR_WEIGHT
 	return out
 
 ## Quanti nemici per specie in un'onda. La coda e' lunga `total` e ogni specie

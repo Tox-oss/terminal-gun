@@ -15,28 +15,55 @@ extends RefCounted
 ## `step()` scrive dentro gli array passati e non restituisce nulla: nel ciclo di
 ## gioco non viene allocato niente, perche' non viene creato niente.
 
-## Le quattro specie. L'indice nel record e' questo intero (`kinds[i]`).
+## Le cinque specie. L'indice nel record e' questo intero (`kinds[i]`).
 const RUNNER := 0
 const GRUNT := 1
 const BRUTE := 2
 const BOSS := 3
-const KIND_COUNT := 4
-const KIND_NAMES := ["runner", "grunt", "brute", "boss"]
+## m13: la quinta specie, l'unica che **non insegue**: entro una certa distanza
+## si ferma e spara un colpo che cade dove stava il giocatore. Le quattro di
+## sopra non cambiano di una virgola: questa aggiunge una voce a ogni tabella e
+## non ne modifica una (vedi il blocco "m13: il mortar" piu' in basso).
+const MORTAR := 4
+const KIND_COUNT := 5
+const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar"]
 
 # Tabelle per specie, allineate 1:1 con KIND_NAMES. Indexate da `kind`.
-static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0])
-static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7])
-static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90])
-static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0])
+##
+## ## Perche' una quinta voce e non un tavolo nuovo
+##
+## Una tabella allineata 1:1 che cresce di una voce **tocca tutto quello che la
+## legge**, e il progetto l'ha gia' scritto (m9: sei copie del raggio). Quindi
+## qui si sceglie la forma che tocca il meno posto possibile: la quinta voce
+## entra nelle sei tabelle che gia' esistono, `KIND_COUNT` passa da 4 a 5, e
+## ogni funzione che le legge le legge gia' con `clamp_kind(kind)`: nessuna
+## tabella nuova da tenere allineata e nessun `switch` da aggiornare.
+##
+## ## Perche' le quattro specie non si muovono
+##
+## I numeri di `runner`, `grunt`, `brute` e `boss` sono **quelli di prima**,
+## voce per voce, e la sezione `m13` di `tests/test_orda.gd` li asserisce uno per
+## uno contro i numeri scritti qui sotto. Un quinto tipo che si fosse portato
+## via una cifra delle altre quattro avrebbe spostato le misure di sette
+## milestone senza dirlo, e la cosa piu' vicina a un numero che mente.
+static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0, 65.0])
+static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7, 2.9])
+static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90, 1.40])
+static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0, 3.2])
 ## Quanto knockback il nemico si mangia: 0 = tutto, 0.9 = quasi immobile.
-static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90])
+static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90, 0.70])
 ## Tinta per specie: e' quello che arena passa al MultiMesh, cosi' l'arena non
 ## deve sapere cosa sia un nemico.
+##
+## La quinta tinta e' **ciano** e non un rosso: il rosso e' della cupola che
+## segnala dove cade il colpo (`mortar_renderer` di `-arena`), e una specie
+## colorata come il proprio avvertimento renderebbe il segnale illeggibile.
 static var COLOR := PackedColorArray([
 	Color(0.98, 0.35, 0.30),
 	Color(0.86, 0.20, 0.55),
 	Color(0.55, 0.25, 0.88),
 	Color(1.00, 0.76, 0.15),
+	Color(0.16, 0.74, 0.80),
 ])
 
 ## Oltre' questa distanza dal bersaglio il nemico rallenta (arrivo).
@@ -283,6 +310,127 @@ const BITE_TIMER := 1
 const BITE_IN_PORTATA := 1  ## il passo scorso era a portata: il contatto è **vecchio**
 const BITE_SPENT := 2  ## ha morso: non ripete finché non esce dalla portata (rientro)
 
+# --- m13: il mortar -------------------------------------------------------------
+#
+# ## La richiesta dell'utente, 2026-10-15, e cosa c'e' qui dentro
+#
+# «in caso riusciamo a dare un attacco ranged ad uno dei mostri? entro un certo
+# range si ferma, spara come un mortaio, viene segnalato con una cupola rossa dove
+# atterra il colpo dando la possibilità di schivare al giocatore».
+#
+# Tre pezzi, e sono in tre posti diversi perche' sono di due foglie:
+#
+# | pezzo | dove sta | chi lo fa |
+# |---|---|---|
+# | il colpo cade **dopo** `mortar_telegraph_s` secondi | qui, `telegraph_for()` | `-orda` |
+# | la cupola rossa che disegna quegli stessi secondi | `horde.mortar_shots` | `-arena` |
+# | che il colpo sia **schivabile** e che **non sia gratis** | qui sotto | `-orda` |
+#
+# I due numeri attraversano il contratto (`Game.mortar_telegraph_s`,
+# `Game.mortar_blast_m`) perche' sono **due foglie e un solo istante**: se ognuna
+# avesse il suo, la cupola direbbe «schiva qui» e il colpo arriverebbe altrove,
+# che e' la classe di difetto delle sei copie di m9.
+#
+# ## I TRE numeri nuovi, e da dove viene ognuno
+#
+# ### 1. `PLAYER_SPEED`, la velocita' che rende la disuguaglianza possibile
+#
+# E' la velocita' del giocatore, e la fonte **non e' qui**: e' il numero con cui
+# il vertice ha scritto la disuguaglianza stessa in `src/core/contracts.gd` (13,65
+# m/s). Copiarlo e' una copia che mente, quindi il criterio di `tests/test_orda.gd`
+# verifica che il contratto dichiari ancora `13,65` e che questa costante sia
+# l'unica occorrenza in codice di quel numero.
+const PLAYER_SPEED := 13.65
+
+# ### 2. Il raggio di esplosione: **l'area che la specie stessa minaccia**
+#
+#     blast = bite_range_of(MORTAR, body_scale) = corpo_disegnato + TOUCH_REACH
+#
+# Perche' questa e non una cifra: e' la **portata di morso del mortar**, cioe' la
+# grandezza che il giocatore ha gia' davanti agli occhi sotto forma di «quando e'
+# cosi' vicino mi morde». Il colpo e' pericoloso esattamente quanto e' pericoloso
+# il mostro che lo spara: piu' piccolo e il mortar sarebbe una species che vale
+# meno del suo corpo, piu' grande e servirebbe un numero nuovo che nessuno saprebbe
+# controllare. E deriva da `RADIUS[MORTAR]` e da `body_scale`, quindi si muove da
+# solo se il renderer cambia la taglia, come `radii`.
+static func blast_radius_for(body_scale: float) -> float:
+	return bite_range_of(MORTAR, body_scale)
+
+# ### 3. Il tempo del telegrrafo: **derivato**, e non scelto a occhio
+#
+# La condizione che decidere se la cosa e' giusta ha due lati, e sono entrambi
+# sbagliati agli estremi:
+#
+#     PLAYER_SPEED x telegraph >= blast + TOUCH_REACH
+#
+# sotto, il colpo **non e' schivabile** ed e' un delitto; sopra, **non costa
+# niente** ed e' un regalo. Quindi il tempo non e' una cifra: e' il tempo minimo
+# di fuga **per un metro che il giocatore deve davvero percorrere** — uscire dal
+# raggio di esplosione piu' il suo corpo, che e' `TOUCH_REACH` — moltiplicato per
+# il margine dichiarato qui sotto.
+static func telegraph_for(body_scale: float) -> float:
+	return (blast_radius_for(body_scale) + TOUCH_REACH) / PLAYER_SPEED * DODGE_MARGIN
+
+# ## Il margine, e perche' e' 2,0 e non 1,0
+#
+# A `1,0` il tempo del telegrrafo e' **esattamente** il tempo di fuga: si puo'
+# schivare solo se si sa gia' dove va a cadere il colpo prima che la cupola
+# compaia, e cioe' se non lo si schiva. Quello non e' una finestra, e' una
+# frase sulla geometria.
+#
+# A `2,0` la finestra e' **due volte** il minimo: la cupola sta a schermo per un
+# tempo di fuga intero *dopo* che il giocatore l'ha vista. E il criterio e' sui
+# due lati, perche' i due lati sono due difetti diversi:
+#
+#   - **sotto** `DODGE_MARGIN = 1,0`: il colpo non e' schivabile (delitto);
+#   - **sopra** il tempo di ricarica (`touch_period_of(MORTAR)`): un nemico puo'
+#     avere **due cupole in volo** nello stesso istante e non si sa piu' quale e'
+#     quella pericolosa, cioe' il mortaio diventa un'arma che non si legge.
+#
+# Il secondo tetto e' derivato (`reload_of(MORTAR)`) e non e' un numero scritto:
+# e' la cadenza con cui quella massa puo' colpire, e cioe' la stessa tabella che
+# gia' decide quanto spesso un morso arriva addosso.
+static var DODGE_MARGIN := 2.0
+
+# ## La distanza a cui il mortar si ferma: **derivata**, e con un'identita'
+#
+#     engage = blast + bite = 2 x bite
+#
+# Non e' una distanza scelta: e' la somma delle due cose che il mortar puo' fare,
+# e la sua proprieta' e' un'identita', non una taratura. Sostituendo
+# `bite = corpo_disegnato + TOUCH_REACH`:
+#
+#     engage - corpo_disegnato - blast  ==  TOUCH_REACH
+#
+# cioe' **fra il corpo disegnato del mortar e il bordo della cupola che sta per
+# disegnare ci sono esattamente 0,45 m**: il raggio del corpo del giocatore, lo
+# stesso numero che copre il morso. Zero spazio libero e zero sovrapposizione,
+# quindi il colpo non tocca mai il nemico che l'ha sparato, e il mortar non puo'
+# morderti da dove sta (la fermata e' fuori dalla sua stessa portata di morso,
+# per costruzione: `engage > bite`).
+static func engage_for(body_scale: float) -> float:
+	return blast_radius_for(body_scale) + bite_range_of(MORTAR, body_scale)
+
+# ## Il danno di un colpo: **il morso peggiore del gioco**
+#
+#     MORTAR_BLAST_HP = TOUCH_DAMAGE_BASE x MASS[BOSS] / MASS[RUNNER] = 13,71 hp
+#
+# Perche' il morso del boss e non un numero nuovo: se un colpo costasse meno del
+# morso peggiore che il gioco ha, un giocatore che punta contro un boss starebbe
+# fermo invece di schivare — cioe' la cupola smetterebbe di essere una scelta e
+# diventerebbe un avvertimento inutile. Il numero **deriva** dalla tabella delle
+# masse, quindi non e' scritto due volte: la tabella delle specie resta l'unica
+# fonte di quanto un colpo costa.
+static var MORTAR_BLAST_HP := TOUCH_DAMAGE_BASE * MASS[BOSS] / MASS[RUNNER]
+
+## Il tempo di ricarica del mortar: **il periodo di morso della sua stessa
+## specie**, `touch_period_of(kind)`. Non e' una tabella nuova: e' la cadenza con
+## cui quella massa puo' colpire, ed e' gia' dichiarata e verificata. E perche'
+## non un numero suo: se il mortar ricaricasse piu' in fretta del suo telegrrafo
+## avrebbe due cupole in volo, che e' il secondo difetto del margine sopra.
+static func reload_of(kind: int) -> float:
+	return touch_period_of(kind)
+
 static func clamp_kind(kind: int) -> int:
 	return clampi(kind, 0, KIND_COUNT - 1)
 
@@ -348,8 +496,8 @@ static func touch_period_of(kind: int) -> float:
 ## (`horde.gd`) spetta solo il tetto di cadenza e la chiamata al contratto.
 ##
 ## Tutti gli array sono paralleli e lunghi `count`: scrive solo `positions[i]`,
-## `velocities[i]`, `timers[i]`, `bite_timers[i]`, `bite_latch[i]` e `bites[i]`.
-## Nessuna allocazione.
+## `velocities[i]`, `timers[i]`, `bite_timers[i]`, `bite_latch[i]`, `bites[i]`,
+## `mortar_timers[i]` e `mortar_fire[i]`. Nessuna allocazione.
 ##
 ## `bite_latch` serve perche' **senza di lui il contatto non puo' essere la
 ## causa del morso**: per morso all'ingresso occorre sapere se il passo scorso il
@@ -362,12 +510,21 @@ static func touch_period_of(kind: int) -> float:
 ## passo: un `static var` qui dentro sarebbe una superficie che `src/` puo'
 ## cambiare senza passare dall'ordine, che e' la strada che questo progetto vieta
 ## di continuo.
+## ## m13: due array in piu', e perche' sono due e non uno
+##
+## Il mortar ha bisogno di **due** fatti: quanto manca alla ricarica
+## (`mortar_timers`, un `float`) e se questo passo ha chiesto il colpo
+## (`mortar_fire`, un intero). Non si puo' fare con uno solo perche' i due tempi
+## sono diversi — il primo arriva a zero e aspetta, il secondo e' un istante —
+## e misurarli nello stesso numero sarebbe la stessa ricetta dell'array parallelo
+## che si disallinea: un nemico che spara con lo stato di un altro.
 static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		positions: PackedVector3Array, velocities: PackedVector3Array,
 		timers: PackedFloat32Array, kinds: PackedInt32Array,
 		arena_radius: float, bite_timers: PackedFloat32Array,
 		bite_latch: PackedInt32Array, bites: PackedInt32Array, has_target: bool,
-		body_scale: float, bite_mode: int, flow = null) -> void:
+		body_scale: float, bite_mode: int, mortar_timers: PackedFloat32Array,
+		mortar_fire: PackedInt32Array, flow = null) -> void:
 	var kind := clamp_kind(kinds[i])
 	var pos := positions[i]
 	var to_target := target - pos
@@ -391,7 +548,19 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 	# Arrivo: rallenta vicino al bersaglio, altrimenti gli si infila addosso e
 	# i 200 nemici diventano un solo punto.
 	var arrive := clampf(dist / ARRIVE_RADIUS, 0.0, 1.0)
-	var wanted := dir * SPEED[kind] * arrive + push
+	# ## m13: il mortar **si ferma**, e non e' una velocita' diversa
+	#
+	# Il mortar non «va piu' piano»: a `engage_for()` si **ferma**, cioe' la
+	# spinta verso il bersaglio sparisce e rimane solo quella di separazione.
+	# E' la differenza fra un nemico che rallenta e uno che ha deciso di
+	# tirare: rallentare e' una velocita', fermarsi e' una scelta, e la scelta
+	# e' quello che il giocatore impara a schivare.
+	#
+	# `has_target` e' nella condizione per la stessa ragione del morso: senza
+	# un giocatore non c'e' nessuno a cui mirare e nessuna cupola da disegnare,
+	# e un mortar che spara al vuoto sarebbe un nemico che spara.
+	var fermo := kind == MORTAR and has_target and dist <= engage_for(body_scale)
+	var wanted := push if fermo else dir * SPEED[kind] * arrive + push
 
 	var vel := velocities[i]
 	vel += (wanted - vel) * minf(1.0, delta * ACCEL)
@@ -411,6 +580,29 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 		vel -= Vector3(flat.x, 0.0, flat.y) / maxf(r, 0.001) * (r - limit) * EDGE_PUSH
 
 	timers[i] = maxf(0.0, timers[i] - delta)
+	# ## m13: il mortar, e perche' la decisione e' qui e non dentro l'ordine
+	#
+	# `mortar_timers[i]` e' un semplice conto alla rovescia della ricarica e
+	# `mortar_fire[i]` e' la **richiesta** del passo, esattamente come `bites[i]`
+	# per il morso: la **decisione** (sono in portata? sono carico?) sta qui,
+	# dove stanno le specie, e a chi tocca applicarla spetta solo la strada
+	# dichiarata — cioe' scrivere **dove** e **quando** cade, che e' il numero
+	# che `-arena` deve disegnare nello stesso istante.
+	#
+	# Il timer **non e' un flag**: quando il giocatore esce dalla portata il
+	# conto si ferma a meta' e il mortar resta carico per quello che manca,
+	# quindi entra ed esce e spara appena entra. Il nemico che si scarica e
+	# aspetta un periodo intero e' il difetto che m12 ha chiuso per il morso, e
+	# non si ripete qui.
+	mortar_fire[i] = 0
+	if fermo:
+		mortar_timers[i] -= delta
+		if mortar_timers[i] <= 0.0:
+			# Il colpo e' gia' sparso: la ricarica parte **adesso**, non quando
+			# il colpo cade. Sono due istanti diversi e l'ordine e' quello che
+			# tiene sotto `telegraph_for()` il tetto «una cupola per nemico».
+			mortar_timers[i] = reload_of(kind)
+			mortar_fire[i] = 1
 	# ## Il morso: il contatto e' la causa (m12)
 	#
 	# `bite_latch` e' di due bit: `BITE_IN_PORTATA` dice che **il passo scorso**

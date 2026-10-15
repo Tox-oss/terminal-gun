@@ -147,6 +147,48 @@ var arena_radius: float = 60.0
 ## silenzioso, e chi lo registra e' `-arena`.
 var enemy_body_scale: float = 3.4
 
+## ## m11: il telegrrafo del mortar, e perche' attraversa il contratto
+##
+## ## La decisione dell'utente, 2026-10-15
+##
+## «danno per specie, in caso riusciamo a dare un attacco ranged ad uno dei mostri? entro un
+## certo range si ferma, spara come un mortaio, viene segnalato con una cupola rossa dove atterra
+## il colpo dando la possibilità di schivare al giocatore».
+##
+## ## Perche' questo numero deve stare qui e non in `src/sim/`
+##
+## **Due foglie e un solo istante.** `-orda` decide *quando* il colpo cade, `-arena` deve disegnare
+## **esattamente** quello stesso istante. Se ognuno avesse il numero, la cupola rossa e il colpo
+## sarebbero due fatti che possono divergere: e quando divergono **la cupola mente**, cioe' dice
+## al giocatore «schiva qui» e il colpo arriva altrove. E' la classe di difetto delle sei copie di
+## m9, e quella gia' l'abbiamo pagata.
+##
+## Quindi: **la fonte e' `src/sim/enemy.gd`**, che e' di `-orda`, e la registra nel proprio avvio;
+## il contratto ne espone il valore e **`-arena` lo legge** senza possederlo. Nessuna copia, nessun
+## fallback silenzioso, e il default dichiarato **non e' una seconda fonte**: e' un valore di partenza,
+## e il criterio che lo verifica avvelena il campo prima di leggere, come fa `test_arena` con
+## `enemy_body_scale`.
+##
+## ## Il numero non e' scelto qui, e questo e' il punto
+##
+## `mortar_telegraph_s` e' il **tempo** fra la cupola che appare e il colpo che cade. La sua soglia
+## ha **due lati** ed entrambi sono sbagliati agli estremi:
+##
+##     13,65 m/s (il giocatore) x mortar_telegraph_s >= mortar_blast_m + corpo_giocatore
+##
+## sotto, il colpo **non e' schivabile** ed e' un delitto; sopra, **non costa niente** ed e' un
+## regalo. Il numero lo deriva `-orda` dalla velocita' del giocatore e dalla tabella del raggio di
+## esplosione, e **non viene deciso a occhio**: questo progetto vieta la cifra prima della misura
+## (piano §1.4b), e quel divieto vale anche per me.
+var mortar_telegraph_s: float = 1.0
+
+## ## Perche' due campi e non uno solo: sono due numeri, e unirli nasconderebbe la disuguaglianza
+##
+## Il tempo e il raggio sono grandezze diverse e servono a controlli diversi: il tempo e' la finestra
+## in cui il giocatore vede la cupola, il raggio e' quanto terreno deve abbandonare. Accorparli in un
+## solo numerone eliminerebbe il nome del raggio e con lui la meta' della verifica.
+var mortar_blast_m: float = 4.0
+
 ## **Terzo raggio scritto a mano, e va chiuso con gli altri due.** `-orda` mi ha segnalato
 ## `src/weapons/projectile_pool.gd:89`, `const ENEMY_RADIUS := 0.55`: un raggio nemico in un file
 ## di `-gameplay`, cioe' un **terzo** proprietario dello stesso concetto. Il difetto che l'utente ha

@@ -291,6 +291,51 @@ var bite_timers: PackedFloat32Array = PackedFloat32Array()
 var bite_latch: PackedInt32Array = PackedInt32Array()
 var bites: PackedInt32Array = PackedInt32Array()
 
+# --- m13: il mortar, e i colpi in volo -----------------------------------------
+#
+# ## Perche' un array e non un nodo per colpo
+#
+# Un colpo in volo e' un dato, non un oggetto di scena: se ogni colpo fosse un
+# `Node3D` il `node_count` salirebbe con il fuoco dell'orda, che e' esattamente
+# il tetto che questa foglia non puo' toccare (e che il gia' successo con
+# l'audio). Quindi `mortar_shots` e' un `PackedVector3Array` di capienza fissa,
+# riscaldato una volta sola in `_build()` come `hit_positions`: nel ciclo di gioco
+# non si alloca niente e `resize` non viene chiamato.
+#
+# ## La convenzione dell'elemento, detta una volta sola
+#
+#     elemento = Vector3(x_atterraggio, z_atterraggio, secondi_residui)
+#
+# cioe' **il punto in cui il colpo cade sta in `x` e `y`, e i secondi che mancano
+# stanno in `z`**. E' la trappia di m10 (il raggio nel disco sta in `y`) ripetuta
+# su un altro array, e per questo `mortar_shot_at(i)` esiste: ritorna il punto
+# **del mondo** con la convenzione gia' disfatta, cosi' `-arena` non deve sapere
+# che `y` e' una `z`.
+var mortar_shots: PackedVector3Array = PackedVector3Array()
+## Quanti colpi sono **in volo**. E' il numero che il renderer chiede prima di
+## iterare: i vivi sono `mortar_shots[0 .. mortar_shot_count)`. Vale sempre
+## `mortar_shot_count <= mortar_shots.size()`, e la capienza e' quella scaldata
+## all'avvio, quindi nel ciclo di gioco non cresce mai.
+##
+## Superficie **congelata dal vertice**: `-orda` la scrive, `-arena` la legge, e
+## il nome non si inventa due volte.
+var mortar_shot_count: int = 0
+## Danni di esplosione consegnati nell'ultimo passo. Telemetria, come
+## `touch_damage_last`: serve a un test per guardare l'economia del colpo e non
+## e' un secondo posto dove il danno e' scritto.
+var mortar_damage_last: float = 0.0
+## Secondi alla prossima ricarica per nemico. Parallelo come gli altri: entra
+## negli stessi quattro punti (`_resize_arrays`, `_apply_spawn`, `_kill`,
+## `restart_run`).
+var mortar_timers: PackedFloat32Array = PackedFloat32Array()
+## Richiesta di colpo del passo, 1 = spara adesso. Come `bites[i]`: la decisione
+## e' in `src/sim/enemy.gd`, qui si applica.
+var mortar_fire: PackedInt32Array = PackedInt32Array()
+## Da dove viene il numero del telegrrafo che sta sul contratto: `contratto` se
+## e' stato registrato, `fallback` altrimenti. Come `body_scale_source`: distingue
+## «canale scritto» da «canale che nessuno ha scritto», che sembrano uguali.
+var mortar_source: String = "fallback"
+
 ## ## m12: `bite_mode`, e perche' e' un campo **pubblico e dichiarato**
 ##
 ## Il gioco gira su `E.BITE_CONTACT`: **il contatto e' la causa del morso**. Un
@@ -550,6 +595,33 @@ func _load_body_scale() -> void:
 	body_scale = s
 	body_scale_source = "contratto"
 
+## ## m13: i due numeri del mortar **scritti** sul contratto, non letti
+##
+## Qui la direzione e' opposta a `enemy_body_scale`: non siamo noi a leggere un
+## numero di `-arena`, siamo noi a **dargli** il nostro. Il vertice ha dichiarato
+## i due campi (`mortar_telegraph_s`, `mortar_blast_m`) dicendo che la fonte e'
+## `src/sim/enemy.gd`, e `-arena` li legge senza possederli.
+##
+## **Perche' non si copia il default del contratto.** Quel default (1,0 s e 4,0 m)
+## e' un valore di partenza, non una fonte: se `-arena` leggesse quel numero,
+## la cupola mostrerebbe un tempo che la simulazione non usa, e cioe' direbbe
+## «schiva qui» mentre il colpo cade altrove — la classe di difetto delle sei
+## copie di m9, che questo progetto ha gia' pagata una volta.
+##
+## ## Perche' si scrive con `set()` e non con `game.campo = x`
+##
+## `_contract()` e' un `Node`: il contratto e' il nodo che si ottiene a runtime,
+## non un tipo noto al compilatore, quindi `get`/`set` sono la strada che questo
+## file usa gia' per `obstacles` ed `enemy_body_scale` (piano 5.1, 5.3).
+func _load_mortar() -> void:
+	mortar_source = "fallback"
+	var game := _contract()
+	if game == null:
+		return
+	game.set("mortar_telegraph_s", E.telegraph_for(body_scale))
+	game.set("mortar_blast_m", E.blast_radius_for(body_scale))
+	mortar_source = "contratto"
+
 ## La portata del morso di una specie, **come la calcola la simulazione**. Non e'
 ## una copia della formula di `enemy.gd`: e' la stessa funzione, e il test di
 ## m11-quarta confronta le due cose perche' una copia, qui, mentirebbe.
@@ -590,6 +662,14 @@ func _build() -> void:
 	_sep_buf.resize(SEPARATION_CHECKS)
 	hit_positions.resize(HITS_KEPT)
 	hit_kinds.resize(HITS_KEPT)
+	# ## m13: la capienza dei colpi in volo, **una volta sola**
+	#
+	# `MAX_ENEMIES` e' la capienza giusta perche' un nemico non puo' avere due
+	# colpi in volo: la ricarica parte quando il colpo **spara** e il criterio di
+	# `tests/test_orda.gd` asserisce che il telegrrafo e' piu' corto della
+	# ricarica. Quindi un nemico, non un colpo, e' l'unita' che conta — e come
+	# per `hit_positions` il ciclo di gioco non chiama mai `resize`.
+	mortar_shots.resize(MAX_ENEMIES)
 
 	# La partita esiste **prima** di qualunque spawn: `_apply_spawn` legge da
 	# `run` il moltiplicatore di vita dell'onda, quindi costruirlo dopo sarebbe
@@ -605,6 +685,12 @@ func _build() -> void:
 	# gli ostacoli, e per la stessa ragione — la simulazione deve sapere quanto e'
 	# grande il corpo che si vede dal primo passo, non dal secondo.
 	_load_body_scale()
+	# I due numeri del mortar sul contratto, **subito dopo** il fattore del corpo:
+	# il raggio di esplosione e' la portata di morso della specie, quindi dipende
+	# dalla taglia che il renderer ha appena dichiarato. Registrarlo prima
+	# lascerebbe il contratto con un numero che dipende da un fattore non ancora
+	# letto, cioe' da una seconda fonte.
+	_load_mortar()
 	_budget = 0.0
 	# Disposizione iniziale **a `population`**, non a `MAX_ENEMIES`.
 	_populate(population)
@@ -747,6 +833,8 @@ func _resize_arrays(n: int) -> void:
 	bite_timers.resize(n)
 	bite_latch.resize(n)
 	bites.resize(n)
+	mortar_timers.resize(n)
+	mortar_fire.resize(n)
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -790,6 +878,9 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	bite_timers[i] = 0.0
 	bite_latch[i] = 0
 	bites[i] = 0
+	# Carico: un nemico appena nato spara subito se e' gia' in portata di tiro.
+	mortar_timers[i] = 0.0
+	mortar_fire[i] = 0
 	colors[i] = E.color_of(kind)
 	# Il raggio del corpo, dalla tabella delle specie: un posto solo (criterio
 	# n. 4 di m8). `radii` non e' derivato da `transforms` ne' dalla tinta: e'
@@ -836,7 +927,17 @@ func step(delta: float) -> void:
 	for i in count:
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
-			body_scale, bite_mode, flow_field)
+			body_scale, bite_mode, mortar_timers, mortar_fire, flow_field)
+	# ## m13: i colpi in volo scendono **nello stesso passo** in cui nascono
+	#
+	# Prima i morsi e poi il mortar, o viceversa: sono due azioni diverse e
+	# l'ordine non le cambia. Quello che conta e' che `_mortar_step` stia qui,
+	# dopo il ciclo dei nemici (perche' e' lui che chiede i colpi) e prima di
+	# `_sweep_dead` (che puo' togliere un nemico e spostare indici con lo
+	# scambio-ultimo: la richiesta di un nemico appena ucciso e' gia' stata
+	# consegnata, e la decisione di m12 — una richiesta consegnata non e' un
+	# colpo perso — vale anche per il mortar).
+	_mortar_step(delta, focus, ha_giocatore)
 	_apply_bites(delta)
 	_sweep_dead()
 	_wave_tick(delta)
@@ -921,6 +1022,105 @@ func _apply_bites(delta: float) -> void:
 		touch_bites_last += 1
 		_bite_interval_left = TOUCH_INTERVAL
 		return
+
+# --- m13: i colpi del mortar, e le tre cose che devono essere vere --------------
+#
+# ## L'ordine dentro `_mortar_step`, e perche' e' quello
+#
+#   1. **scendono** i colpi gia' in volo, e quelli che arrivano a zero
+#      **esplodono** e escono dall'array;
+#   2. poi si leggono le **richieste** dei nemici di questo passo e i colpi
+#      nuovi entrano con `telegraph_for()` secondi.
+#
+# Il punto 2 viene dopo il 1 e non prima perche' un colpo appena sparato deve
+# partire dal suo tempo pieno: accodarlo prima di aver fatto scendere gli altri
+# gli toglierebbe un `DT` a ogni passo, e `mortar_shots[i].z` deve scendere di
+# esattamente `DT` a ogni passo — e' il numero su cui `-arena` disegna la cupola.
+#
+# Nessuna allocazione: si scrive dentro un array gia' scaldato e si rimuove per
+# **scambio con l'ultimo**, come `_kill`. Nessun `resize`, nessun `new()`.
+
+## Un passo del mortar: i colpi in volo scendono e le richieste diventano colpi.
+func _mortar_step(delta: float, focus: Vector3, ha_giocatore: bool) -> void:
+	mortar_damage_last = 0.0
+	var i := 0
+	while i < mortar_shot_count:
+		var s := mortar_shots[i]
+		if s.z - delta > 0.0:
+			mortar_shots[i] = Vector3(s.x, s.y, s.z - delta)
+			i += 1
+			continue
+		_mortar_impact(i, focus, ha_giocatore)
+		# niente `i += 1`: lo slot `i` e' stato riempito con l'ultimo colpo,
+		# quindi e' **quello** che va guardato al passo dopo (scambio-ultimo).
+	for j in count:
+		if mortar_fire[j] == 0:
+			continue
+		mortar_fire[j] = 0
+		_mortar_spara(focus)
+
+## Il colpo e' sparato: entra in `mortar_shots` con il tempo del telegrrafo e il
+## punto in cui cade, che e' **dove stava il giocatore quando ha premuto**.
+##
+## Il punto di cadere non e' il nemico: e' il bersaglio al momento dello sparo,
+## e non un punto davanti a lui. La cupola quindi segnala il pericolo **vero**,
+## cioe' quello che il giocatore deve abbandonare adesso.
+func _mortar_spara(focus: Vector3) -> void:
+	if mortar_shot_count >= mortar_shots.size():
+		# Difensivo, e dichiarato: non ci arriva mai, perche' un nemico non puo'
+		# avere due colpi in volo (ricarica > telegrrafo) e i nemici non sono
+		# piu' di `MAX_ENEMIES`. Un tetto che non puo' scattare e' una difesa, non
+		# un criterio, ed e' dichiarato come tale.
+		return
+	# `(x, z, secondi)`: i secondi stanno in `z`, come dice il contratto.
+	mortar_shots[mortar_shot_count] = Vector3(focus.x, focus.z,
+		E.telegraph_for(body_scale))
+	mortar_shot_count += 1
+
+## Il colpo e' caduto: se il giocatore e' dentro il raggio di esplosione prende
+## il danno, e il colpo esce comunque.
+##
+## ## Il danno e' un **istante**, non un campo
+##
+## Qui e' il secondo criterio del mortar, e quello che rende la misura non
+## comoda: mentre la cupola e' a schermo il giocatore **non prende niente**, e
+## prende tutto **quando il colpo cade**. Una finestra nella quale ci si puo'
+## stare dentro senza danno non e' una finestra per schivare, e' un campo che
+## si puo' attraversare: quello e' il difetto che il criterio deve chiudere, e
+## per questo qui non c'e' nessun danno per passo e nessun `if` dentro la
+## finestra.
+func _mortar_impact(i: int, focus: Vector3, ha_giocatore: bool) -> void:
+	var s := mortar_shots[i]
+	var blast := E.blast_radius_for(body_scale)
+	# `s.y` e' la **z** del mondo: la convenzione dell'elemento e' `(x, z, s)` e
+	# disfarla qui e' il motivo per cui esiste `mortar_shot_at`.
+	var punto := Vector2(s.x, s.y)
+	if ha_giocatore and Vector2(focus.x, focus.z).distance_squared_to(punto) <= blast * blast:
+		var game := _contract()
+		if game != null:
+			game.damage_player(E.MORTAR_BLAST_HP)
+			mortar_damage_last = E.MORTAR_BLAST_HP
+	# scambio con l'ultimo: niente cancellazione dal vettore, niente `resize`.
+	var last := mortar_shot_count - 1
+	if i != last:
+		mortar_shots[i] = mortar_shots[last]
+	mortar_shot_count = last
+
+## Il punto **del mondo** dove cade il colpo `i`, con la convenzione disfatta.
+##
+## Esiste perche' l'elemento di `mortar_shots` tiene `(x, z, secondi)`: chi
+## disegna la cupola ha bisogno di un `Vector3` con la `y` a zero, e rileggere
+## `shot.y` come profondita' e' l'errore che la convenzione di m10 (il raggio
+## del disco in `y`) ha gia' fatto perdere un'onda a qualcun altro.
+func mortar_shot_at(i: int) -> Vector3:
+	if i < 0 or i >= mortar_shot_count:
+		return Vector3.ZERO
+	var s := mortar_shots[i]
+	return Vector3(s.x, 0.0, s.y)
+
+## Quanto manca, in secondi, alla caduta del colpo `i`. `-1.0` se non c'e'.
+func mortar_shot_left(i: int) -> float:
+	return -1.0 if i < 0 or i >= mortar_shot_count else mortar_shots[i].z
 
 ## C'e' un giocatore in scena? `player_position` e' l'API che -gameplay registra:
 ## se non c'e', non c'e' nessun giocatore, e nessun morso. Non e' una ipotesi sul
@@ -1074,6 +1274,8 @@ func _kill(i: int) -> void:
 		bite_timers[i] = bite_timers[last]
 		bite_latch[i] = bite_latch[last]
 		bites[i] = bites[last]
+		mortar_timers[i] = mortar_timers[last]
+		mortar_fire[i] = mortar_fire[last]
 	count = last
 	_resize_arrays(count)
 	kills += 1
@@ -1224,6 +1426,15 @@ func restart_run() -> void:
 	_bite_interval_left = 0.0
 	touch_damage_last = 0.0
 	touch_bites_last = 0
+	# ## m13: i colpi in volo **non sopravvivono al restart**
+	#
+	# Un colpo e' gia' partito e il suo istante di caduta e' gia' deciso: senza
+	# questa riga una partita nuova comincerebbe con la cupola di un colpo
+	# sparato nella partita di prima, cioe' un avvertimento che punta a una zona
+	# che non ha niente a che fare. Il conto si azzera e basta: l'array di
+	# capienza resta scaldato, quindi non si alloca niente.
+	mortar_shot_count = 0
+	mortar_damage_last = 0.0
 	# **Prima** di `_populate`: il ripopolamento legge `_rng`, quindi il seme va
 	# rimescolato prima e non dopo (dopo sarebbe un no-op silenzioso, e un
 	# no-op silenzioso è un difetto che la porta non vede).

@@ -2904,6 +2904,62 @@ const RATIO_TOLERANCE := 0.001
 ## Tolleranza della sollevata. Stessa natura: `Transform3D` e' a 32 bit.
 const LIFT_TOLERANCE := 0.002
 
+## ## m13: IL PESO CHE IL TEST PILOTA, E LA STRADA SCELTA PER IL CRITERIO
+##
+## ## Il difetto che questa sezione chiude
+##
+## `-orda` ha aggiunto la quinta specie (`mortar`, `KIND_NAMES` e' passato da 4 a 5
+## voci) e l'ha dichiarata **non spendibile**: `Spawner.MORTAR_WEIGHT = 0.0` in ogni
+## onda, perche' un mortar senza la cupola che segnala dove cade il colpo e' un
+## danno senza preavviso. Quindi il campione di questa sezione ne conteneva quattro,
+## e il criterio che confrontava `by_kind` con **tutte** le specie dichiarate era
+## rosso per un motivo che non e' un difetto del renderer: la quinta specie non puo'
+## nascere.
+##
+## ## La strada scelta: (B), non (A)
+##
+## (A) sarebbe stato confrontare `by_kind` con le specie a peso non nullo **nella
+## misura**: piu' semplice, ma lascia fuori la quinta specie dal campione e il
+## renderer continua a non essere mai stato guardato con cinque specie in campo.
+## (B) pilota il peso dal campo che `-orda` ha dichiarato pilotabile per questo
+## (`MORTAR_WEIGHT` e' `static var`, non `const`, **perche'** i test possano
+## accendere il difetto da sole: e' la ragione dichiarata in `spawner.gd`) e
+## campiona un contesto dove il mortar **nasce davvero**. Il campione contiene
+## cinque specie vere e il criterio torna a valere per tutte e cinque, il giorno in
+## che la cupola rossa apre il peso di produzione come deve.
+##
+## **Quello che `MORTAR_STEER` non e'**: non e' un numero di produzione. Non finisce
+## in nessun file di `src/`, non entra in `wave_weights`, non viene asserito da nessuna
+## parte: e' il pilotaggio del test, dichiarato qui e riportato a zero in fondo alla
+## sezione, con il ripristino asserito come `_restore_body_scale` fa con il veleno.
+##
+## ## Perche' 12,0 e non un numero qualsiasi
+##
+## Sull'onda che il campione usa (`wave_weights(2)` con i pesi di oggi: 47,5 + 30,0 +
+## 18,8 + 5,0 + 12,0 = 113,3) il mortar e' l'11% delle nascite: su 200 nemici la
+## probabilita' di non vederne nessuno e' `0.89^200 = 1.3e-10`, cioe' il campione non
+## dipende da un caso. E 12,0 non e' nessuno dei pesi della tabella (50, 30, 17, 3),
+## quindi se un giorno il file di `-orda` cambiasse quei numeri questo resterebbe
+## riconoscibile come un numero del test e non come uno copiato.
+const MORTAR_STEER := 12.0
+
+## Tolleranza dei confronti fra pesi. `MORTAR_WEIGHT` e' un `float` a 64 bit e
+## `wave_weights()` lo versa in un `PackedFloat32Array`, quindi il confronto non e'
+## mai esatto; 1e-4 e' quattro ordini sopra quel rumore e quattro sotto il difetto
+## (un peso pilotato che non arriva allo spawn e lascia il mortar a zero).
+const WEIGHT_TOLERANCE := 0.0001
+
+## Distanza minima fra due tinte di specie diverse, come frazione del massimo
+## possibile (1,0 = tinte opposte). Sotto questa soglia due specie sono **la stessa
+## tinta a occhio**, che e' il difetto che m8 ha gia' chiuso una volta: prima di m8 le
+## specie si distinguevano solo di tinta. La soglia non e' messa sul massimo misurato
+## (vedi sotto) per non diventare un tetto che cade al primo pixel di differenza: e'
+## un quarto della distanza che due tinte devono avere per essere due tinte.
+##
+## Misurato sul campione di oggi, la distanza minima fra due tinte e' **0,315**
+## (runner e grunt), quindi il criterio ha 3,15 volte la soglia di margine.
+const TINT_STEP := 0.10
+
 ## I nomi delle specie, **letti dalla tabella di -orda** (`KIND_NAMES` in
 ## `src/sim/enemy.gd`) e non scritti qui. Nessuna copia: `ENEMY_KINDS` non esiste
 ## in questo file, e i nomi che compaiono nei messaggi sono quelli che -orda ha
@@ -2917,20 +2973,39 @@ const LIFT_TOLERANCE := 0.002
 ## Restituisce un array vuoto se la tabella non e' piu' li', e il chiamante lo
 ## dichiara invece di procedere con un tetto sbagliato.
 func _kind_names(horde) -> Array:
-	var scr = horde.get_script()
-	if scr == null or not scr.has_method("get_script_constant_map"):
-		return []
-	var map: Dictionary = scr.get_script_constant_map()
-	if not map.has("E"):
-		return []
-	var e: Object = map["E"]
-	if e == null or not e.has_method("get_script_constant_map"):
+	var e = _enemy_script(horde)
+	if e == null:
 		return []
 	var emap: Dictionary = e.get_script_constant_map()
 	if not emap.has("KIND_NAMES"):
 		return []
 	var names: Array = emap["KIND_NAMES"]
 	return names
+
+## Uno script che `horde.gd` ha preloatato con una `const` al proprio interno, raggiunto
+## dalla **stessa** via di `E` sopra. Nessuna copia: questo file non sa il nome del
+## file che contiene le tabelle, e non deve saperlo -- e' un dato di -orda letto da
+## -orda. `null` se la `const` non c'e' piu' o non e' uno `Script`, cosi' il chiamante
+## lo dichiara invece di procedare con un tetto sbagliato.
+func _preloaded_script(horde, const_name: String):
+	var scr = horde.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return null
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has(const_name):
+		return null
+	var o = map[const_name]
+	return o if o is Script else null
+
+## La tabella delle specie di -orda (`E`, cioe' `src/sim/enemy.gd`).
+func _enemy_script(horde):
+	return _preloaded_script(horde, "E")
+
+## Il produttore unico dei **pesi** di -orda (`Spawner`, cioe' `src/sim/spawner.gd`):
+## e' il file che dichiara `MORTAR_WEIGHT`, e quel campo e' la leva che la sezione
+## 9.3 usa per accendere il mortar (vedi `_accendi_il_mortar`).
+func _spawner(horde):
+	return _preloaded_script(horde, "Spawner")
 
 func _milestone_8(h, arena: Node3D) -> void:
 	var horde = arena.get_node_or_null("Horde")
@@ -2981,9 +3056,23 @@ func _milestone_8(h, arena: Node3D) -> void:
 		horde.population = saved_pop
 		horde.reseed(SEED_A)
 		return
-	var kinds: int = kind_names.size()
 
-	# ## Il campione: uno **sweep di semi fissati**, non un dado
+	# ## m13: ACCENDERE IL MORTAR, e perche' la sezione si ferma se non si accende
+	#
+	# Il criterio n. 3 confronta il campione con le specie **spendibili** nel
+	# contesto misurato, e perche' il campione ne contenga cinque il peso viene
+	# pilotato dal campo che `-orda` ha dichiarato pilotabile. Il ritorno e' la
+	# lista degli indici spendibili **letta dai pesi dell'onda in gioco**: se qui
+	# sotto qualcosa non torna, il criterio non avrebbe denti e va detto invece di
+	# essere allargato a quattro.
+	var pilotaggio := _accendi_il_mortar(h, horde, kind_names)
+	if not pilotaggio.get("ok", false):
+		horde.population = saved_pop
+		horde.reseed(SEED_A)
+		return
+	var spendable: Array = pilotaggio["spendable"]
+
+	# Il campione: uno **sweep di semi fissati**, non un dado
 	#
 	# `reseed(s)` con `s != 0` fissa il `_rng` di -orda, quindi l'orda che ne
 	# nasce e' **sempre** la stessa disposizione: la lista delle specie osservate
@@ -2991,10 +3080,12 @@ func _milestone_8(h, arena: Node3D) -> void:
 	# sono **quelli dello sweep di m3** (`SWEEP_FIRST`, `SWEEP_STEP`,
 	# `SWEEP_COUNT`), gia' dichiarati in questo file: nessun numero nuovo.
 	#
-	# Il ciclo si ferma al primo seme che mostra tutte le specie. Serve perche' il
-	# boss pesa il 3% dei nemici dell'onda 1 (`Spawner.KIND_WEIGHTS`) e un singolo
-	# campione da 200 potrebbe non mostrarlo: il numero dei semi usati viene
-	# stampato, cosi' si vede quanto campione e' servito davvero.
+	# Il ciclo si ferma al primo seme che mostra tutte le specie spendibili.
+	# Serve perche' il boss pesa il 5% dei nemici dell'onda 2
+	# (`Spawner.wave_weights(2)`) e un singolo campione da 200 potrebbe non
+	# mostrarlo: il numero dei semi usati viene stampato, cosi' si vede quanto
+	# campione e' servito davvero.
+	horde.population = cap
 	var by_kind: Dictionary = {}
 	var seeds_used: Array[int] = []
 	for i in SWEEP_COUNT:
@@ -3002,18 +3093,188 @@ func _milestone_8(h, arena: Node3D) -> void:
 		horde.reseed(s)
 		_accumula(horde, enemies, mesh_size, by_kind)
 		seeds_used.append(s)
-		if by_kind.size() >= kinds:
+		if by_kind.size() >= spendable.size():
 			break
 
-	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte"
-		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size()])
-	_quattro_specie(h, by_kind, mesh_size, legacy_extent, kind_names)
+	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte su %d spendibili"
+		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size(), spendable.size()])
+	_specie_campionate(h, by_kind, mesh_size, legacy_extent, kind_names, spendable)
 
 	# Ripristino **sempre**: `check()` non interrompe, e una sezione che lascia
 	# l'orda con una popolazione diversa da quella trovata sporca quello che viene
-	# dopo.
+	# dopo. Anche il peso pilotato torna al valore dichiarato di -orda, con due
+	# asserzioni che lo dicono (vedi `_ripristina_il_mortar`).
+	_ripristina_il_mortar(h, horde, pilotaggio, cap, kind_names, by_kind.size())
 	horde.population = saved_pop
 	horde.reseed(SEED_A)
+
+## ## 9.3 m13: LA STRADA (B), e le sue due precondizioni
+##
+## Cosa fa, in ordine:
+##   1. legge `Spawner.MORTAR_WEIGHT`, che e' il valore di **produzione** di -orda,
+##      e non lo ricopia: e' quello a cui la sezione torna in fondo;
+##   2. scrive `MORTAR_STEER` al suo posto;
+##   3. **precondizione 1**: il peso pilotato e' arrivato alla funzione che decide
+##      chi nasce, `Spawner.wave_weights()`;
+##   4. rimette l'orda su un'onda in cui **tutte** le specie sono spendibili,
+##      con l'API di -orda e non scrivendo un array di pesi a mano: `restart_run()`
+##      rilegge i pesi, e poi la barra dell'onda portata a zero e un `step()` fanno
+##      quello che nella partita fa la fine di un'onda — `horde.gd::_wave_tick()`
+##      chiama `_sync_weights()` nei tre punti in cui l'onda cambia, e `reseed()`
+##      da solo **non** lo chiama, quindi senza questo passo il pilotaggio non
+##      arriverebbe mai allo spawn;
+##   5. **precondizione 2**: i pesi con cui l'orda sta davvero spawnando sono
+##      `wave_weights(onda in corso)`, voce per voce.
+##
+## ## Perche' l'onda 2 e non l'onda 1
+##
+## Sull'onda 1 il boss e' a `BOSS_WAVE1 = 0.0`: **anche lui non puo' nascere**.
+## Campionando l'onda 1 il criterio sarebbe «tutte le specie spendibili» = quattro,
+## cioe' la stessa forma di criterio che m13 voleva chiudere, solo con un numero
+## diverso. Sull'onda 2 tutte e cinque sono spendibili, quindi il campione le
+## contiene tutte e cinque davvero e il criterio vale per tutte.
+##
+## ## Perche' `run.wave_killed` non e' un violare il file di -orda
+##
+## `wave_killed` e' un campo **pubblico e dichiarato** di `src/sim/run.gd`, e questa
+## sezione lo scrive come già scrive `horde.population` e mette `flow_field` a
+## `null`: il test guida il contesto con le leve che il progetto dichiara, invece di
+## scrivere a mano gli array di nascita. Nessun file di `src/` viene toccato.
+func _accendi_il_mortar(h, horde, kind_names: Array) -> Dictionary:
+	var vuoto := {"ok": false, "mortar": -1, "dichiarato": -1.0,
+		"spendable": [] as Array, "onda": -1, "pesi": PackedFloat32Array()}
+	var e = _enemy_script(horde)
+	var spawner = _spawner(horde)
+	if not h.check(e != null and spawner != null,
+			"m8: dalla scena di -orda non si leggono piu' ne' E (la tabella delle specie) ne' Spawner (i pesi): senza i pesi non si puo' dire quale specie **puo' nascere**, e il confronto con tutte le specie dichiarate sarebbe un criterio che non sa cosa misura"):
+		return vuoto
+	var emap: Dictionary = e.get_script_constant_map()
+	if not h.check(emap.has("MORTAR") and emap.has("KIND_COUNT"),
+			"m8: src/sim/enemy.gd non dichiara piu' MORTAR e KIND_COUNT: senza l'indice della quinta specie il peso pilotato andrebbe sulla voce sbagliata"):
+		return vuoto
+	var mortar: int = int(emap["MORTAR"])
+	h.check(mortar == kind_names.size() - 1,
+		"m8: la quinta specie deve essere l'ultima voce di KIND_NAMES: MORTAR = %d su %d nomi. Una specie aggiunta in mezzo sposta gli indici di tutto quello che legge per indice"
+			% [mortar, kind_names.size()])
+	if not h.check(int(emap["KIND_COUNT"]) == kind_names.size(),
+			"m8: KIND_COUNT (%d) deve combaciare con KIND_NAMES (%d): e' la stessa tabella contata due volte" % [int(emap["KIND_COUNT"]), kind_names.size()]):
+		return vuoto
+
+	# ## 1 e 2: il valore di produzione letto, e il pilotaggio
+	var dichiarato: float = float(spawner.MORTAR_WEIGHT)
+	h.check(dichiarato >= 0.0,
+		"m8: Spawner.MORTAR_WEIGHT deve essere un peso, cioe' >= 0: letto %.4f" % dichiarato)
+	spawner.MORTAR_WEIGHT = MORTAR_STEER
+
+	# ## 3: PRECONDIZIONE 1 -- il pilotaggio e' arrivato alla funzione dei pesi.
+	# Senza questa, una sezione che legge «il mortar c'e' nel campione» potrebbe
+	# averlo letto perche' il pilotaggio non e' mai entrato, e il criterio
+	# diventerebbe decorativo esattamente nella sola circostanza in cui deve mordere.
+	var pesi_prova: PackedFloat32Array = spawner.wave_weights(1)
+	h.near(pesi_prova[mortar], MORTAR_STEER, WEIGHT_TOLERANCE,
+		"m8: il peso pilotato deve arrivare a Spawner.wave_weights(): letto %.4f invece di %.4f, quindi il pilotaggio non e' entrato e il campione misurerebbe il peso di -orda"
+			% [pesi_prova[mortar], MORTAR_STEER])
+
+	# ## 4: l'orda su un'onda in cui tutte e cinque sono spendibili
+	horde.restart_run()
+	horde.run.wave_killed = horde.run.wave_total
+	horde.step(DT)
+	var onda: int = horde.wave
+	if not h.check(onda >= 2,
+			"m8: l'orda non e' arrivata a un'onda in cui tutte le specie sono spendibili (onda %d): sull'onda 1 anche il boss e' a zero (BOSS_WAVE1) e il campione sarebbe di quattro. `restart_run()` + `run.wave_killed = run.wave_total` + `step()` sono la strada con cui -orda chiude un'onda" % onda):
+		return vuoto
+
+	# ## 5: PRECONDIZIONE 2 -- i pesi con cui l'orda spawna davvero.
+	# `horde.gd::_weights` e' un campo **privato** di -orda e questa e' l'unica
+	# lettura che questo test ne fa: e' una `get()`, non una `set()`, e senza di essa
+	# la sezione non puo' distinguere «il pilotaggio non e' arrivato» da «il
+	# renderer non ha disegnato tutte le specie». Il confronto e' voce per voce con
+	# `wave_weights(onda in corso)`, quindi dice anche che l'orda non spawna con i
+	# pesi di un'onda diversa da quella in cui dice di essere.
+	var usati: PackedFloat32Array = horde.get("_weights")
+	var pesi: PackedFloat32Array = spawner.wave_weights(onda)
+	h.eq(usati.size(), kind_names.size(),
+		"m8: i pesi con cui l'orda spawna devono avere una voce per specie: %d su %d" % [usati.size(), kind_names.size()])
+	h.check(usati == pesi,
+		"m8: l'orda deve spawnare con Spawner.wave_weights(%d), voce per voce: in campo %s, dichiarati %s. Il pilotaggio del peso del mortar non e' arrivato allo spawn" % [onda, str(usati), str(pesi)])
+
+	# Le specie spendibili **della misura**, non quelle dichiarate: sono gli indici
+	# con peso maggiore di zero nei pesi che l'orda sta usando adesso.
+	var spendable: Array = []
+	for k in kind_names.size():
+		if pesi[k] > 0.0:
+			spendable.append(k)
+	h.eq(spendable.size(), kind_names.size(),
+		"m8: il contesto pilotato deve avere tutte e %d le specie spendibili, altrimenti il campione non puo' contenerle e il criterio non misurerebbe niente: pesi %s"
+			% [kind_names.size(), str(pesi)])
+
+	vuoto["ok"] = true
+	vuoto["mortar"] = mortar
+	vuoto["dichiarato"] = dichiarato
+	vuoto["spendable"] = spendable
+	vuoto["onda"] = onda
+	vuoto["pesi"] = pesi
+	print("test_arena: m8 m13 strada (B): MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test** (numero di collaudo, non di produzione: non entra in nessun file di src/), ripresa all'onda %d (%s) dove tutte e %d le specie sono spendibili; l'orda spawna con quei pesi, voce per voce"
+		% [dichiarato, MORTAR_STEER, onda, str(pesi), spendable.size()])
+	return vuoto
+
+## ## Il ripristino, e **due** asserzioni che lo dicono
+##
+## `MORTAR_WEIGHT` e' una `static var` di uno script: vive piu' a lungo di questa
+## sezione, e lasciarla a 12,0 significa che tutto quello che gira dopo in questo
+## processo nascerebbe con un mortar che `-orda` non ha autorizzato. Il ripristino
+## quindi non e' pulizia: e' parte del criterio, e come in `_restore_body_scale` sono
+## due le asserzioni, perche' oggi `dichiarato == 0.0` e `MORTAR_STEER == 12.0` sono
+## due numeri diversi e la prima da sola passerebbe anche se il ripristino non fosse
+## mai partito.
+##
+## E poi la **seconda misura**: lo stesso contesto, lo stesso seme, il peso tornato a
+## quello di produzione. Il numero che esce e' la ragione per cui il criterio confronta
+## `by_kind` con le specie spendibili e non con tutte le dichiarate: e' stampato, non
+## asserito, perche' **e' il numero di -orda** e questo test non asserisce numeri di
+## -orda; quel criterio gli tocca `tests/test_orda.gd`, e quando il peso di produzione
+## salira questa riga comincia a dire cinque da sola.
+func _ripristina_il_mortar(h, horde, pilotaggio: Dictionary, cap: int, kind_names: Array, campione: int) -> void:
+	var spawner = _spawner(horde)
+	if not h.check(spawner != null, "m8: nel ripristino non si rilegge piu' Spawner dalla scena di -orda"):
+		return
+	var dichiarato: float = float(pilotaggio["dichiarato"])
+	spawner.MORTAR_WEIGHT = dichiarato
+	var dopo: float = float(spawner.MORTAR_WEIGHT)
+	h.near(dopo, dichiarato, WEIGHT_TOLERANCE,
+		"m8: dopo la sezione MORTAR_WEIGHT deve essere tornato al valore dichiarato da src/sim/spawner.gd (%.4f)" % dichiarato)
+	h.check(not is_equal_approx(dopo, MORTAR_STEER),
+		"m8: il ripristino non ha spostato niente, MORTAR_WEIGHT e' ancora al %.1f pilotati dal test: tutto quello che gira dopo in questo processo nascerebbe con un mortar che -orda non ha autorizzato" % MORTAR_STEER)
+
+	# L'orda rilegge i pesi di produzione e si rimette a `cap`: e' la stessa via
+	# della sezione, cosi' il numero stampato qui sotto e' **lo stesso contesto** con
+	# il peso di prima e non un contesto diverso.
+	horde.run.wave_killed = horde.run.wave_total
+	horde.step(DT)
+	horde.population = cap
+	horde.reseed(SEED_A)
+
+	var viste := _specie_presenti(horde)
+	print("test_arena: m8 m13 denti, MISURATI nello stesso contesto: col peso pilotato a %.1f il campione contiene %d specie su %d spendibili, col peso di produzione tornato a %.1f ne contiene %d su %d dichiarate, e sono %s. E' per questo che il criterio confronta by_kind con le specie SPENDIBILI: a peso zero il mortar non puo' nascere, e chiedere che ci sia sarebbe chiedere un numero che il motore non puo' produrre"
+		% [MORTAR_STEER, campione, kind_names.size(), dichiarato,
+			viste.size(), kind_names.size(), ", ".join(_nomi_di(viste, kind_names))])
+	h.check(viste.size() > 0,
+		"m8: la misura col peso di produzione deve vedere almeno una specie, altrimenti la riga sopra racconta uno zero che nessuno ha misurato")
+
+## Gli indici di specie che l'orda contiene davvero, adesso.
+func _specie_presenti(horde) -> Dictionary:
+	var viste: Dictionary = {}
+	for i in horde.count:
+		viste[horde.kinds[i]] = true
+	return viste
+
+## I nomi delle specie presenti, dalla tabella di -orda, in ordine di indice.
+func _nomi_di(presenti: Dictionary, kind_names: Array) -> Array[String]:
+	var out: Array[String] = []
+	for k in presenti.keys():
+		out.append(str(kind_names[k]) if int(k) < kind_names.size() else "specie %d" % int(k))
+	out.sort()
+	return out
 
 ## ## 9.1 Il criterio n. 1: la taglia disegnata e' PROPORZIONALE a `radii[i]`
 ##
@@ -3075,8 +3336,9 @@ func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
 ## che ripetono la stessa verta' per ogni nemico.
 ##
 ## Per ogni specie: quanti nemici, il raggio **minimo e massimo** (devono essere
-## uguali, perche' `radii[i]` e' una funzione di `kinds[i]`), e la taglia disegnata
-## e la sollevata del primo esemplare visto.
+## uguali, perche' `radii[i]` e' una funzione di `kinds[i]`), la **tinta** (che deve
+## essere unica per specie, e' la via che il giocatore distingue due corpi a
+## distanza) e la taglia disegnata e la sollevata del primo esemplare visto.
 ##
 ## Il **nome** non lo mette qui: `horde.kind_name(i)` prende un **indice** di
 ## nemico, non un indice di specie, e chiamarlo con `kind` avrebbe scritto il
@@ -3085,6 +3347,7 @@ func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
 ## `_kind_names()`, cioe' dalla tabella di -orda.
 func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 	var radii: PackedFloat32Array = horde.radii
+	var tinte: PackedColorArray = horde.colors
 	for i in horde.count:
 		var kind: int = horde.kinds[i]
 		var r: float = float(radii[i])
@@ -3094,6 +3357,8 @@ func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 				"seen": 0,
 				"r_lo": r,
 				"r_hi": r,
+				"tint": tinte[i],
+				"tint_unica": true,
 				"drawn": _drawn_extent(t.basis, mesh_size),
 				"height": _scale_of(t.basis) * mesh_size.y,
 				"lift": _lift_of(enemies, horde.transforms[i], r),
@@ -3102,6 +3367,12 @@ func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 		row["seen"] = int(row["seen"]) + 1
 		row["r_lo"] = minf(float(row["r_lo"]), r)
 		row["r_hi"] = maxf(float(row["r_hi"]), r)
+		# `colors[i] = E.color_of(kinds[i])`: la tinta e' una funzione della specie
+		# esattamente come il raggio. Due nemici della stessa specie con due tinte
+		# diverse significa che il canale delle tinte e' rotto, e in headless la
+		# MultiMesh non si rilegge: l'unica lettura possibile e' questa.
+		if tinte[i] != row["tint"]:
+			row["tint_unica"] = false
 
 ## ## 9.2 Il criterio n. 3: le quattro specie sono distinguibili, per nome
 ##
@@ -3119,7 +3390,7 @@ func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 ##     dell'altezza effettiva del corpo. Questo controllo e' **indipendente** dalla
 ##     proporzionalita' — un renderer che scala i nemici e li lascia affondare
 ##     rispetta la proporzione e non si vede — ed e' la via corta per i denti.
-func _quattro_specie(h, by_kind: Dictionary, mesh_size: Vector3, legacy_extent: float, kind_names: Array) -> void:
+func _specie_campionate(h, by_kind: Dictionary, mesh_size: Vector3, legacy_extent: float, kind_names: Array, spendable: Array) -> void:
 	h.eq(by_kind.size(), kind_names.size(),
 		"m8: il campione deve contenere tutte le specie dichiarate da -orda (%d), e ne contiene %d"
 		% [kind_names.size(), by_kind.size()])

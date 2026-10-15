@@ -300,6 +300,14 @@ func _run() -> void:
 	# `_reroll` perche' quella chiama `restart_run()` e rimetterebbe a posto
 	# l'orda che qui e' stata ridotta a un nemico per specie.
 	_banda_morso(h, horde)
+	# m13: il mortar. Sta **subito dopo** `_banda_morso` e **prima** di `_reroll`
+	# per due motivi, e sono due motivi di ordine e non di comodo'ita'. Primo: la
+	# sezione ha bisogno di un **giocatore registrato** perche' il colpo cade
+	# dove sta il giocatore, e lo spia di `_touch` e' l'unico che questo file
+	# abbia: prima di lui nessuna cupola avrebbe un punto da segnalare. Secondo:
+	# `_reroll` chiama `restart_run()`, che azzera i colpi in volo, e la sezione
+	# vuole poter guardare un colpo che arriva davvero a cadere.
+	_mortar(h, horde)
 	# m11-bis-b: il reroll della sezione 14. Sta qui, dopo `_touch` e **prima**
 	# di `_scena_vera`, e il posto e' dichiarato nella sezione: sulla scena vera un
 	# restart rimescolerebbe proprio il numero che il criterio n. 1 di 1.14-ter
@@ -773,6 +781,9 @@ func _touch_table(h) -> void:
 		"il runner e' la base del morso: la formula e' ancorata a lui")
 	h.near(ENEMY.touch_period_of(ENEMY.RUNNER), ENEMY.TOUCH_PERIOD, 0.000001,
 		"e del periodo")
+	# Ogni specie, senza eccezioni: il danno e la cadenza escono dalla tabella
+	# `MASS` e da nient'altro. La quinta specie e' dentro anche lei, quindi qui
+	# si misura che non abbia fatto nascere una tabella tutta sua.
 	for k in ENEMY.KIND_COUNT:
 		var atteso := ENEMY.TOUCH_DAMAGE_BASE * ENEMY.MASS[k] / ENEMY.MASS[ENEMY.RUNNER]
 		h.near(ENEMY.touch_damage_of(k), atteso, 0.000001,
@@ -781,15 +792,36 @@ func _touch_table(h) -> void:
 		var periodo := ENEMY.TOUCH_PERIOD * sqrt(ENEMY.MASS[k] / ENEMY.MASS[ENEMY.RUNNER])
 		h.near(ENEMY.touch_period_of(k), periodo, 0.000001,
 			"la cadenza di %s esce dalla stessa tabella" % ENEMY.KIND_NAMES[k])
-		if k > 0:
-			h.check(ENEMY.touch_damage_of(k) > ENEMY.touch_damage_of(k - 1),
-				"piu' pesante morde piu' forte: %s (%.2f) sopra %s (%.2f)"
-					% [ENEMY.KIND_NAMES[k], ENEMY.touch_damage_of(k),
-						ENEMY.KIND_NAMES[k - 1], ENEMY.touch_damage_of(k - 1)])
-			h.check(ENEMY.touch_period_of(k) > ENEMY.touch_period_of(k - 1),
-				"piu' pesante morde piu' lento: %s (%.2f s) sopra %s (%.2f s)"
-					% [ENEMY.KIND_NAMES[k], ENEMY.touch_period_of(k),
-						ENEMY.KIND_NAMES[k - 1], ENEMY.touch_period_of(k - 1)])
+	# ## m13: la monotonia e' sulla **massa**, non sull'indice
+	#
+	# Fino a m12 le due cose coincidevano: l'ordine degli indici (`runner`,
+	# `grunt`, `brute`, `boss`) era anche l'ordine delle masse. Con la quinta
+	# specie **no**: il mortar ha massa 3,2, cioe' piu' del brute (2,6) e meno
+	# del boss (6,0), e il suo indice e' 4 perche' e' nato dopo. Quindi un
+	# criterio scritto su `k - 1` comincia a confrontare il mortar col boss e va
+	# rosso — e va rosso per la ragione sbagliata.
+	#
+	# Il numero che il criterio descrive non e' cambiato: resta «piu' pesante
+	# morde piu' forte e piu' lento», ed e' quello che i due numeri storici
+	# (1,60 / 2,29 / 5,94 / 13,71) continuano a dire. A cambiare e' **la domanda**:
+	# non piu' «la specie dopo e' piu' pesante», ma «la specie piu' pesante di
+	# tutte». Scrivere il criterio sull'indice e stato quello che ha fatto questa
+	# sezione andare rossa; scriverlo sulla massa e' la correzione, e il fatto
+	# che sia una correzione e' dichiarato qui e non nascosto.
+	var per_massa := _specie_per_massa()
+	for n in per_massa.size():
+		var k: int = per_massa[n]
+		if n == 0:
+			continue
+		var j: int = per_massa[n - 1]
+		h.check(ENEMY.touch_damage_of(k) > ENEMY.touch_damage_of(j),
+			"piu' pesante morde piu' forte: %s (%.2f, massa %.1f) sopra %s (%.2f, massa %.1f)"
+				% [ENEMY.KIND_NAMES[k], ENEMY.touch_damage_of(k), ENEMY.MASS[k],
+					ENEMY.KIND_NAMES[j], ENEMY.touch_damage_of(j), ENEMY.MASS[j]])
+		h.check(ENEMY.touch_period_of(k) > ENEMY.touch_period_of(j),
+			"piu' pesante morde piu' lento: %s (%.2f s, massa %.1f) sopra %s (%.2f s, massa %.1f)"
+				% [ENEMY.KIND_NAMES[k], ENEMY.touch_period_of(k), ENEMY.MASS[k],
+					ENEMY.KIND_NAMES[j], ENEMY.touch_period_of(j), ENEMY.MASS[j]])
 	# nessun morso uccide da solo: il capo e' la specie piu' pesante e quindi
 	# quella che morde piu' forte, ed e' il numero che tiene sotto il tetto.
 	h.check(ENEMY.touch_damage_of(ENEMY.BOSS) <= PLAYER_HP_REFERENCE / 4.0,
@@ -800,6 +832,36 @@ func _touch_table(h) -> void:
 		h.check(ENEMY.touch_period_of(k) >= ENEMY.TOUCH_PERIOD,
 			"%s non morde piu' di una volta al secondo (periodo %.2f s)"
 				% [ENEMY.KIND_NAMES[k], ENEMY.touch_period_of(k)])
+	print("orda: morso, tabella per specie nell'ordine del peso: %s"
+		% _riga_mosse())
+
+## Gli indici delle specie **in ordine di massa crescente**, dall'indice piu'
+## basso. Non e' un trucco: e' la domanda che «piu' pesante morde piu' forte» sta
+## davvero facendo. L'ordine degli indici era la stessa cosa solo finche' le
+## specie sono state quattro (vedi la dichiarazione sopra).
+func _specie_per_massa() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for k in ENEMY.KIND_COUNT:
+		out.append(k)
+	# ordinamento per inserzione: cinque elementi e nessuna allocazione che
+	# valga la pena dichiarare.
+	for a in range(1, out.size()):
+		var v: int = out[a]
+		var b := a - 1
+		while b >= 0 and ENEMY.MASS[out[b]] > ENEMY.MASS[v]:
+			out[b + 1] = out[b]
+			b -= 1
+		out[b + 1] = v
+	return out
+
+## `runner 0.7/1.60/1.00s` per ogni specie nell'ordine del peso: massa, morso,
+## periodo. Il denominatore e' dichiarato per ogni voce, come in `_riga_specie`.
+func _riga_mosse() -> String:
+	var testo := ""
+	for k in _specie_per_massa():
+		testo += " %s %.1f/%.2f/%.2fs" % [ENEMY.KIND_NAMES[k], ENEMY.MASS[k],
+			ENEMY.touch_damage_of(k), ENEMY.touch_period_of(k)]
+	return testo
 
 # --- 1. Popolazione -----------------------------------------------------------
 
@@ -3827,6 +3889,597 @@ func _morde_a_distanza(h, horde: HORDE, kind: int, distanza: float) -> bool:
 	horde.auto_respawn = respawn
 	return morso
 
+# --- m13. Il mortar: la quinta specie, il telegrrafo e la cupola ----------------
+#
+# ## La richiesta, e i tre numeri che la rendono giusta o sbagliata
+#
+# «entro un certo range si ferma, spara come un mortaio, viene segnalato con una
+# cupola rossa dove atterra il colpo dando la possibilità di schivare».
+#
+# La cupola e' di `-arena`; **quando** il colpo cade e' di questa foglia. La
+# sezione quindi dimostra tre cose, e ognuna ha due lati:
+#
+# | | cosa deve essere vero | il difetto se non lo e' |
+# |---|---|---|
+# | **schivabile** | `13,65 x telegraph >= blast + 0,45` | il colpo e' un delitto: arriva e non si vede arrivare |
+# | **non gratis** | un giocatore fermo dentro il raggio **muore** | la finestra e' cosi' lunga che ci si sta dentro senza danno, e allora e' un campo, non un colpo |
+# | **un solo istante** | il contratto porta il numero di `enemy.gd` | la cupola dice «schiva qui» e il colpo cade altrove |
+#
+# ## Il numero che decide, e **da dove viene**
+#
+# Non e' una cifra scelta a occhio: il tempo e' **derivato** dalla disuguaglianza
+# con un margine dichiarato (`DODGE_MARGIN` in `src/sim/enemy.gd`), e il raggio
+# di esplosione e' la **portata di morso della specie stessa**, quindi una
+# grandezza che il giocatore ha gia' davanti agli occhi. Sotto ci sono i denti:
+# si stringe il margine e la disuguaglianza deve fallire; si allarga e deve
+# fallire l'altra condizione (due cupole in volo insieme).
+#
+# ## Quattro denti, e cosa ognuno esclude
+#
+#   1. **la disuguaglianza** coi due numeri e il margine **stampati**, non un
+#      booleano: chi legge deve poter rifare il conto;
+#   2. **i denti del margine**, dentro la sezione: `DODGE_MARGIN` a 0,5 deve
+#      rompere la disuguaglianza, a 20,0 deve rompere il tetto della ricarica, e
+#      il ripristino e' asserito due volte;
+#   3. **il canale avvelenato**: il contratto vale 99,0 s e -7,0 m, si monta
+#      un'altra orda, e quello che arriva deve essere **il numero di questa
+#      foglia**, non il default e non il numero di prova;
+#   4. **il colpo in volo**: `mortar_shot_count` vale 1 e `mortar_shots[0].z`
+#      scende di `DT` a ogni passo fino a zero — letto sul **campo congelato**,
+#      non su un metodo comodo.
+
+## Le quattro specie che **non** cambiano, voce per voce. Sono i numeri di sette
+## milestone e la quinta voce non puo' portarsene via una cifra.
+static var QUATTRO_HP := PackedFloat32Array([14.0, 34.0, 110.0, 900.0])
+static var QUATTRO_SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7])
+static var QUATTRO_RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90])
+static var QUATTRO_MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0])
+static var QUATTRO_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90])
+## I quattro numeri di morso che il vertice ha dichiarato **inviolabili** in
+## questa onda: 1,60 / 2,29 / 5,94 / 13,71 hp.
+static var QUATTRO_MORSO := PackedFloat32Array([1.6, 2.29, 5.94, 13.71])
+
+## Il punto in cui sta il giocatore in tutta la sezione.
+##
+## **Non `Vector3.ZERO`**: `_player_focus()` rifiuta un punto a distanza quasi
+## nulla e ripiega sul fuoco dell'ordine, quindi un giocatore finto all'origine
+## misurerebbe una cosa diversa dal gioco (la stessa ragione di `FAKE_PLAYER`).
+##
+## **8 m dal centro e non 3,-5**: a 8 m il disco centrale e' libero per costruzione
+## — il primo anello di ostacoli e' a 19,80 m con raggio 3,90 m, quindi il disco
+## libero arriva a 15,90 m — e nessun nemico di questa sezione viene spinto
+## fuori da un disco mentre misura il tempo di un colpo.
+const PUNTO_MORTAR := Vector3(0.0, 0.0, 8.0)
+
+## Quanto il nemico di questa sezione e' **dentro** la fermata, in metri.
+##
+## Non e' uno scarto di comodo': `transforms` e' un `PackedVector3Array`, cioe'
+## `float32`, e la posizione scritta puo' cadere qualche ulp **oltre** la
+## distanza di fermata calcolata in `float64`. Un test che mette il nemico
+## esattamente sul confine sta misurando la precisione del `float` e non il
+## comportamento: e quando succede, va rosso per la ragione sbagliata, che e' la
+## cosa peggiore di un criterio. Dentro di 5 cm e' una posizione che vale per
+## qualunque `float32`.
+const FERMO_DENTRO := 0.05
+
+## Quanti passicorre la corsa a **danno zero**, coi denti dentro.
+##
+## Non e' un numero per far presto: e' il minimo che contiene **due colpi caduti**
+## con la ricarica di 2,1381 s, cioe' `2 x 129` passi piu' il tempo di volo del
+## primo. Sotto questo numero i denti misurerebbero «non e' partito niente» invece
+## di «non ha fatto danno», cioe' la ragione sbagliata.
+const PASSI_DENTI_DANNO := 420
+
+## Il tetto di passi del «fermo dentro», dichiarato come tutti gli altri numeri.
+## `PASSI_DENTI_DANNO` e' la parte corta; il tetto viene dal gioco e non e' un
+## numero di comodo': e' quanto serve a un giocatore da 100 hp a prendere
+## `ceil(100 / 13,7143) = 8` colpi, uno ogni `reload = 2,1381 s`.
+const PASSI_FERMO_DENTRO := 2400
+
+func _mortar(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	_m13_tabelle(h)
+	_m13_peso_zero(h, horde)
+	var tele := ENEMY.telegraph_for(horde.body_scale)
+	var blast := ENEMY.blast_radius_for(horde.body_scale)
+	var fuga := (blast + ENEMY.TOUCH_REACH) / ENEMY.PLAYER_SPEED
+	var margine := tele / maxf(0.000001, fuga)
+	var ricarica := ENEMY.reload_of(ENEMY.MORTAR)
+	# ## Il criterio 1: la disuguaglianza, con i due numeri e il margine
+	#
+	# `>=` e non `>`: sotto e' un delitto, **uguale** e' il limite esatto — e il
+	# margine dichiarato dice di quanto quel limite e' stato spinto fuori.
+	h.check(ENEMY.PLAYER_SPEED * tele >= blast + ENEMY.TOUCH_REACH,
+		"disuguaglianza di schivata: %.2f m/s x %.4f s = %.4f m deve essere >= %.4f m "
+			% [ENEMY.PLAYER_SPEED, tele, ENEMY.PLAYER_SPEED * tele, blast + ENEMY.TOUCH_REACH]
+			+ "(raggio %.4f m + corpo %.2f m): sotto, il colpo non e' schivabile"
+				% [blast, ENEMY.TOUCH_REACH])
+	# ## Il criterio 2, l'altro lato: **una cupola per nemico**
+	#
+	# Sopra la ricarica il mortar avrebbe due colpi in volo nello stesso istante e
+	# il giocatore non saprebbe quale e' quello che sta per cadere: un avvertimento
+	# che non si legge non e' un avvertimento. Il tetto e' derivato (`reload_of`),
+	# non scritto.
+	h.check(tele <= ricarica,
+		"una cupola per nemico: il telegrrafo (%.4f s) non puo' superare la ricarica (%.4f s), "
+			% [tele, ricarica]
+			+ "altrimenti due cupole sarebbero in volo insieme")
+	h.check(ENEMY.DODGE_MARGIN >= 1.0,
+		"il margine dichiarato (%.2f) e' almeno 1: sotto, il colpo e' schivabile solo da chi "
+			% ENEMY.DODGE_MARGIN
+			+ "sa gia' dove cade prima che la cupola compaia")
+	print("orda: m13, telegrrafo %.4f s (%.1f passi a DT=%.4f) x raggio %.4f m, margine %.2f "
+			% [tele, tele / DT, DT, blast, margine]
+		+ "(fuga minima %.4f s: %.2f m/s x %.4f s >= %.4f + %.2f m), ricarica %.4f s, "
+			% [fuga, ENEMY.PLAYER_SPEED, fuga, blast, ENEMY.TOUCH_REACH, ricarica]
+			+ "fermata a %.4f m, danno %.4f hp"
+			% [ENEMY.engage_for(horde.body_scale), ENEMY.MORTAR_BLAST_HP])
+	# ## La fermata e' derivata, e lo dice con un'identita', non con una stima
+	var corpo := horde.body_scale * ENEMY.RADIUS[ENEMY.MORTAR]
+	h.near(ENEMY.engage_for(horde.body_scale) - corpo - blast, ENEMY.TOUCH_REACH, 0.000001,
+		"fra il corpo disegnato del mortar e il bordo della cupola che sta per disegnare "
+			+ "ci sono esattamente %.2f m (il corpo del giocatore), non uno spazio libero"
+				% ENEMY.TOUCH_REACH)
+	h.check(ENEMY.engage_for(horde.body_scale) > ENEMY.bite_range_of(ENEMY.MORTAR, horde.body_scale),
+		"il mortar si ferma fuori dalla propria portata di morso, quindi da dove sta non morde")
+	# ## Il numero del giocatore viene dal contratto, non da una copia qui
+	var game := _game()
+	h.check(game != null and _contiene("res://src/core/contracts.gd", "13,65"),
+		"il contratto dichiara ancora 13,65 m/s nella disuguaglianza del mortar")
+	h.near(ENEMY.PLAYER_SPEED, 13.65, 0.000001,
+		"la velocita' del giocatore in enemy.gd e' il numero che il contratto dichiara")
+	h.eq(_occorrenze_di_codice("res://src/sim/enemy.gd", "13.65"), 1,
+		"13.65 compare in codice una volta sola in enemy.gd: l'unica fonte")
+	h.eq(_occorrenze_di_codice("res://src/sim/horde.gd", "13.65"), 0,
+		"e in horde.gd non compare: la tabella delle specie e' la fonte, non una copia")
+
+	_m13_denti_margine(h, horde, tele, blast)
+	_m13_canale(h, horde, tele, blast)
+	_m13_volo(h, horde, tele, blast)
+	_m13_stazionario(h, horde)
+
+	# ## L'orda e il contratto tornano come erano
+	_player_via = FAKE_PLAYER
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	h.eq(horde.mortar_shot_count, 0,
+		"m13: il restart azzera i colpi in volo (una partita nuova non comincia con la cupola di prima)")
+	h.eq(horde.count, horde.population, "m13: e l'orda torna alla popolazione della curva")
+	print("orda: m13, sezione intera in %d us" % (Time.get_ticks_usec() - t0))
+
+## ## Le sei tabelle: allineate 1:1, e le quattro specie immobili
+func _m13_tabelle(h) -> void:
+	h.eq(ENEMY.KIND_COUNT, 5, "m13: KIND_COUNT e' 4 specie piu' il mortar")
+	h.eq(ENEMY.KIND_NAMES.size(), 5, "m13: KIND_NAMES ha cinque nomi")
+	h.eq(ENEMY.KIND_NAMES[ENEMY.MORTAR], "mortar", "m13: la quinta voce si chiama mortar")
+	# Le cinque tabelle numeriche 1:1 su `KIND_COUNT`, e ognuna con la sua
+	# versione di quattro specie da confrontare voce per voce. `near` e non
+	# `eq`: una `PackedFloat32Array` conserva dei `float32` e `0.60` scritto qui
+	# sarebbe un `float64` — il confronto esatto fallirebbe per un ulp, e un
+	# criterio che fallisce per un ulp mente sul difetto che sta guardando.
+	var tabelle := [
+		["HP_MAX", ENEMY.HP_MAX, QUATTRO_HP],
+		["SPEED", ENEMY.SPEED, QUATTRO_SPEED],
+		["RADIUS", ENEMY.RADIUS, QUATTRO_RADIUS],
+		["MASS", ENEMY.MASS, QUATTRO_MASS],
+		["KNOCKBACK_RESIST", ENEMY.KNOCKBACK_RESIST, QUATTRO_RESIST],
+	]
+	for riga in tabelle:
+		var nome: String = riga[0]
+		var tabella: PackedFloat32Array = riga[1]
+		h.eq(tabella.size(), 5,
+			"m13: la tabella %s ha una voce per specie, non quattro" % nome)
+		var quattro: PackedFloat32Array = riga[2]
+		for k in 4:
+			h.near(tabella[k], quattro[k], 0.0001,
+				"m13: la tabella %s non ha spostato la voce %s (indice %d): %.4f contro %.4f"
+					% [nome, ENEMY.KIND_NAMES[k], k, tabella[k], quattro[k]])
+	h.eq(ENEMY.COLOR.size(), 5, "m13: anche la tabella delle tinte ha cinque voci")
+	for k in 4:
+		h.near(ENEMY.touch_damage_of(k), QUATTRO_MORSO[k], 0.006,
+			"m13: il morso di %s e' ancora %.2f hp, il numero che il vertice ha dichiarato "
+				% [ENEMY.KIND_NAMES[k], QUATTRO_MORSO[k]]
+				+ "inviolabile in questa onda")
+	# E il numero che la nuova specie si porta dietro, derivato e non scribblato.
+	h.check(ENEMY.MASS[ENEMY.MORTAR] > ENEMY.MASS[ENEMY.BRUTE]
+			and ENEMY.MASS[ENEMY.MORTAR] < ENEMY.MASS[ENEMY.BOSS],
+		"m13: il mortar pesa fra il brute (%.1f) e il boss (%.1f): piu' grosso di chi insegue, "
+			% [ENEMY.MASS[ENEMY.BRUTE], ENEMY.MASS[ENEMY.BOSS]]
+			+ "piu' piccolo del capo, ottenuto %.1f" % ENEMY.MASS[ENEMY.MORTAR])
+	h.near(ENEMY.MORTAR_BLAST_HP, ENEMY.touch_damage_of(ENEMY.BOSS), 0.0001,
+		"m13: il danno di un colpo e' il morso peggiore del gioco (%.2f hp), derivato dalla "
+			% ENEMY.touch_damage_of(ENEMY.BOSS)
+			+ "tabella delle masse e non scritto a mano")
+	h.near(ENEMY.reload_of(ENEMY.MORTAR), ENEMY.touch_period_of(ENEMY.MORTAR), 0.000001,
+		"m13: la ricarica del mortar e' il periodo di morso della sua specie, non un numero suo")
+	print("orda: m13, tabelle allineate 1:1 su %d specie (%s), %s | morso %s"
+		% [ENEMY.KIND_COUNT, _nomi_tabelle(), _quattro_specie_sicure(), _riga_mosse()])
+
+## Le quattro specie, con quello che ciascuna vale: la stampa che dice che la
+## quinta voce ha **aggiunto** e non spostato niente.
+func _quattro_specie_sicure() -> String:
+	return "le quattro specie hanno ancora hp %.0f/%.0f/%.0f/%.0f e massa %.1f/%.1f/%.1f/%.1f" \
+		% [QUATTRO_HP[0], QUATTRO_HP[1], QUATTRO_HP[2], QUATTRO_HP[3],
+			QUATTRO_MASS[0], QUATTRO_MASS[1], QUATTRO_MASS[2], QUATTRO_MASS[3]]
+
+func _m13_peso_zero(h, horde: HORDE) -> void:
+	h.eq(SPAWNER.MORTAR_WEIGHT, 0.0,
+		"m13: il peso del mortar e' dichiarato a 0.0 (un mortar senza cupola e' un danno "
+			+ "senza preavviso: il peso sale in un'onda separata, quando -arena ha la cupola)")
+	for w in [1, 2, 3, 4, 8, 12, 20]:
+		var pesi := SPAWNER.wave_weights(int(w))
+		h.eq(pesi.size(), 5, "m13: i pesi dell'onda %d hanno una voce per specie" % int(w))
+		h.eq(pesi[ENEMY.MORTAR], 0.0,
+			"m13: il peso del mortar sull'onda %d e' 0.0, non solo sull'onda 1" % int(w))
+	# ## I denti: la voce segue la **fonte**, quindi non e' uno zero scritto qui
+	var prima := SPAWNER.MORTAR_WEIGHT
+	SPAWNER.MORTAR_WEIGHT = 7.0
+	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], 7.0,
+		"denti: con il peso di fonte a 7.0 la voce dei pesi deve seguirlo, altrimenti lo zero "
+			+ "qui e' una copia scritta a mano")
+	SPAWNER.MORTAR_WEIGHT = prima
+	h.eq(SPAWNER.MORTAR_WEIGHT, 0.0, "denti: ripristino 1, la fonte torna a 0.0")
+	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], 0.0,
+		"denti: ripristino 2, e i pesi ricalcolati tornano a 0.0")
+	# E nel gioco vero non c'e' nessun mortar: e' l'unica cosa che garantisce che
+	# `-arena` continui a vedere le specie che ha da disegnare.
+	h.eq(horde.census()[ENEMY.MORTAR], 0,
+		"m13: nell'orda dell'onda 1 non c'e' nessun mortar, quindi il renderer non ne vede")
+
+## ## I denti del margine, accesi e spenti nella stessa sezione
+##
+## Un criterio che nessuno ha mai visto andare rosso e' un numero che il prossimo
+## legge come se fosse vivo. Qui il difetto si accende due volte, sui due lati,
+## e il ripristino e' asserito tre volte.
+func _m13_denti_margine(h, horde: HORDE, tele: float, blast: float) -> void:
+	var bs := horde.body_scale
+	var prima := ENEMY.DODGE_MARGIN
+	# ## Lato basso: sotto il tempo di fuga il colpo non e' schivabile
+	ENEMY.DODGE_MARGIN = 0.5
+	var stretto := ENEMY.telegraph_for(bs)
+	h.check(ENEMY.PLAYER_SPEED * stretto < blast + ENEMY.TOUCH_REACH,
+		"denti: col margine a 0,5 il telegrrafo deve VIOLARE la disuguaglianza (%.4f m < %.4f m), "
+			% [ENEMY.PLAYER_SPEED * stretto, blast + ENEMY.TOUCH_REACH]
+			+ "altrimenti il criterio non ha denti e la misura non sta guardando il posto giusto")
+	ENEMY.DODGE_MARGIN = prima
+	h.eq(ENEMY.DODGE_MARGIN, prima, "denti: ripristino 1, il margine torna a %.2f" % prima)
+	h.near(ENEMY.telegraph_for(bs), tele, 0.000001,
+		"denti: ripristino 2, e il telegrrafo ricalcolato torna a %.4f s" % tele)
+	# ## Lato alto: sopra la ricarica ci sarebbero due cupole in volo
+	ENEMY.DODGE_MARGIN = 20.0
+	var largo := ENEMY.telegraph_for(bs)
+	h.check(largo > ENEMY.reload_of(ENEMY.MORTAR),
+		"denti: col margine a 20,0 il telegrrafo (%.2f s) deve superare la ricarica (%.2f s), "
+			% [largo, ENEMY.reload_of(ENEMY.MORTAR)]
+			+ "altrimenti il tetto 'una cupola per nemico' non ha denti")
+	ENEMY.DODGE_MARGIN = prima
+	h.near(ENEMY.telegraph_for(bs), tele, 0.000001,
+		"denti: ripristino 3, il telegrrafo torna a quello di partita, %.4f s" % tele)
+
+## ## Il canale: il vertice dichiara due campi, **questa** foglia li scrive
+##
+## Come `enemy_body_scale` alla rovescia: li' si legge un numero di `-arena`, qui
+## si da' un numero a `-arena`. Il criterio avvelena i due campi con un numero
+## assurdo, monta un'altra orda, e verifica che al contratto arrivi **il numero di
+## questa foglia** — non il default dichiarato e non il numero di prova.
+const TELEGRAPH_AVVELENATO := 99.0
+const BLAST_AVVELENATO := -7.0
+
+func _m13_canale(h, horde: HORDE, tele: float, blast: float) -> void:
+	var game := _game()
+	if game == null:
+		h.fail("m13: il contratto non c'e', la prova del canale non puo' girare")
+		return
+	h.eq(horde.mortar_source, "contratto",
+		"m13: l'orda dichiara di aver registrato i due numeri: un fallback qui sarebbe silenzioso")
+	h.near(float(game.get("mortar_telegraph_s")), tele, 0.000001,
+		"m13: sul contratto c'e' il telegrrafo di questa foglia (%.4f s)" % tele)
+	h.near(float(game.get("mortar_blast_m")), blast, 0.000001,
+		"m13: sul contratto c'e' il raggio di esplosione di questa foglia (%.4f m)" % blast)
+	# ## Il default dichiarato **non e' una seconda fonte**
+	#
+	# Se il numero in campo fosse uguale al default dichiarato, tutto quello che
+	# e' sopra passerebbe anche se nessuno avesse mai scritto niente. Quindi si
+	# verifica che i due non coincidano e si dice per iscritto quale e' il
+	# default: un test che non lo distingue chiama «canale» un numero che nessuno
+	# ha scritto.
+	var d_tele := _mortar_dichiarato("mortar_telegraph_s")
+	var d_blast := _mortar_dichiarato("mortar_blast_m")
+	h.check(d_tele > 0.0 and d_blast > 0.0,
+		"m13: il contratto dichiara entrambi i numeri (default %.2f s e %.2f m)" % [d_tele, d_blast])
+	h.check(absf(d_tele - tele) > 0.000001 and absf(d_blast - blast) > 0.000001,
+		"m13: il numero in campo non coincide col default dichiarato (%.2f s, %.2f m): "
+			% [d_tele, d_blast]
+			+ "altrimenti «il contratto porta il nostro numero» passerebbe anche senza nessuna scrittura")
+	var prima_t := float(game.get("mortar_telegraph_s"))
+	var prima_b := float(game.get("mortar_blast_m"))
+	game.set("mortar_telegraph_s", TELEGRAPH_AVVELENATO)
+	game.set("mortar_blast_m", BLAST_AVVELENATO)
+	h.eq(float(game.get("mortar_telegraph_s")), TELEGRAPH_AVVELENATO,
+		"m13: avvelenamento, il contratto ha il numero di prova %.1f s" % TELEGRAPH_AVVELENATO)
+	h.eq(float(game.get("mortar_blast_m")), BLAST_AVVELENATO,
+		"m13: avvelenamento, e %.1f m" % BLAST_AVVELENATO)
+	var bs := _m13_sonda(h, "OrdaSondaMortar")
+	h.near(float(game.get("mortar_telegraph_s")), ENEMY.telegraph_for(bs), 0.000001,
+		"m13: un'orda montata col contratto avvelenato scrive il telegrrafo di enemy.gd (%.4f s), "
+			% ENEMY.telegraph_for(bs)
+			+ "non il %.1f s del contratto" % TELEGRAPH_AVVELENATO)
+	h.near(float(game.get("mortar_blast_m")), ENEMY.blast_radius_for(bs), 0.000001,
+		"m13: e il raggio di esplosione di enemy.gd (%.4f m), non il %.1f m avvelenato"
+			% [ENEMY.blast_radius_for(bs), BLAST_AVVELENATO])
+	game.set("mortar_telegraph_s", prima_t)
+	game.set("mortar_blast_m", prima_b)
+	h.eq(float(game.get("mortar_telegraph_s")), prima_t,
+		"m13: ripristino 1, il contratto torna a %.4f s" % prima_t)
+	h.eq(float(game.get("mortar_blast_m")), prima_b,
+		"m13: ripristino 2, e a %.4f m" % prima_b)
+	var bs_dopo := _m13_sonda(h, "OrdaSondaMortarDopo")
+	h.near(float(game.get("mortar_telegraph_s")), prima_t, 0.000001,
+		"m13: ripristino 3, e un'altra orda montata adesso rivede %.4f s: il canale funziona "
+			% prima_t
+			+ "dopo che e' stato avvelenato, quindi «ripristinato» non e' una parola")
+	h.near(float(game.get("mortar_blast_m")), prima_b, 0.000001,
+		"m13: ripristino 4, e rivede %.4f m" % prima_b)
+	_ripristina(h, horde)
+	print("orda: m13, canale -- contratto avvelenato a %.1f s / %.1f m, l'orda montata in quel "
+			% [TELEGRAPH_AVVELENATO, BLAST_AVVELENATO]
+		+ "momento scrive %.4f s / %.4f m (default dichiarato sul contratto %.2f / %.2f), poi il "
+			% [ENEMY.telegraph_for(bs), ENEMY.blast_radius_for(bs),
+				d_tele, d_blast]
+			+ "contratto torna a %.4f / %.4f e un'altra orda lo rivede" % [prima_t, prima_b])
+
+## Il default che il contratto dichiara, letto **dal sorgente**: serve a dire se
+## il valore in campo e' quello che `-orda` ha registrato o e' ancora il default.
+func _mortar_dichiarato(nome: String) -> float:
+	var f := FileAccess.open("res://src/core/contracts.gd", FileAccess.READ)
+	if f == null:
+		return -1.0
+	for riga in f.get_as_text().split("\n"):
+		var t := str(riga).strip_edges()
+		if t.begins_with("var " + nome):
+			return float(t.split("=")[1].strip_edges())
+	return -1.0
+
+## Monta un'orda di prova solo per guardare che cosa scrive sul contratto, e la
+## butta giù'. Come `_sonda_corpo` della sezione 16: la sonda ha un seme suo e
+## dichiarato, e alla fine le API tornano all'orda del test.
+func _m13_sonda(h, nome: String) -> float:
+	var sonda := HORDE.new()
+	sonda.name = nome
+	sonda.seed = 4242
+	root.add_child(sonda)
+	# ## Il fattore si legge **prima** di liberare la sonda
+	#
+	# Dopo `queue_free()` l'oggetto non esiste piu': leggerne un campo da quel
+	# punto schianta il processo, e un test che schianta non e' un test che ha
+	# sbagliato un numero, e' un test che non ha risposto niente. Quindi qui si
+	# restituisce **il valore**, non l'oggetto, e chi chiama guarda il valore.
+	var bs := sonda.body_scale
+	h.eq(sonda.mortar_source, "contratto",
+		"%s dichiara mortar_source 'contratto': senza questa riga un fallback sarebbe silenzioso"
+			% nome)
+	root.remove_child(sonda)
+	sonda.queue_free()
+	return bs
+
+## ## Il colpo in volo, letto sul campo **congelato**
+##
+## Qui non si usa un metodo comodo: `mortar_shot_count` e `mortar_shots[0].z`
+## sono i due nomi che `-arena` costruisce il suo `MultiMesh` sopra, e sono quindi
+## la superficie che va verificata. Un metodo che dicesse «va tutto bene» sopra un
+## campo sbagliato non cambierebbe niente a `-arena`: romperebbe la sua onda e
+## lascerebbe questo file verde.
+func _m13_volo(h, horde: HORDE, tele: float, blast: float) -> void:
+	_m13_prepara(horde, ENEMY.MORTAR)
+	h.eq(horde.mortar_shot_count, 0, "m13: nessun colpo in volo prima di spari")
+	var danno_prima := _totale_danno
+	horde.step(DT)
+	h.eq(horde.mortar_shot_count, 1,
+		"m13: il mortar entro la fermata spara e il colpo e' in volo")
+	h.eq(horde.mortar_shots.size(), HORDE.MAX_ENEMIES,
+		"m13: l'array dei colpi e' scaldato una volta sola a MAX_ENEMIES, quindi nel ciclo di "
+			+ "gioco non cresce mai")
+	h.vec_near(horde.mortar_shot_at(0), PUNTO_MORTAR, 0.0001,
+		"m13: la cupola segnala il punto in cui cade il colpo, che e' dove stava il giocatore "
+			+ "quando il mortar ha premuto")
+	h.eq(int(horde.mortar_shots[0].x), 0, "m13: convenzione dell'elemento, `x` e' la x del mondo")
+	h.eq(int(horde.mortar_shots[0].y), 8, "m13: e `y` e' la z del mondo, non una profondita'")
+	h.near(horde.mortar_shots[0].z, tele, 0.0001,
+		"m13: il colpo parte con %.4f s di tempo residuo, cioe' il telegrrafo" % tele)
+	h.near(_totale_danno, danno_prima, 0.000001,
+		"m13: mentre il colpo e' in volo non e' successo niente: il danno e' un istante, non un campo")
+	h.eq(horde.touch_bites_last, 0,
+		"m13: e il mortar non morde: si e' fermato %.4f m dal giocatore, fuori dalla sua portata"
+			% ENEMY.engage_for(horde.body_scale))
+	var passi := 0
+	var scala := " %.4f" % horde.mortar_shots[0].z
+	while horde.mortar_shot_count > 0 and passi < 240:
+		var prima_z := horde.mortar_shots[0].z
+		horde.step(DT)
+		if horde.mortar_shot_count == 0:
+			h.check(prima_z <= DT + 0.000001,
+				"m13: il colpo cade nell'ultimo passo (residuo %.5f s, DT %.5f s): non puo' "
+					% [prima_z, DT]
+					+ "volare un passo oltre il telegrrafo")
+			h.near(_totale_danno - danno_prima, ENEMY.MORTAR_BLAST_HP, 0.0001,
+				"m13: il giocatore fermo dentro la cupola prende %.4f hp quando il colpo cade"
+					% ENEMY.MORTAR_BLAST_HP)
+			break
+		var dopo_z := horde.mortar_shots[0].z
+		h.near(dopo_z, prima_z - DT, 0.00001,
+			"m13: i secondi residui scendono di DT a ogni passo (da %.5f a %.5f)"
+				% [prima_z, dopo_z])
+		if passi < 4:
+			scala += " -> %.4f" % dopo_z
+		passi += 1
+	h.eq(horde.mortar_shot_count, 0, "m13: il colpo esce dall'array quando e' caduto")
+	# ## L'invariante vera, e con denti
+	#
+	# La riga che stava qui prima confrontava il conteggio con
+	# `mortar_shots.size() - mortar_shots.size()`, cioe' con **zero**: era
+	# `0 == 0`, verde per costruzione, cioe' un criterio che non puo' fallire. E un
+	# criterio che non puo' fallire e' la cosa peggiore che si possa lasciare,
+	# perche' il prossimo lo legge come se misurasse qualcosa.
+	#
+	# L'invariante vera e' un'altra: i vivi sono `mortar_shots[0 .. count)`, quindi
+	# il conteggio non puo' superare la capienza scaldata. Se un nemico avesse due
+	# colpi in volo (ricarica sotto il telegrrafo) il conteggio la toccherebbe.
+	h.check(horde.mortar_shot_count >= 0 and horde.mortar_shot_count <= horde.mortar_shots.size(),
+		"m13: il conteggio dei vivi (%d) sta dentro la capienza scaldata (%d): sono i vivi "
+			% [horde.mortar_shot_count, horde.mortar_shots.size()]
+			+ "che il renderer chiede prima di iterare, e non l'array")
+	h.check(passi >= int(ceil(tele / DT)) - 1,
+		"m13: il colpo e' restato in volo %d passi, che e' il telegrrafo (%.1f passi)"
+			% [passi, tele / DT])
+	print("orda: m13, il colpo in volo -- caduta su (%.2f, %.2f), residui%s -> 0 in %d passi "
+			% [PUNTO_MORTAR.x, PUNTO_MORTAR.z, scala, passi]
+		+ "(%.4f s a DT %.4f), danno %.2f hp all'istante della caduta"
+			% [tele, DT, ENEMY.MORTAR_BLAST_HP])
+	# ## E adesso la **schivata**, che e' la meta' della finestra
+	#
+	# Stesso colpo, stesso istante, giocatore spostato fuori dal raggio: e' la
+	# domanda che il mortaio deve fare possibile («dando la possibilita' di
+	# schivare»), e si risponde muovendo il giocatore di quanto basta e guardando
+	# che il danno non arriva. Se il raggio di esplosione fosse piu' grande di
+	# quello dichiarato, la cupola direbbe una cosa e il colpo un'altra.
+	_m13_prepara(horde, ENEMY.MORTAR)
+	# ## Il totale va preso **subito prima** di questo volo
+	#
+	# Il confronto di prima guardava `_totale_danno` contro il totale di **prima
+	# del primo colpo**, che da allora aveva gia' preso %.2f hp: stava sommando
+	# due voli contro il riferimento di uno solo, e la schivata sarebbe parsa un
+	# colpo che ha fatto danno per errore.
+	var danno_dopo_primo := _totale_danno
+	horde.step(DT)
+	h.eq(horde.mortar_shot_count, 1, "m13: secondo colpo in volo per la prova della schivata")
+	h.near(_totale_danno, danno_dopo_primo, 0.000001,
+		"m13: e il totale non e' cambiato spariando: il danno arriva quando il colpo cade")
+	var caduta := horde.mortar_shots[0]
+	_player_via = Vector3(caduta.x, 0.0, caduta.y - (blast + 0.05))
+	var schivato := 0
+	for _i in int(ceil(tele / DT)) + 4:
+		horde.step(DT)
+		schivato += 1
+		if horde.mortar_shot_count == 0:
+			break
+	h.eq(horde.mortar_shot_count, 0, "m13: il colpo e' caduto")
+	h.near(_totale_danno - danno_dopo_primo, 0.0, 0.000001,
+		"m13: il giocatore a %.2f m dal punto di caduta (raggio %.2f m + %.2f m di corpo) "
+			% [blast + 0.05, blast, ENEMY.TOUCH_REACH]
+			+ "non prende niente: la cupola dice la verita' sul raggio")
+	print("orda: m13, schivata -- fuori di %.2f m dal punto di caduta, %.4f hp presi in %d passi "
+			% [blast + 0.05, _totale_danno - danno_dopo_primo, schivato]
+		+ "(contro %.4f hp presi restando fermo dentro): la finestra e' abbastanza per uscire e il "
+			% ENEMY.MORTAR_BLAST_HP
+			+ "raggio di esplosione e' quello dichiarato")
+
+## ## «Un giocatore fermo dentro il raggio deve morire»
+##
+## Il secondo lato della misura, e quello che rende la disuguaglianza non comoda:
+## sotto il tempo di fuga il colpo e' un delitto, sopra **il colpo e' gratis**. Il
+## numero che tiene la linea qui e' che il danno e' **un istante**: durante tutta
+## la finestra non arriva niente, e quando il colpo cade arriva tutto. Un campo che
+## facesse male a ogni passo mentre la cupola e' a schermo passerebbe questa
+## sezione e sarebbe l'esatto contrario di quello che l'utente ha chiesto.
+func _m13_stazionario(h, horde: HORDE) -> void:
+	_m13_prepara(horde, ENEMY.MORTAR)
+	var danno_iniziale := _totale_danno
+	var passi := 0
+	var colpi := 0
+	var violazioni := 0
+	var cadute := 0
+	while _totale_danno - danno_iniziale < PLAYER_HP_REFERENCE and passi < PASSI_FERMO_DENTRO:
+		var prima_conteggio := horde.mortar_shot_count
+		var prima_danno := _totale_danno
+		horde.step(DT)
+		var preso := _totale_danno - prima_danno
+		if horde.mortar_shot_count < prima_conteggio:
+			cadute += 1
+		if horde.mortar_damage_last > 0.0:
+			colpi += 1
+			h.near(preso, ENEMY.MORTAR_BLAST_HP, 0.0001,
+				"m13: il colpo che cade prende %.4f hp, tutto in un colpo"
+					% ENEMY.MORTAR_BLAST_HP)
+		elif absf(preso) > 0.000001:
+			violazioni += 1
+		passi += 1
+	var totale := _totale_danno - danno_iniziale
+	h.check(totale >= PLAYER_HP_REFERENCE,
+		"m13: un giocatore fermo dentro il raggio di esplosione deve MORIRE: presi %.2f hp "
+			% totale
+			+ "in %d passi (%.2f s) con %d colpi, contro i %.0f hp di riferimento"
+				% [passi, float(passi) * DT, colpi, PLAYER_HP_REFERENCE])
+	h.check(colpi >= 2, "m13: e non e' un colpo solo: %d colpi caduti" % colpi)
+	h.eq(violazioni, 0,
+		"m13: nessun danno fuori dall'istante in cui il colpo cade: la finestra non e' un campo")
+	print("orda: m13, fermo dentro -- %.2f hp in %d passi (%.2f s), %d colpi caduti, "
+			% [totale, passi, float(passi) * DT, cadute]
+		+ "danno solo all'impatto (0 violazioni su %d passi)" % passi)
+	# ## I denti: spento il danno, il criterio **deve** andare rosso
+	#
+	# Il criterio di sopra puo' passare per il motivo sbagliato — un mortar che
+	# spara in un campo vuoto fa morire lo spia ugualmente, se lo spia accetta
+	# tutto. Quindi qui si toglie il danno e si verifica che il giocatore **non**
+	# muore, coi denti dentro la sezione e non in un file a parte.
+	var danno_prima := ENEMY.MORTAR_BLAST_HP
+	ENEMY.MORTAR_BLAST_HP = 0.0
+	_m13_prepara(horde, ENEMY.MORTAR)
+	# ## Il totale si prende **qui**, non all'inizio della sezione
+	#
+	# `danno_iniziale` e' il totale di **prima** del «fermo dentro» che ha appena
+	# misurato %.2f hp: confrontarlo adesso sommerebbe quei colpi a quelli della
+	# corsa avvelenata e la prova direbbe «ha fatto danno» per il motivo sbagliato
+	# (perche' ne aveva gia' fatti prima). Quindi la base e' il totale **dopo** il
+	# ripristino, e la domanda diventa quella giusta: *in questa corsa* e' passato
+	# qualcosa al giocatore?
+	var danno_avvelenato := _totale_danno
+	var colpi_avvelenati := 0
+	for _i in PASSI_DENTI_DANNO:
+		var prima_conteggio := horde.mortar_shot_count
+		horde.step(DT)
+		if horde.mortar_shot_count < prima_conteggio:
+			colpi_avvelenati += 1
+	h.check(colpi_avvelenati >= 2,
+		"denti: col danno a 0.0 i colpi devono cadere lo stesso (%d in %d passi), altrimenti "
+			% [colpi_avvelenati, PASSI_DENTI_DANNO]
+			+ "questa prova sta misurando una cupola che non parte e non il danno")
+	h.eq(_totale_danno - danno_avvelenato, 0.0,
+		"denti: col danno a 0.0 il giocatore fermo dentro non prende niente in %d passi e %d "
+			% [PASSI_DENTI_DANNO, colpi_avvelenati]
+			+ "colpi caduti, quindi il criterio di sopra dipende dal danno e non e' nato verde "
+			+ "(i %.2f hp presi li aveva presi prima di avvelenare)" % totale)
+	ENEMY.MORTAR_BLAST_HP = danno_prima
+	h.near(ENEMY.MORTAR_BLAST_HP, ENEMY.touch_damage_of(ENEMY.BOSS), 0.0001,
+		"denti: ripristino, il danno del colpo torna a derivare dalla tabella delle masse (%.4f hp)"
+			% ENEMY.MORTAR_BLAST_HP)
+
+## Un nemico solo, della specie richiesta, alla distanza di tiro, col giocatore
+## finto sul punto dichiarato.
+func _m13_prepara(horde: HORDE, kind: int) -> void:
+	var respawn := horde.auto_respawn
+	horde.auto_respawn = true
+	while horde.count > 0:
+		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+	horde.population = 1
+	var passi := 0
+	while horde.count < 1 and passi < 60:
+		horde.step(DT)
+		passi += 1
+	horde.auto_respawn = respawn
+	horde.kinds[0] = kind
+	horde.radii[0] = ENEMY.RADIUS[kind]
+	horde.colors[0] = ENEMY.color_of(kind)
+	horde.hp[0] = ENEMY.hp_of(kind)
+	horde.velocities[0] = Vector3.ZERO
+	horde.mortar_timers[0] = 0.0
+	horde.mortar_fire[0] = 0
+	_player_via = PUNTO_MORTAR
+	horde.transforms[0] = PUNTO_MORTAR + Vector3(0.0, 0.0,
+		ENEMY.engage_for(horde.body_scale) - FERMO_DENTRO)
+
+func _nomi_tabelle() -> String:
+	return "HP/SPEED/RADIUS/MASS/KNOCKBACK_RESIST/COLOR"
+
 # --- 17. I due cammini della miscela: popolazione iniziale e respawn -------------
 #
 # ## Il difetto, come stava, in due righe di `src/sim/horde.gd`
@@ -4104,7 +4757,16 @@ func _pesi_onda1(h) -> void:
 ## Scrivere `18.8` in un confronto `float` darebbe un numero diverso per il solo
 ## fatto di averlo scritto in `float64`: e' il motivo per cui qui non compare un
 ## numero esadecimale scritto a mano.
-static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0])
+## ## m13: la quinta voce e' **zero**, e perche' qui non si scrive un numero
+##
+## Il peso del mortar e' `Spawner.MORTAR_WEIGHT`, che vale 0,0 in tutte le onde di
+## questo giro (vedi la sua dichiarazione in `spawner.gd`): la specie esiste ma
+## non nasce, finche' `-arena` non ha la cupola. Scrivere qui `0.0` sarebbe una
+## seconda copia del numero che mente alla prima riga cambiata di quella
+## dichiarazione, che e' la lezione di `offer_label` e delle sei copie di m9.
+## Quindi la voce e' zero **per costruzione della tabella**, e i numeri delle
+## altre quattro restano bit-identici a com'erano.
+static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 0.0])
 
 func _onde_2_e_avanti(h) -> void:
 	var due := SPAWNER.wave_weights(2)

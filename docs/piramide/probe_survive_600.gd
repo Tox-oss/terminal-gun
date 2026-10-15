@@ -15,11 +15,13 @@ extends SceneTree
 ##
 ## - scala 0.00: senza nemici non si puo' morire, DEVE arrivare al tetto 600 s.
 ##   Se non ci arriva, lo strumento e' rotto e nessun numero vale.
-## - scala 1.00: il minimo DEVE riprodurre 44,20 s, che e' il gioco di oggi
-##   rilanciato con questa stessa sonda il 2026-10-14 dopo c171c81. Il vecchio
-##   riferimento di 82,03 s apparteneva a un gioco la cui portata del morso era
-##   un'altra, e usarlo come risposta nota avrebbe fatto sembrare rotta la sonda
-##   quando era vecchio il riferimento.
+## - scala 1.00: il minimo DEVE riprodurre 41,73 s, che e' il gioco di oggi
+##   rilanciato con questa stessa sonda il 2026-10-15 dopo che il boss e' uscito
+##   dall'onda 1 (`Spawner.BOSS_WAVE1 = 0.0`). I due riferimenti precedenti
+##   appartenevano a giochi diversi: 82,03 s a un morso che non era quello
+##   disegnato, 44,20 s a un gioco che aveva ancora il boss nell'apertura. Usarli
+##   come risposta nota avrebbe fatto sembrare rotta la sonda quando era vecchio
+##   il riferimento, che e' gia' successo una volta.
 ##
 ## ## La trappola dell'ordine (gia' pagata)
 ##
@@ -72,7 +74,7 @@ func _run() -> void:
 	print("PROBE: raggio %.1f m, scena vera 27 ostacoli, arma vera." % RAGGIO)
 	print("PROBE: TMAX=%.0f s. MORTO=caduto prima del tetto, TETTO=sopravvissuto." % TMAX)
 	print("PROBE: scala 0.00 DEVE toccare il tetto (nessun nemico = non si muore).")
-	print("PROBE: scala 1.00 DEVE dare minimo 44.20 s (gioco di oggi, rilmisurato il 2026-10-14).")
+	print("PROBE: scala 1.00 DEVE dare minimo 41.73 s (gioco di oggi, rilmisurato il 2026-10-15 senza il boss nell'onda 1).")
 	print("")
 
 	var risultati := PackedFloat32Array()         # minimo per scala
@@ -139,7 +141,7 @@ func _run() -> void:
 				return
 
 		if is_equal_approx(s, 1.0):
-			print("PROBE: scala 1.00 (oggi): minimo %.2f s vs 44.20 s noti." % peggiore_t)
+			print("PROBE: scala 1.00 (oggi): minimo %.2f s vs 41.73 s noti." % peggiore_t)
 
 	print("")
 	print("PROBE: LETTURA FINALE")

@@ -2778,6 +2778,55 @@ il candidato numero uno della leva dell'apertura. Ma «togli il boss dall'onda 1
 precisa e una difficoltà precisa: **non basta azzerare il peso a 0**, perché al 3,0% si arriva togliendolo
 da una tabella che è anche la tabella piatta dei respawn su tutte le onde.
 
+### 1.14-settadecima **600 s: ci si arriva. La leva era il boss, e l'aveva detto la misura**
+
+`8efa8c0` toglie il boss dall'onda 1 (`Spawner.BOSS_WAVE1 = 0,0`, una sola variabile, onde ≥ 2
+bit-identiche). `docs/piramide/probe_survive_600.gd`, tre semi, `TMAX = 600`, rilanciata subito dopo.
+**Il caso a risposta nota scala 0,00 riproduce: 600,02 s al tetto.**
+
+| scala | nemici | **prima** del boss fuori | **adesso** | esito |
+|---|---|---|---|---|
+| 0,00 | 0 | 600,02 s | 600,02 s | **TETTO** ✓ riferimento |
+| **0,25** | **6** | ~~121,47 s~~ | **600,02 s** | **TETTO** ✓ **600 s raggiunti** |
+| 0,50 | 13 | 48,33 s | **65,55 s** | MORTO |
+| 1,00 | 25 | 44,20 s | **41,73 s** | MORTO |
+
+**È la prima volta che una partita di questo progetto raggiunge i 600 secondi**, ed è la conferma
+della leva che §1.14-quattordicesima aveva indicato: il blocco era **un boss che non va via**, non il
+numero di nemici.
+
+**Ma il risultato è anche meno pulito di quanto sembra, e va detto prima di festeggiare.**
+
+1. **Non è monotono.** 6 nemici reggono 600 s, 13 reggono 65 s, 25 reggono **41,73 s** — che è
+   **peggio** dei 44,20 s di prima. Toglier il boss dall'apertura ha **migliorato** il caso da 13 e
+   **peggiorato** quello da 25. Non c'è una leva che «aumenta la difficoltà»: ci sono due leve che si
+   muovono in verso opposto, e a 25 nemici la perdita del boss non basta a compensare.
+2. **Un seme si blocca.** Al seme 7311, scala 0,25, da 420 s in poi la stampa è ferma:
+   `hp 100.00 | vivi 6 | uccisi 96`. Lo schivatore ha chiuso un ciclo e non chiude più nemici. **Non
+   è un difetto della sonda** — il tetto l'ha toccato con 100 hp — ma è **un giocatore che non sta
+   divertendosi**, e la sonda non misura la noia. È il caso di §1.14: *un giocatore che schiva è uno
+   che ho scritto io, e uno che ho scritto io non può dirvi se è divertente*.
+3. **Il giocatore ora arriva all'onda 2**: due semi su tre sono in `onda 2` con 13 vivi al tetto. Questo
+   **scioglie il blocco dichiarato da `-orda`** — «da quale onda il boss torna non è ancora
+   scegliibile, perché il giocatore muore nell'onda 1». Ora si può scegliere, e va scelto **su
+   misura**.
+4. `test_progression`: l'onda 1 chiude in **3455 passi (57,58 s)** contro 3594 (59,90 s).
+5. Sulla scena vera, fermo al centro con 200 vivi: danno per morso **6,55 → 4,34** hp ma morte
+   **25,98 → 22,62 s**. **Meno danno e morte prima**: controintuitivo, non spiegato, dichiarato.
+
+**Il riferimento della sonda è stato aggiornato a 41,73 s.** Sono tre numeri di riferimento in una
+settimana, tutti per la stessa ragione: **ogni volta che il gioco cambia, la risposta nota vecchia fa
+sembrare rotto lo strumento.** È successo due volte ed è costato una diagnosi sbagliata.
+
+**Che cosa resta fuori portata, e non è un fallimento del lavoro di oggi.** Ai 25 nemici di oggi, che
+sono il gioco consegnato, il caso peggiore è **41,73 s** e i 600 s sono **14,38 volte** lontani. Il
+lavoro di oggi ha **spostato il pavimento**: prima il tetto era irraggiungibile a **qualsiasi**
+dimensione, adesso è raggiungibile e si sa a quale dimensione. **Il prossimo passo non è un'altra
+leva di specie: è la dimensione dell'onda 1**, e `POP_BASE = 6` torna in gioco ma con la base
+misurata **oggi**, non quella troncata di §1.14-dodicesima.
+
+`GATE: 8/8` · `PERM: 15/15`.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

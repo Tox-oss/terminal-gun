@@ -3190,6 +3190,66 @@ uccide»* era una previsione, e la misura le dà 5,7×.
 è un criterio rotto — è il motivo per cui la misura va su più semi, e il perché di non fidarsi di un
 solo campione.
 
+### 1.14-ventunesima **m14-c: la sonda era cieca al mortar, e per un giro l'ho fatta cieca con un termine che sembrava vivo**
+
+L'utente ha deciso: *«prima misura chi si muove»*. Giusto, e la misura non era possibile: **le tre
+s sonde non sapevano che il mortar esiste**. In `docs/piramide/` non c'era una sola occorrenza di
+«mortar» fuori dal piano.
+
+Il motivo è nel codice e vale più di una constante mancante: lo steering delle sonde sceglieva la
+direzione che **massimizza la distanza dal nemico più vicino**. Un colpo in arrivo non cambia niente
+del punteggio. Quindi i 65,83 hp/s che uccidono sarebbero arrivati addosso a uno schivatore che
+guarda **solo in terra**, e il numero che ne sarebbe uscito non avrebbe descritto un giocatore:
+avrebbe descritto uno che non guarda la cupola rossa, che è esattamente la cosa che nessuno fa.
+
+**E un secondo difetto, più subdolo: il primo termine che ho scritto non faceva niente.** Valutava
+solo il punto di arrivo `q`, chiedendo «arrivo prima che il colpo cada?». Ma `q = p + d * guarda` e
+`guarda` è sempre 20,5 m, quindi il tempo d'arrivo è **sempre 1,5 s**, mentre il telegrrafo è
+**0,8293 s**: `1,5 > 0,8293` **sempre**, per ogni direzione e ogni colpo. La penalità era
+**identicamente zero**. Il sintomo era invisibile: nessun errore, solo un numero un po' peggiore.
+
+Il rimedio è valutare il **cammino**, non la destinazione: `CAMPIONI = 4` punti fra `p` e `q`, ognuno
+col suo istante, e ogni punto attraversato prima della caduta e dentro la cupola costa. Il peso è
+volutamente esagerato (`PENALITA_MORTAR = 3.0`, urgenza fino a ×3): non si prova a essere un
+giocatore bravo, si prova a essere **uno che guarda in alto**, così il confronto non è offuscato da
+quanto il criterio è generoso.
+
+**E l'autocontrollo, perché questo difetto è silenzioso.** La sonda stampa quanti passi avevano una
+cupola in volo e qual è stata la **penalità massima mai calcolata**: `63568` passi, `50,1208`. Se
+ci sono state cupole e la penalità è rimasta a zero, dice a voce alta che i numeri valgono come caso
+cieco. Una misura che può mentire senza accorgersene è una misura che va difesa.
+
+**La misura, a 25 nemici (l'apertura consegnata), 3 semi:**
+
+| | |
+|---|---|
+| **MIN** | **26,42 s** · MAX 47,45 s · i tre semi 26,4 / 34,9 / 47,5 |
+| riferimento ritirato | **41,73 s** → **−37%** |
+| **chi uccide** | **mortar 3 su 3** |
+| scala 0,00 (strumento) | **TETTO 600,02 s**, la risposta nota passa |
+| scala 0,25 | MIN **505,05 s** (era 521,75 s): il termine **ha cambiato il numero** |
+| scala 0,50 | MIN 24,20 s, uccisori brute 1 su 3 e mortar 2 su 3 |
+
+**Il conto del danno all'apertura, tre semi** — ripartizioni per evento, morso e colpo su due righe
+perché sono due prezzi (`7,31` il morso del mortar, `13,71` il colpo):
+
+```
+runner 88,00 | grunt 228,57 | brute 362,51 | mortar-morso 146,29 | mortar-colpi 205,71
+```
+
+**Il mortar vale 205,71 hp di colpi ed è il terzo contributo dopo brute e grunt, da un nemico che è il
+5,75% del campo.**
+
+**Una cosa che va detta perché il confronto altrimenti mente:** alla scala 1,00 i tre semi sono
+**identici cifra per cifra** fra la corsa cieca e quella con il termine vivo. Non è un errore, e non
+è «la misura non ha cambiato niente»: è che alle 25 nemici la partita dura 26–47 s e il giocatore sta
+già scappando dall'orda di mischio, quindi nei pochi passi in cui c'era una cupola la direzione
+migliore era già decisa da `_distanza_minima`. Alla scala 0,25 e 0,50, dove la partita dura di più,
+il termine **ha cambiato il numero** (521,75 → 505,05 s) e **ha cambiato l'uccisore** (da mortar a
+brute). Quindi: **alla scala 1,00 il mortar uccide anche uno che guarda in alto.**
+
+I 600 s dell'utente sono **22,71 volte** il minimo a scala 1,00.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

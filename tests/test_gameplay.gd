@@ -252,6 +252,9 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## ripartizione di 26 e sono esattamente la cosa che questo numero vieta), e
 ## quindi il tetto passa da 19 a 20 **perche' un'altra foglia ha lavorato bene**.
 ##
+## ## 20 -> 21: l'incremento e' ancora di `-arena` (m11, 2026-10-15) e si dichiara qui.
+## Il nodo e' `MortarDome`, una `MultiMeshInstance3D` unica per tutte le cupole del mortar, mai uno per colpo: `node_count` va da 45 a 46 e quel nodo costa uguale con zero cupole e con tutte disegnate — cosi' `-arena` l'ha misurato, invece di aggirarlo con `top_level`.
+##
 ## ## Perche' questo numero resta, e non diventa un assoluto
 ##
 ## Non e' un assoluto: e' una **ripartizione** fra le foglie, e una ripartizione
@@ -261,7 +264,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 20
+const NODI_SCENA_VERA := 21
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #

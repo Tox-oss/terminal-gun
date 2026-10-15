@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 ; -arena. La scena principale: `res://scenes/arena_main.tscn`, il path che
 ; project.godot dichiara come `run/main_scene`.
@@ -12,6 +12,7 @@
 ;   src/render/arena_ground.gd    -arena   pavimento, muro, casse (3 MultiMesh)
 ;   src/render/arena_obstacles.gd -arena   i dischi su cui si scontra (1 MultiMesh)
 ;   src/render/horde_renderer.gd  -arena   i 200 nemici in UNA MultiMeshInstance3D
+;   src/render/mortar_renderer.gd -arena   le cupole rosse dei colpi in volo (1 MultiMesh)
 ;   src/render/arena_camera.gd    -arena   la camera che segue il giocatore
 ;   scenes/hud.tscn + src/ui/     -arena   vite, punteggio, arma
 ;   src/sim/horde.gd              -orda    i nemici e le sue tre API
@@ -58,6 +59,7 @@
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="6_player"]
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="7_hud"]
 [ext_resource type="Script" path="res://src/render/arena_obstacles.gd" id="8_obstacles"]
+[ext_resource type="Script" path="res://src/render/mortar_renderer.gd" id="9_mortar"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_arena"]
 sky_top_color = Color(0.08, 0.09, 0.16, 1)
@@ -179,6 +181,31 @@ seed = 4242
 
 [node name="Enemies" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("3_enemies")
+
+; ## LA CUPOOLA ROSSA DEL MORTAR, e perche' sta DOPO `Enemies`
+;
+; L'utente l'ha chiesta il 2026-10-15: «viene segnalato con una cupola rossa dove
+; atterra il colpo dando la possibilità di schivare al giocatore». Il canale non e'
+; qui dentro: e' `horde.mortar_shot_count` / `mortar_shot_at(i)` / `mortar_shot_left(i)`
+; di -orda, e questo nodo lo **legge** una volta per frame.
+;
+; ## PERCHE' UN NODO E NON UNO PER COLPO
+;
+; Come i dischi di m10 e come l'orda di m8: una cupola in volo e' un'istanza di una
+; `MultiMesh`, quindi `node_count` non dipende dal numero di colpi. Il tetto di 120
+; e' assoluto e questo file e' quello che lo rispetta: **46 nodi con zero colpi in
+; volo e 46 con sette**. Un nodo per colpo salirebbe col fuoco dell'orda, che e'
+; esattamente il tetto che questo progetto ha gia' violato una volta con i nemici.
+;
+; ## PERCHE' STA DOPO `Horde` E NON PRIMA
+;
+; L'ordine dei `_ready()` e' quello dei figli, e `Horde` e' il nodo che **scrive**
+; `Game.mortar_blast_m` sul contratto (`src/sim/horde.gd::_load_mortar`). La cupola
+; lo **rilettura** a ogni frame e non lo copia, quindi l'ordine non le cambia la
+; risposta; ma metterla dopo `Horde` rende leggibile la sequenza: prima il canale,
+; poi chi lo disegna.
+[node name="MortarDome" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("9_mortar")
 
 [node name="Player" parent="." instance=ExtResource("6_player")]
 

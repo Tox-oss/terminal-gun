@@ -257,6 +257,11 @@ func _run() -> void:
 	# quello che ha toccato, quindi puo' stare dopo tutto quello che conta i
 	# nemici vivi.
 	_milestone_8(h, arena)
+	# m13: **per ultima anche rispetto a `_milestone_8`**, e per lo stesso motivo:
+	# pilota `Spawner.MORTAR_WEIGHT`, riavvia la partita e rimette a posto peso,
+	# popolazione e giocatore. Se sta prima, `_milestone_8` misurerebbe il suo
+	# campione con il peso che questa sezione sta pilotando.
+	_m13_cupola(h, arena, game)
 
 	_cleanup(arena)
 	print("test_arena: tutto il file in %d ms; la porta dà 120 s a questo test e ne resta %d, e m11-bis e m11 hanno costato le cifre stampate nelle loro righe" % [Time.get_ticks_msec() - _t0, 120000 - (Time.get_ticks_msec() - _t0)])
@@ -531,7 +536,7 @@ func _restore_body_scale(h, game: Node, dichiarato: float) -> void:
 ## nella prima stesura non si poteva fare: fino a ieri la scena non esisteva.
 func _wiring(h, arena: Node3D, game: Node) -> void:
 	for node_name in ["WorldEnvironment", "Sun", "Ground", "Horde", "Enemies",
-			"Obstacles", "Player", "Camera", "Hud"]:
+			"Obstacles", "MortarDome", "Player", "Camera", "Hud"]:
 		h.check(arena.get_node_or_null(node_name) != null,
 			"arena_main.tscn deve avere il nodo \"%s\"" % node_name)
 
@@ -539,6 +544,11 @@ func _wiring(h, arena: Node3D, game: Node) -> void:
 	if obstacles != null:
 		h.eq(_script_path(obstacles), "res://src/render/arena_obstacles.gd",
 			"il nodo Obstacles deve avere incollato src/render/arena_obstacles.gd: e' il file che costruisce i dischi registrati in Game.obstacles")
+
+	var cupola = arena.get_node_or_null("MortarDome")
+	if cupola != null:
+		h.eq(_script_path(cupola), MORTAR_SCRIPT,
+			"il nodo MortarDome deve avere incollato src/render/mortar_renderer.gd: e' il file che costruisce le cupole rosse dai colpi in volo di horde.mortar_shots")
 
 	var horde = arena.get_node_or_null("Horde")
 	var player = arena.get_node_or_null("Player")
@@ -3468,6 +3478,734 @@ func _max3(a: float, b: float, c: float) -> float:
 func _mesh_name(enemies) -> String:
 	var mm = enemies.multimesh
 	return "MultiMesh" if mm == null else str(mm.mesh.resource_path)
+
+# --- 10. m13: la cupola rossa che segnala dove cade il colpo --------------------
+#
+# ## LA RICHIESTA DELL'UTENTE, 2026-10-15
+#
+# «viene segnalato con una cupola rossa dove atterra il colpo dando la
+# possibilita' di schivare al giocatore».
+#
+# La **simulazione** e' chiusa e verde: `src/sim/horde.gd` tiene i colpi in volo in
+# `mortar_shots` e ne espone tre nomi (`mortar_shot_count`, `mortar_shot_at(i)`,
+# `mortar_shot_left(i)`), dichiarati congelati in `src/core/contracts.gd`. Quello
+# che mancava, e che e' di **-arena**, e' il pezzo che si vede.
+#
+# ## I CINQUE CRITERI, e ognuno ha un difetto che cerca
+#
+#   1. **sincronizzazione vera**: con N colpi in volo, `instance_count` e' N e la
+#      posizione di ogni istanza combacia con `(x, z)` del canale entro
+#      `DOME_TOLERANCE`. Difetto cercato: una cupola nel posto sbagliato, che e'
+#      peggio di nessuna cupola perche' dice «schiva qui» e il colpo cade altrove.
+#   2. **nessuna cupola fantasma**: con `mortar_shot_count == 0`,
+#      `instance_count == 0`. Difetto cercato: la cupola che resta dopo l'impatto.
+#   3. **il raggio e' quello dichiarato**: il raggio disegnato viene da
+#      `Game.mortar_blast_m`, non da un numero magico di -arena.
+#   4. **un nodo, non uno per colpo**: `node_count` identico con 0 colpi e con N.
+#   5. **il canale chiuso col veleno**: il contratto viene avvelenato, la cupola
+#      deve rivedere il veleno e non una copia.
+#
+# ## DOVE STA IL PESO PILOTATO, E PERCHE' DA -orda
+#
+# `Spawner.MORTAR_WEIGHT = 0.0` dichiara che **un mortar senza cupola e' un danno
+# senza preavviso**, e quel peso e' di `-orda` (`src/sim/spawner.gd`): qui non si
+# tocca. Il pilotaggio e' la strada **(B)** che `m8` ha gia' fatto per le cinque
+# specie — `MORTAR_WEIGHT` e' una `static var` **perche'** i test possano accendere
+# il difetto da sole — e come li' il valore non entra in nessun file di `src/` e
+# viene riportato a zero in fondo alla sezione, con il ripristino asserito.
+
+## -arena, m13: il file che costruisce le cupole. Caricato a runtime con `load()` e
+## non in `const`, per la trappola dei `const preload` dichiarata in testa al file.
+const MORTAR_SCRIPT := "res://src/render/mortar_renderer.gd"
+
+## Tolleranza del confronto fra la posizione **disegnata** e quella **del canale**.
+## `mortar_shot_at(i)` mette `x` e `y` del mondo dentro una `Transform3D` a 32
+## bit senza scalarla: l'errore e' dell'ordine di 1e-7 m. 1e-4 m e' un decimo di
+## millimetro, quattro ordini sopra quel rumore e quattro sotto il difetto da prendere
+## (una cupolacentrata sull'origine, o con `x` e `z` scambiati: 1 m e piu').
+const DOME_TOLERANCE := 0.0001
+
+## Tolleranza del confronto fra il raggio **disegnato** e `mortar_blast_m`. Stessa
+## natura di `DOME_TOLERANCE`: il raggio passa per una `Basis` a 32 bit, quindi il
+## confronto non e' mai esatto.
+const DOME_RADIUS_TOLERANCE := 0.0001
+
+## Il **veleno** di `_m13_cupola_canale`: il valore a cui `Game.mortar_blast_m`
+## viene portato di proposito per distinguere «la cupola legge il contratto» da «la
+## cupola ha una copia dentro». Lontanissimo da 5,21 m e da qualunque raggio
+## plausibile, cosi' il confronto non possa passare per arrotondamento.
+const BLAST_POISON := 99.0
+
+## Oltre `engage_for()` di quanto il giocatore viene messo, e in **dentro**: mezzo
+## metro. `fermo` in `src/sim/enemy.gd` e' `dist <= engage_for()`, quindi il
+## giocatore deve stare dalla parte del centro rispetto al nemico, non dalla parte
+## del muro: mezzo metro oltre farebbe `dist > engage`, il mortar non si fermerebbe
+## e non sparerebbe, e la sezione misurerebbe un canale vuoto senza dirlo.
+const CUPOLA_ENGAGE_MARGIN := 0.5
+
+## Quanti semi si percorrono alla ricerca di **un** mortar. Il campione del peso
+## pilotato e' l'11% circa (`MORTAR_STEER = 12,0` su 113,3 di pesi), quindi con
+## `CUPOLA_SEED_TRIES` semi la probabilita' di non trovarne uno e'
+## `0.89^N`. Non e' un numero di produzione: e' la dimensione di una ricerca, e il
+## numero di semi **usati** viene stampato sotto.
+const CUPOLA_SEED_TRIES := 96
+
+## Passi che il test acceta di dare a `-orda` perche' il colpo cada. Il telegrrafo e'
+## `mortar_telegraph_s` = 0,8293 s, cioe' 49,8 passi a `DT = 1/60`: il tetto e' un
+## secondo e un quarto sopra il tempo di caduta, e serve a coprire il fatto che il
+## canale scende di `DT` a ogni passo.
+const CUPOLA_FALL_STEPS_MAX := 75
+
+## Quanti colpi finti chiede la prova della capienza: quattro volte `CAPACITY` del
+## renderer, che e' un multiplo di `MAX_ENEMIES`.
+const CUPOLA_OVERDRIVE := 1024
+
+## Il raggio di **ingresso** con cui la prova di forma pilota il contratto. Non e' un
+## numero di produzione e non entra in nessun file di `src/`: serve a dire che la
+## cupola segue il contratto anche quando il contratto dice una cosa che il gioco non
+## sta ancora usando, e il valore e' scelto lontano sia dai 5,21 m di produzione sia
+## dal default di 4,0 m, cosi' il confronto non possa passare per arrotondamento.
+const CUPOLA_FORMA_BLAST := 2.75
+
+func _m13_cupola(h, arena: Node3D, game: Node) -> void:
+	var t0 := Time.get_ticks_msec()
+	var horde = arena.get_node_or_null("Horde")
+	var player = arena.get_node_or_null("Player")
+	var cupola = arena.get_node_or_null("MortarDome")
+	if not h.check(horde != null and player != null and cupola != null,
+			"m13: la scena vera deve avere i nodi Horde, Player e MortarDome"):
+		return
+	h.check(cupola.is_built(),
+		"m13: il nodo MortarDome deve aver costruito la sua MultiMesh: un nodo che non costruisce niente non puo' essere un difetto di sincronizzazione, e' un difetto di esistenza")
+
+	# ## LO STATO PRIMA, e i due numeri che il canale deve poter sporcare
+	#
+	# `Spawner.MORTAR_WEIGHT` e' una `static var`: vive piu' a lungo di questa
+	# sezione, quindi tutto quello che gira dopo in questo processo nascerebbe con un
+	# mortar che `-orda` non ha autorizzato. Il ripristino non e' pulizia: e' parte
+	# del criterio, come in `_ripristina_il_mortar`.
+	var spawner = _spawner(horde)
+	if not h.check(spawner != null,
+			"m13: dalla scena di -orda non si legge piu' Spawner: senza il produttore dei pesi il pilotaggio non puo' arrivare allo spawn"):
+		return
+	var peso_dichiarato: float = float(spawner.MORTAR_WEIGHT)
+	var pop_dichiarata: int = horde.population
+	var pos_dichiarata: Vector3 = player.global_position
+	var vita_dichiarata: float = player.hp
+
+	# ## LA PREMESSA, MISURATA: a peso di produzione non c'e' nessun mortar
+	#
+	# Senza questa, tutta la sezione potrebbe essere verde perche' il canale e'
+	# vuoto: e' il caso a risposta nota di `_poison_body_scale`, e la ragione per cui
+	# il peso viene pilotato **dopo** e non prima.
+	h.eq(horde.mortar_shot_count, 0,
+		"m13: a peso di produzione (MORTAR_WEIGHT = %.1f) nessun colpo puo' essere in volo: se ce ne fosse uno, la sezione starebbe misurando una cupola che il gioco non produce" % peso_dichiarato)
+	cupola.refresh()
+	h.eq(cupola.drawn_count(), 0,
+		"m13: nessun colpo in volo, nessuna cupola disegnata")
+	# Il numero di nodi **prima**: e' il termine di paragone del criterio n. 4. Non
+	# e' previsto qui: e' misurato, e i due numeri vengono stampati insieme.
+	var nodi_vuoto := _count_nodes(arena)
+
+	# ## LA VOLA: il mortar che nasce davvero, col peso pilotato dal test
+	var accesa := _accendi_il_mortar_per_la_cupola(h, horde, player, spawner)
+	if not h.check(accesa.get("ok", false), "m13: %s" % str(accesa.get("motivo", ""))):
+		_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+		return
+
+	var seed_usato: int = int(accesa["seed"])
+	var puntatore: int = int(accesa["nemico"])
+
+	# ## IL COLPO: un passo di `-orda`, e il colpo esiste perche' **lui** ha deciso
+	horde.step(DT)
+	h.check(horde.mortar_shot_count > 0,
+		"m13: il mortar fermo a %.3f m dal giocatore deve aver sparito entro il primo passo"
+			% float(accesa["distanza"]))
+	if horde.mortar_shot_count <= 0:
+		_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+		return
+	var chiesti: int = horde.mortar_shot_count
+	var grezzi: PackedVector3Array = horde.mortar_shots.duplicate()
+	cupola.refresh()
+
+	# ## CRITERIO 1: sincronizzazione vera
+	_criterio_sincronizzazione(h, cupola, horde, grezzi)
+
+	# ## CRITERIO 3: il raggio e' quello dichiarato dal contratto
+	var blast := _contract_float(game, "mortar_blast_m")
+	h.near(cupola.blast_used(), blast, DOME_RADIUS_TOLERANCE,
+		"m13: la cupola deve aver letto Game.mortar_blast_m all'ultimo refresh")
+	h.positive(blast, "m13: il contratto deve dichiarare un raggio di esplosione positivo")
+	for i in cupola.drawn_count():
+		h.near(cupola.drawn_radius(i), blast, DOME_RADIUS_TOLERANCE,
+			"m13: cupola %d: il raggio disegnato deve essere quello che l'esplosione colpisce (Game.mortar_blast_m = %.4f m)" % [i, blast])
+	# E la cupola **appoggia a terra**: `origin.y == 0`. Una cupola a meta' dentro
+	# il terreno ha la stessa impronta a occhio e non e' la stessa cosa, quindi il
+	# numero non basta e questa riga c'è.
+	for i in cupola.drawn_count():
+		h.near(cupola.written_transform(i).origin.y, 0.0, DOME_TOLERANCE,
+			"m13: cupola %d: l'impronta deve stare sul pavimento (y = 0), non a meta' dentro il terreno" % i)
+	# Il pulsare cambia la **cupola**, non la sua **impronta**: l'altezza resta
+	# dentro la banda dichiarata dal renderer e il raggio non si muove. L'invariante
+	# fra due cupole con tempi diversi e' verificato in `_forma_della_cupola`,
+	# dove il canale finto permette di averne due sotto controllo.
+	var minimo := _const_of(MORTAR_SCRIPT, "DOME_MIN_HEIGHT")
+	if h.check(minimo > 0.0,
+			"m13: src/render/mortar_renderer.gd deve dichiarare DOME_MIN_HEIGHT: senza la banda dichiarata non si puo' dire che il pulsare resti dentro"):
+		h.check(cupola.drawn_height_ratio(0) >= minimo - DOME_TOLERANCE
+				and cupola.drawn_height_ratio(0) <= 1.0 + DOME_TOLERANCE,
+			"m13: l'altezza della cupola deve stare fra %.2f e 1 del raggio: misurata %.4f" % [minimo, cupola.drawn_height_ratio(0)])
+
+	# ## CRITERIO 4: un nodo, non uno per colpo
+	var nodi_pieno := _count_nodes(arena)
+	h.eq(nodi_pieno, nodi_vuoto,
+		"m13: %d colpi in volo non devono aggiungere ne' un nodo: %d nodi a vuoto contro %d a pieno" % [chiesti, nodi_vuoto, nodi_pieno])
+	h.eq(cupola.get_child_count(), 0,
+		"m13: il renderer delle cupole non deve avere figli: un nodo per colpo e' la stessa classe di difetto del nodo per nemico")
+	h.check(nodi_pieno < NODE_BUDGET,
+		"m13: node_count deve restare sotto %d con le cupole: e' %d" % [NODE_BUDGET, nodi_pieno])
+
+	# I tre numeri delle righe sotto, **catturati adesso**: fra qui e la fine della
+	# sezione il colpo cade e il canale si svuota, quindi rileggendoli piu' avanti
+	# le stampe racconterebbero 0 cupole e un raggio di 1,0000 m (la trasformazione
+	# vuota che `written_transform()` restituisce fuori dall'intervallo). Una stampa
+	# che non dice la cosa misurata e' peggio di nessuna stampa.
+	var istanze_in_volo: int = cupola.drawn_count()
+	var raggio_disegnato: float = cupola.drawn_radius(0)
+	var altezza_disegnata: float = cupola.drawn_height_ratio(0)
+	var scarto_in_volo := _scarto_cupola(cupola, grezzi)
+
+	# ## CRITERIO 2: nessuna cupola fantasma
+	#
+	# Il canale si svuota da solo, e' `-orda` a svuotarlo: qui si guarda solo che la
+	# cupola lo segua fino in fondo. Una cupola che resta dopo l'impatto dice
+	# «schivati» a chi e' gia' stato colpito.
+	var caduti := 0
+	while horde.mortar_shot_count > 0 and caduti < CUPOLA_FALL_STEPS_MAX:
+		horde.step(DT)
+		caduti += 1
+	h.eq(horde.mortar_shot_count, 0,
+		"m13: il colpo deve essere caduto entro %d passi (telegrrafo %.4f s = %.1f passi a DT %.4f): ne restano %d dopo %d passi"
+			% [CUPOLA_FALL_STEPS_MAX, _contract_float(game, "mortar_telegraph_s"),
+				_contract_float(game, "mortar_telegraph_s") / DT, DT,
+				horde.mortar_shot_count, caduti])
+	cupola.refresh()
+	h.eq(cupola.drawn_count(), 0,
+		"m13: nessuna cupola fantasma: il colpo e' caduto e la cupola sparisce")
+	var mm = cupola.multimesh
+	if h.check(mm != null, "m13: il renderer delle cupole deve avere la sua MultiMesh"):
+		h.eq(mm.instance_count, 0,
+			"m13: instance_count deve tornare a 0 quando il canale e' vuoto: e' %d" % mm.instance_count)
+		h.eq(mm.visible_instance_count, 0,
+			"m13: nessuna istanza visibile dopo l'impatto: e' %d" % mm.visible_instance_count)
+		h.check(mm.mesh != null, "m13: la cupola deve avere una mesh: un disco che non si vede non schiva nessuno")
+
+	print("test_arena: m13 cupola, sincronizzazione: %d colpi in volo -> %d istanze, scarto massimo di posizione %.9f m (toleranza dichiarata %.4f m), seme %d, nemico %d a %.2f m dal giocatore, caduti in %d passi"
+		% [chiesti, istanze_in_volo, scarto_in_volo, DOME_TOLERANCE,
+			seed_usato, puntatore, float(accesa["distanza"]), caduti])
+	print("test_arena: m13 cupola, raggio: Game.mortar_blast_m = %.4f m, raggio disegnato %.4f m, altezza sul raggio %.4f fra %.2f e 1: il pulsare cambia la cupola e non l'impronta"
+		% [blast, raggio_disegnato, altezza_disegnata, minimo])
+	print("test_arena: m13 cupola, nodi: %d a vuoto contro %d con %d colpi in volo, tetto %d: la cupola costa UN nodo qualunque sia il numero di colpi"
+		% [nodi_vuoto, nodi_pieno, chiesti, NODE_BUDGET])
+
+	_m13_cupola_canale(h, game, cupola, horde, blast)
+	_cupola_oltre_capienza(h, cupola, horde)
+	_forma_della_cupola(h, game)
+
+	_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+	print("test_arena: m13 cupola, sezione in %d ms" % (Time.get_ticks_msec() - t0))
+
+## Il ripristino, e **tre** asserzioni che lo dicono.
+##
+## Sono tre e non una perche' `MORTAR_STEER == 12.0` e `peso_dichiarato == 0.0` non
+## coincidono (la prima da sola passerebbe anche se il ripristino non fosse mai
+## partito, perche' il valore ci sarebbe gia'), la seconda dice che il peso di
+## produzione e' tornato e la terza che il giocatore e' tornato dove era: un
+## `global_position` lasciato sotto un mortar fa partire le sezioni successive da un
+## mondo diverso.
+func _ripristina(h, spawner, peso: float, horde, player, pop: int, pos: Vector3, vita: float) -> void:
+	spawner.MORTAR_WEIGHT = peso
+	h.near(float(spawner.MORTAR_WEIGHT), peso, WEIGHT_TOLERANCE,
+		"m13: dopo la sezione MORTAR_WEIGHT deve essere tornato al valore dichiarato da src/sim/spawner.gd (%.4f)" % peso)
+	h.check(not is_equal_approx(float(spawner.MORTAR_WEIGHT), MORTAR_STEER),
+		"m13: il ripristino non ha spostato niente: MORTAR_WEIGHT e' ancora al %.1f pilotati dal test" % MORTAR_STEER)
+	player.global_position = pos
+	player.hp = vita
+	player.velocity = Vector3.ZERO
+	h.vec_near(player.global_position, pos, DOME_TOLERANCE,
+		"m13: la sezione deve rimettere il giocatore dove lo ha trovato")
+	horde.population = pop
+	horde.restart_run()
+	h.eq(horde.mortar_shot_count, 0,
+		"m13: il restart azzera i colpi in volo: una partita nuova non comincia con la cupola di prima")
+
+## ## IL CRITERIO 1: sincronizzazione vera
+##
+## Il confronto e' su `written_transform(i)`, cioe' **quello che e' stato scritto**,
+## e non su `dome_transform()`, che e' la funzione che lo produce. In headless il
+## `MultiMesh` non si rilegge (cfr. la nota in `horde_renderer.gd`), quindi rileggere
+## la funzione sarebbe un test sulla formula e non sul risultato.
+##
+## La posizione attesa e' letta dall'**array grezzo** `mortar_shots`, cioe' dalla
+## superficie congelata: l'elemento e' `(x_atterraggio, z_atterraggio, secondi)` e
+## quindi il punto del mondo e' `(s.x, 0, s.y)`. E' la trappia di m10 ripetuta, e qui
+## la si guarda **dal lato di chi verifica**, non da quello di chi disegna.
+func _criterio_sincronizzazione(h, cupola, horde, grezzi: PackedVector3Array) -> void:
+	var chiesti: int = horde.mortar_shot_count
+	h.eq(cupola.drawn_count(), chiesti,
+		"m13: criterio 1, la cupola deve disegnare tutti i colpi in volo")
+	h.eq(cupola.requested_count(), chiesti,
+		"m13: criterio 1, precondizione: il canale deve aver chiesto %d cupole, altrimenti la prova passerebbe sul vuoto" % chiesti)
+	var mm = cupola.multimesh
+	if h.check(mm != null, "m13: criterio 1, il renderer non ha costruito la MultiMesh"):
+		h.eq(mm.instance_count, chiesti,
+			"m13: criterio 1, instance_count deve essere il numero di colpi in volo")
+		h.eq(mm.visible_instance_count, chiesti,
+			"m13: criterio 1, tutte le cupole devono essere visibili: quelle nascoste sono colpi senza avvertimento")
+
+	# Il canale e il suo aiuto devono essere la stessa cosa. Senza questa riga la
+	# sezione misurerebbe solo `mortar_shot_at()` e non saprebbe se la superficie
+	# grezza e quella disfatta concordano.
+	h.check(grezzi.size() > 0,
+		"m13: criterio 1, il canale grezzo `horde.mortar_shots` deve esistere e avere il colpo")
+	var n: int = mini(chiesti, grezzi.size())
+	for i in n:
+		var s: Vector3 = grezzi[i]
+		h.vec_near(horde.mortar_shot_at(i), Vector3(s.x, 0.0, s.y), DOME_TOLERANCE,
+			"m13: criterio 1, convenzione dell'elemento %d: mortar_shot_at deve dare il punto del mondo (x, z)" % i)
+		var t: Transform3D = cupola.written_transform(i)
+		h.near(t.origin.x, s.x, DOME_TOLERANCE,
+			"m13: criterio 1, cupola %d: la x disegnata deve combaciare con la x del canale" % i)
+		h.near(t.origin.z, s.y, DOME_TOLERANCE,
+			"m13: criterio 1, cupola %d: la z disegnata deve combaciare con la seconda coordinata del canale, che e' la z del mondo" % i)
+		h.near(horde.mortar_shot_left(i), s.z, DOME_TOLERANCE,
+			"m13: criterio 1, il tempo residuo %d deve combaciare con la terza coordinata del canale" % i)
+
+## Lo scarto massimo fra il punto **disegnato** e quello **del canale**, in metri.
+func _scarto_cupola(cupola, grezzi: PackedVector3Array) -> float:
+	var peggiore := 0.0
+	for i in mini(cupola.drawn_count(), grezzi.size()):
+		var s: Vector3 = grezzi[i]
+		var o: Vector3 = cupola.written_transform(i).origin
+		peggiore = maxf(peggiore, Vector2(o.x - s.x, o.z - s.y).length())
+	return peggiore
+
+## ## ACCENDERE IL MORTAR PER LA CUPOLA: la strada (B), sul canale e non sul campione
+##
+## La sezione `m8` accende il mortar per guardare **se lo si disegna** (taglia e
+## tinta). Qui la domanda e' un'altra: se `-orda` **spara**, la cupola c'e'? Quindi il
+## pilotaggio e' lo stesso e il percorso e' diverso — un nemico solo, cosi' l'unico
+## colpo in volo e' quello che vogliamo guardare e nessun altro mortar puo' sparare
+## mentre il colpo cade.
+##
+## `engage_for()` e' la distanza a cui il mortar **si ferma**, ed e' di `-orda`: si
+## chiama sul suo script (`E`), non si scrive. Il giocatore viene messo mezzo metro
+## oltre, cosi' il nemico e' gia' `fermo` al primo passo e spara.
+func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner) -> Dictionary:
+	var vuoto := {"ok": false, "motivo": "", "seed": -1, "nemico": -1, "distanza": -1.0}
+	var e = _enemy_script(horde)
+	if not h.check(e != null,
+			"m13: dalla scena di -orda non si legge piu' E (la tabella delle specie): senza l'indice del mortar il pilotaggio andrebbe sulla voce sbagliata"):
+		vuoto["motivo"] = "la tabella delle specie di -orda non e' raggiungibile"
+		return vuoto
+	var emap: Dictionary = e.get_script_constant_map()
+	if not h.check(emap.has("MORTAR"),
+			"m13: src/sim/enemy.gd non dichiara piu' MORTAR: la quinta specie non e' piu' indirizzabile"):
+		vuoto["motivo"] = "src/sim/enemy.gd non dichiara piu' MORTAR"
+		return vuoto
+	var mortar: int = int(emap["MORTAR"])
+
+	# Il peso di produzione **prima**, perche' `MORTAR_STEER` e' una copia di
+	# collaudo e questa e' l'unica riga che la dichiara tale.
+	var dichiarato: float = float(spawner.MORTAR_WEIGHT)
+	spawner.MORTAR_WEIGHT = MORTAR_STEER
+
+	# ## PRECONDIZIONE 1: il peso pilotato e' arrivato alla funzione che decide chi
+	# nasce. Senza questa, una sezione che legge «il colpo e' partito» potrebbe
+	# averlo letto perche' il pilotaggio non e' mai entrato, e il criterio
+	# diventerebbe decorativo esattamente nella sola circostanza in cui deve mordere.
+	var pesi_prova: PackedFloat32Array = spawner.wave_weights(2)
+	h.near(pesi_prova[mortar], MORTAR_STEER, WEIGHT_TOLERANCE,
+		"m13: il peso pilotato deve arrivare a Spawner.wave_weights(): letto %.4f invece di %.4f, quindi il pilotaggio non e' entrato e il colpo misurato sarebbe quello di un contesto che -orda non usa"
+			% [pesi_prova[mortar], MORTAR_STEER])
+
+	# ## PRECONDIZIONE 2: l'orda e' su un'onda in cui il mortar e' spendibile, e
+	# spara con quei pesi. `restart_run()` rilegge i pesi e la barra a zero fa cio'
+	# che nella partita fa la fine di un'onda: `horde.gd::_wave_tick()` chiama
+	# `_sync_weights()` nei tre punti in cui l'onda cambia, e `reseed()` da solo
+	# **non** lo chiama.
+	horde.restart_run()
+	horde.run.wave_killed = horde.run.wave_total
+	horde.step(DT)
+	if not h.check(horde.wave >= 2,
+			"m13: l'orda deve essere su un'onda in cui il mortar e' spendibile (e' all'onda %d): sull'onda 1 il peso del mortar e' quello di -onda, non quello pilotato" % horde.wave):
+		vuoto["motivo"] = "l'orda non e' arrivata a un'onda in cui il mortar e' spendibile"
+		return vuoto
+	var usati: PackedFloat32Array = horde.get("_weights")
+	h.check(usati == spawner.wave_weights(horde.wave),
+		"m13: l'orda deve sparare con Spawner.wave_weights(%d), voce per voce: in campo %s. Il pilotaggio del peso non e' arrivato allo spawn"
+			% [horde.wave, str(usati)])
+
+	# ## LA RICERCA: un nemico solo, e di specie mortar
+	#
+	# `population = 1` e `reseed(s)` danno un campo di **un** nemico, e senza gli
+	# altri 199 nessun altro mortar puo' sparare mentre questo cade: e il modo in cui
+	# `criterio n. 3` (criterio 4) gia' guida la partita con l'API di -orda, senza
+	# scrivere un record a mano. Il numero di semi usati viene stampato.
+	horde.population = 1
+	var bs: float = horde.body_scale
+	var fermata: float = float(e.engage_for(bs))
+	var semi := 0
+	var trovato := -1
+	for i in CUPOLA_SEED_TRIES:
+		var s: int = SWEEP_FIRST + i * SWEEP_STEP
+		horde.reseed(s)
+		semi += 1
+		if horde.count == 1 and horde.kinds[0] == mortar:
+			trovato = 0
+			vuoto["seed"] = s
+			break
+	if not h.check(trovato == 0,
+			"m13: nessun seme su %d ha fatto nascere un nemico solo di specie mortar col peso pilotato a %.1f: senza un colpo che nasca cosi' la sezione non avrebbe niente da guardare"
+				% [semi, MORTAR_STEER]):
+		vuoto["motivo"] = "nessun seme ha fatto nascere un mortar col peso pilotato"
+		return vuoto
+
+	# Il giocatore mezzo metro **dentro** la fermata e **verso il centro**: cosi'
+	# `fermo` e' vero al primo passo (il mortar spara) e il giocatore resta dentro
+	# l'arena qualunque punto di nascita abbia avuto il nemico, quindi la misura non
+	# dipende da dove sia capitato.
+	var pos: Vector3 = horde.transforms[0]
+	var piana := Vector2(pos.x, pos.z)
+	var verso := Vector2(1.0, 0.0)
+	if piana.length() > 0.001:
+		verso = -piana.normalized()
+	var distanza := fermata - CUPOLA_ENGAGE_MARGIN
+	player.global_position = Vector3(pos.x + verso.x * distanza, 0.0, pos.z + verso.y * distanza)
+	player.velocity = Vector3.ZERO
+	# La vita a pieno: la sezione deve poter arrivare all'impatto, e il danno del
+	# colpo e' **un istante** che qui arriva davvero (il giocatore e' dentro la
+	# cupola per costruzione). Il ripristino e' in `_ripristina`.
+	player.hp = player.max_hp
+
+	var misurata := Vector2(pos.x - player.global_position.x, pos.z - player.global_position.z).length()
+	h.near(misurata, distanza, 0.001,
+		"m13: il mortar deve essere a %.3f m dal giocatore, dentro la fermata di %.3f m cosi' e' gia' fermo al primo passo: misurati %.3f m"
+			% [distanza, fermata, misurata])
+	h.check(misurata < fermata,
+		"m13: il giocatore deve essere **dentro** la distanza di fermata (%.3f m < %.3f m): oltre, `fermo` in src/sim/enemy.gd e' falso e il mortar non spara" % [misurata, fermata])
+
+	vuoto["ok"] = true
+	vuoto["nemico"] = 0
+	vuoto["distanza"] = misurata
+	print("test_arena: m13 cupola, il contesto: MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test**, ripresa all'onda %d, un nemico solo di specie mortar trovato al seme %d dopo %d semi; fermata a %.3f m (E.engage_for = 2 x blast), giocatore a %.3f m"
+		% [dichiarato, MORTAR_STEER, horde.wave, int(vuoto["seed"]), semi, fermata, misurata])
+	return vuoto
+
+## ## CRITERIO 5: il canale chiuso col veleno
+##
+## `Game.mortar_blast_m` e' il numero che `-orda` **scrive** e che -arena **legge**,
+## quindi la prova e' la inversa di `_poison_body_scale`: li' si avvelena per vedere
+## chi **scrive**, qui si avvelena per vedere chi **legge**. Una copia — un campo
+## scritto in `_ready()` e non più riletto — prenderebbe il valore giusto al primo
+## frame e passerebbe tutto.
+##
+## Lo stesso canale si chiude anche dall'altra parte della campana: il default
+## dichiarato sul contratto (4,0 m) **non** coincide con il valore in campo (5,21 m),
+## quindi «il contratto porta il numero di -orda» non passerebbe senza nessuna
+## scrittura.
+func _m13_cupola_canale(h, game: Node, cupola, horde, blast: float) -> void:
+	if not h.check(game != null, "m13: il contratto non c'e': la prova del canale non puo' girare"):
+		return
+	var dichiarato_default := _field_default_of(CONTRACT_SCRIPT, "var mortar_blast_m")
+	h.check(dichiarato_default > 0.0,
+		"m13: il contratto deve dichiarare `var mortar_blast_m` con un default (letto %.4f)" % dichiarato_default)
+	h.check(absf(dichiarato_default - blast) > 0.001,
+		"m13: il numero in campo (%.4f m) non coincide col default dichiarato sul contratto (%.4f m): altrimenti «la cupola legge il contratto» passerebbe anche se il contratto non fosse mai stato scritto"
+			% [blast, dichiarato_default])
+
+	# Il canale che la cupola guarda durante tutta questa prova e' **finto** e ha un
+	# solo colpo: cosi' la prova parla del raggio e non della sincronizzazione, che ha
+	# gia' i suoi criteri e i suoi denti. Il canale finto non scrive niente sul
+	# contratto e non e' nell'albero.
+	var finta := FakeShots.new()
+	finta.name = "FakeShotsCanale"
+	finta.fill(1)
+	cupola.set_horde(finta)
+
+	# ## 1. IL VERO, per primo. Senza questa, «ha riletto il veleno» potrebbe voler
+	# dire soltanto «ha cambiato numero per caso».
+	cupola.refresh()
+	h.eq(cupola.drawn_count(), 1,
+		"m13: precondizione, col canale finto da un colpo la cupola deve disegnare una cupola")
+	h.near(cupola.drawn_radius(0), blast, DOME_RADIUS_TOLERANCE,
+		"m13: prima dell'avvelenamento la cupola deve dire il raggio vero %.4f m: %.4f" % [blast, cupola.drawn_radius(0)])
+
+	# ## 2. IL VELENO, e la precondizione che lo mette al suo posto
+	game.set("mortar_blast_m", BLAST_POISON)
+	h.near(_contract_float(game, "mortar_blast_m"), BLAST_POISON, DOME_RADIUS_TOLERANCE,
+		"m13: il veleno deve essere %.1f m sul contratto, altrimenti il criterio non distingue «la cupola legge il contratto» da «la cupola ha letto un numero e lo ha tenuto»"
+			% BLAST_POISON)
+
+	# ## 3. E LA CUPOLA CHE GIA' AVEVA LETTO IL VERO: e' questa la riga che ha denti
+	#
+	# Quella cupola ha gia' visto 5,2100 m al passo precedente. Se il raggio fosse
+	# stato copiato in un campo al primo refresh, continuerebbe a dire 5,2100 m e
+	# questa sezione sarebbe verde perche' il canale funziona, non perche' lo si e'
+	# guardato: una copia prende il valore giusto una volta e poi mente in silenzio
+	# per tutta la partita.
+	cupola.refresh()
+	h.eq(cupola.drawn_count(), 1,
+		"m13: col veleno a terra la cupola deve comunque avere il suo colpo: %d" % cupola.drawn_count())
+	h.near(cupola.drawn_radius(0), BLAST_POISON, DOME_RADIUS_TOLERANCE,
+		"m13: la cupola aveva gia' letto %.4f m e deve rivedere il veleno %.1f m: se dice ancora %.4f m sta usando una copia, e una copia prenderebbe il valore giusto al primo frame e mentirebbe per tutta la partita"
+			% [blast, BLAST_POISON, cupola.drawn_radius(0)])
+
+	# ## 4. UNA CUPOLA MONTATA ADESSO legge il veleno: il caso a risposta nota
+	#
+	# Il nodo nasce **dopo** l'avvelenamento, quindi l'unico modo che ha per dire
+	# 5,21 m e' averlo scritto da qualche parte prima. E' la stessa prova con un
+	# soggetto nuovo, che non ha ancora letto niente.
+	var sola = _cupola_sola("MortarDomeCanale", finta)
+	if sola != null:
+		sola.refresh()
+		h.eq(sola.drawn_count(), 1,
+			"m13: una cupola montata col contratto avvelenato deve comunque disegnare il colpo")
+		h.near(sola.drawn_radius(0), BLAST_POISON, DOME_RADIUS_TOLERANCE,
+			"m13: una cupola montata adesso deve leggere il veleno %.1f m, non il numero di prima" % BLAST_POISON)
+		root.remove_child(sola)
+		sola.free()
+
+	# ## 5. IL RIPRISTINO, e un'altra istanza che rivede il valore vero
+	game.set("mortar_blast_m", blast)
+	h.near(_contract_float(game, "mortar_blast_m"), blast, DOME_RADIUS_TOLERANCE,
+		"m13: ripristino, il contratto deve tornare a %.4f m: e' %.4f" % [blast, _contract_float(game, "mortar_blast_m")])
+	h.check(not is_equal_approx(_contract_float(game, "mortar_blast_m"), BLAST_POISON),
+		"m13: il ripristino non ha spostato niente: il contratto e' ancora al veleno %.1f m e le sezioni che vengono dopo misurerebbero un numero che nessuno ha scritto" % BLAST_POISON)
+	# E la cupola che aveva letto il veleno torna al numero vero: il canale funziona
+	# nei due sensi, non solo quando va nel senso giusto per caso.
+	cupola.refresh()
+	h.near(cupola.drawn_radius(0), blast, DOME_RADIUS_TOLERANCE,
+		"m13: ripristino, la cupola gia' montata deve tornare al valore vero %.4f m: %.4f" % [blast, cupola.drawn_radius(0)])
+	var sola2 = _cupola_sola("MortarDomeDopoRipristino", finta)
+	if sola2 != null:
+		sola2.refresh()
+		h.near(sola2.drawn_radius(0), blast, DOME_RADIUS_TOLERANCE,
+			"m13: un'altra cupola montata dopo il ripristino deve rivedere il valore vero %.4f m: «ripristinato» non e' una parola" % blast)
+		root.remove_child(sola2)
+		sola2.free()
+
+	cupola.set_horde(horde)
+	cupola.refresh()
+	finta.free()
+
+	print("test_arena: m13 cupola, canale: la cupola della scena vera leggeva %.4f m, contratto avvelenato a %.1f m -> riletto %.1f m; una cupola montata in quel momento legge %.1f m (default dichiarato sul contratto %.2f m); ripristinato a %.4f m -> la stessa cupola rivede %.4f m e un'altra istanza rivede %.4f m"
+		% [blast, BLAST_POISON, BLAST_POISON, BLAST_POISON, dichiarato_default, blast, blast, blast])
+
+## Una cupola montata **fuori dalla scena**, con dentro il proprio canale finto. Non
+## e' una ricostruzione: e' lo stesso file di -arena, costruito da zero, che legge il
+## contratto come fa quello della scena.
+func _cupola_sola(nome: String, fonte: Node):
+	var solo = MultiMeshInstance3D.new()
+	solo.name = nome
+	solo.set_script(load(MORTAR_SCRIPT))
+	root.add_child(solo)
+	solo.set_horde(fonte)
+	return solo
+
+## ## OLTRE LA CAPIENZA: si ferma, non cresce e non legge fuori dal canale
+##
+## Come `FakeHorde` per l'orda: un canale finto che **chiede** piu' di quanto si
+## possa disegnare. Il numero chiesto e' stampato dal finto, altrimenti la prova
+## passerebbe anche con un canale che non chiede niente.
+func _cupola_oltre_capienza(h, cupola, horde) -> void:
+	var capienza := _const_of(MORTAR_SCRIPT, "CAPACITY")
+	var max_orda := _max_enemies(horde)
+	if not h.check(capienza > 0.0,
+			"m13: src/render/mortar_renderer.gd deve dichiarare CAPACITY: senza un tetto dichiarato la guardia di capienza non e' verificabile"):
+		return
+	h.check(capienza >= float(max_orda),
+		"m13: la capienza delle cupole deve coprire MAX_ENEMIES (%d di -orda), altrimenti ci sarebbero colpi in volo che nessuno vede: CAPACITY = %.0f" % [max_orda, capienza])
+
+	var finta := FakeShots.new()
+	finta.name = "FakeShotsCapienza"
+	finta.fill(int(CUPOLA_OVERDRIVE))
+	cupola.set_horde(finta)
+	cupola.refresh()
+	h.eq(finta.asked(), int(CUPOLA_OVERDRIVE),
+		"m13: precondizione, il canale finto deve aver chiesto %d colpi: altrimenti la prova sarebbe passata sul vuoto" % int(CUPOLA_OVERDRIVE))
+	h.eq(cupola.drawn_count(), int(capienza),
+		"m13: oltre la capienza il renderer deve fermarsi alla capienza, non crescere")
+	h.eq(cupola.clamped_count(), int(CUPOLA_OVERDRIVE) - int(capienza),
+		"m13: il numero di colpi accorciati deve essere quello che non e' entrato nel buffer")
+	# Il numero accorciato, **catturato qui**: dopo il `set_horde(horde)` di sotto non
+	# c'e' piu' niente da accorciare e la stampa direbbe 0.
+	var accorciati: int = cupola.clamped_count()
+	var disegnati: int = cupola.drawn_count()
+	cupola.set_horde(horde)
+	cupola.refresh()
+	h.eq(cupola.drawn_count(), horde.mortar_shot_count,
+		"m13: tornato all'orda vera, il renderer deve tornare a seguire il canale vero")
+
+	# E il nodo non e' cresciuto mentre il canale finto chiedeva 1024 colpi.
+	h.check(cupola.get_child_count() == 0,
+		"m13: 1024 colpi richiesti non devono aver creato un nodo: il renderer ne ha esattamente uno")
+	print("test_arena: m13 cupola, capienza: chiesti %d, disegnati %.0f, accorciati %d, CAPACITY = %.0f contro MAX_ENEMIES = %d di -orda"
+		% [int(CUPOLA_OVERDRIVE), disegnati, accorciati, capienza, max_orda])
+	finta.free()
+
+## ## I DENTI DI -arena: la funzione che disegna la cupola, chiamata con un input
+## che qui non e' il gioco.
+##
+## Un punto con `x` e `z` lontani e non uguali, e un raggio che **non** e' quello di
+## produzione: cosi' uno scambio fra `x` e `z`, o fra il punto e il raggio, non puo'
+## passare. Il confronto e' su `written_transform()`, cioe' quello che e' stato
+## scritto nel buffer, e non su `dome_transform()`, che e' la funzione che lo
+## produce: rileggere la funzione sarebbe un test sulla formula, non sul risultato.
+##
+## Il canale finto ha **due** colpi con tempi residui diversi, e serve a due cose:
+## la convenzione dell'elemento grezzo e l'invariante del pulsare.
+func _forma_della_cupola(h, game: Node) -> void:
+	var finta := FakeShots.new()
+	finta.name = "FakeShotsForma"
+	finta.fill(2)
+	var solo = _cupola_sola("MortarDomeForma", finta)
+	if not h.check(solo != null, "m13: non si e' potuta montare una cupola di prova"):
+		finta.free()
+		return
+	# ## Il raggio dell'ingresso, pilotato dal contratto
+	#
+	# Non e' un argomento: il renderer non ha un ingresso del genere, e accettarne
+	# uno significherebbe che il numero puo' arrivare anche da un'altra parte, che e'
+	# esattamente la copia che questa sezione chiude. Il contratto torna al suo
+	# valore in fondo, con la precondizione che ci mette.
+	var prima := _contract_float(game, "mortar_blast_m")
+	var raggio_ingresso := CUPOLA_FORMA_BLAST
+	game.set("mortar_blast_m", raggio_ingresso)
+	solo.refresh()
+	h.eq(solo.drawn_count(), 2, "m13: due colpi in ingresso devono produrre due cupole disegnate")
+	h.eq(solo.requested_count(), 2,
+		"m13: precondizione, il canale finto deve aver chiesto 2 colpi: altrimenti la prova sarebbe passata sul vuoto")
+
+	# La convenzione grezza: `elemento = Vector3(x, z, secondi)`, quindi il punto del
+	# mondo e' `(s.x, 0, s.y)`. `fill()` scrive valori diversi fra loro, e uno scambio
+	# fra `x` e `y` qui non puo' passare.
+	for i in solo.drawn_count():
+		var s: Vector3 = finta.mortar_shots[i]
+		h.near(solo.drawn_radius(i), raggio_ingresso, DOME_RADIUS_TOLERANCE,
+			"m13: il raggio disegnato deve essere quello che il contratto dice in quel momento (%.4f m), non una cifra della mesh: %.4f" % [raggio_ingresso, solo.drawn_radius(i)])
+		var t: Transform3D = solo.written_transform(i)
+		h.near(t.origin.x, s.x, DOME_TOLERANCE,
+			"m13: cupola %d: il punto in x va disegnato dove sta, non spostato e non scambiato con la z" % i)
+		h.near(t.origin.z, s.y, DOME_TOLERANCE,
+			"m13: cupola %d: il punto in z va disegnato dove sta, non spostato e non scambiato con la x" % i)
+		h.near(t.origin.y, 0.0, DOME_TOLERANCE,
+			"m13: cupola %d: la cupola deve stare sul pavimento, non a mezza altezza" % i)
+		h.check(absf(t.basis.get_scale().x - t.basis.get_scale().z) < 0.0001,
+			"m13: cupola %d: deve essere rotonda, scala x %.4f e scala z %.4f" % [i, t.basis.get_scale().x, t.basis.get_scale().z])
+
+	# ## IL PULSARE: stessa impronta, altezze diverse
+	#
+	# `fill(2)` scrive due tempi residui diversi, quindi le due cupole hanno altezze
+	# diverse: e' la prova che `remaining` entra nella geometria. E che il raggio
+	# **non** si muove: una cupola che pulsa anche in diametro smetterebbe di dire
+	# *dove* cade il colpo e direbbe solo «qui vicino».
+	h.check(absf(solo.drawn_height_ratio(0) - solo.drawn_height_ratio(1)) > 0.001,
+		"m13: due cupole con tempi residui diversi devono avere altezze diverse: %.4f e %.4f"
+			% [solo.drawn_height_ratio(0), solo.drawn_height_ratio(1)])
+	h.near(solo.drawn_radius(0), solo.drawn_radius(1), DOME_RADIUS_TOLERANCE,
+		"m13: due cupole con tempi residui diversi devono avere lo stesso raggio: %.6f e %.6f"
+			% [solo.drawn_radius(0), solo.drawn_radius(1)])
+	var minimo := _const_of(MORTAR_SCRIPT, "DOME_MIN_HEIGHT")
+	if h.check(minimo > 0.0 and minimo < 1.0,
+			"m13: src/render/mortar_renderer.gd deve dichiarare DOME_MIN_HEIGHT fra 0 e 1: letto %.4f" % minimo):
+		for i in solo.drawn_count():
+			h.check(solo.drawn_height_ratio(i) >= minimo - DOME_TOLERANCE
+					and solo.drawn_height_ratio(i) <= 1.0 + DOME_TOLERANCE,
+				"m13: cupola %d: l'altezza deve restare fra %.2f e 1 del raggio: %.4f"
+					% [i, minimo, solo.drawn_height_ratio(i)])
+
+	# ## Il canale vuoto, sulla stessa funzione
+	finta.fill(0)
+	solo.refresh()
+	h.eq(solo.drawn_count(), 0,
+		"m13: un canale finto svuotato deve svuotare anche la cupola")
+	var mm = solo.multimesh
+	if h.check(mm != null, "m13: la cupola di prova deve avere la sua MultiMesh"):
+		h.eq(mm.instance_count, 0, "m13: instance_count a zero quando il canale finto e' vuoto")
+
+	# ## Il contratto torna al suo valore, e la precondizione che lo dichiara
+	game.set("mortar_blast_m", prima)
+	h.near(_contract_float(game, "mortar_blast_m"), prima, DOME_RADIUS_TOLERANCE,
+		"m13: ripristino, il contratto deve tornare a %.4f m: e' %.4f" % [prima, _contract_float(game, "mortar_blast_m")])
+
+	# ## I DENTI SONO STATI PROVATI E POI RIMOSSI
+	#
+	# Protocollo del 2026-10-15, sulla scena vera della sezione `m13` (seme 231,
+	# DT 1/60, un mortar solo col peso pilotato a 12,0, fermata a 10,420 m). Il
+	# blocco che spegneva la sincronizzazione **non e' in questo file**: fu rimosso
+	# dopo. I tre numeri sotto sono **misurati**, non previsti.
+	#
+	#   1. canale vero, **1 colpo in volo**, renderer sul canale vero -> **1** cupola
+	#      disegnata su 1 richiesta, scarto di posizione **0,000000000 m**. VERDE.
+	#   2. stesso canale, renderer della scena rimesso su un canale finto **vuoto**
+	#      (`FakeShots.fill(0)` + `refresh()`) -> **0** cupole su 1 richiesta, e il
+	#      **criterio n. 1** ha detto **FAIL** con «atteso 1, ottenuto 0». Sono
+	#      cadute **6** asserzioni di criterio n. 1: il numero di istanze, la
+	#      precondizione del canale, `instance_count`, `visible_instance_count`, la x
+	#      e la z della cupola 0. Uscita 1.
+	#   3. renderer rimesso sul canale vero -> **1** su **1**, scarto
+	#      **0,000000000 m**. VERDE. Uscita 0.
+	#
+	# Il punto 2 e' l'unico che dimostra qualcosa: senza il difetto il criterio
+	# sarebbe verde anche se non guardasse niente, e con un canale finto che non
+	# chiede niente passerebbe sul vuoto — le due cose che `_criterio_sincronizzazione`
+	# dichiara con `requested_count()` e che il punto 1 riattiva.
+	#
+	# Nel file finale resta il **criterio**, non la prova del criterio: il numero che
+	# si vede alla riga `m13 cupola, sincronizzazione` qui sopra e' quello del punto 1
+	# e del punto 3, riletto ogni esecuzione.
+	root.remove_child(solo)
+	solo.free()
+	finta.free()
+
+## Un canale finto con la **stessa forma** dei tre nomi che `mortar_renderer.gd`
+## legge, e con la convenzione grezza dichiarata in `src/sim/horde.gd`:
+## `elemento = Vector3(x_atterraggio, z_atterraggio, secondi_residui)`.
+##
+## Non registra niente sul contratto e non e' nell'albero: vive solo per la durata
+## della prova, e `asked()` dice che cosa il renderer ha davvero letto — senza il
+## quale una prova passerebbe anche con un canale che non chiede niente.
+##
+## I tempi residui di due colpi sono **diversi**, e devono esserlo: e' la
+## precondizione dell'invariante del pulsare, cioe' del fatto che la cupola cambia
+## altezza e non impronta.
+class FakeShots extends Node:
+	var mortar_shots: PackedVector3Array = PackedVector3Array()
+	var mortar_shot_count: int = 0
+
+	func fill(n: int) -> void:
+		mortar_shot_count = n
+		mortar_shots.resize(n)
+		for i in n:
+			# Valori non ovvi e diversi fra loro: uno scambio fra `x` e `y`, o un
+			# raggio letto al posto del punto, non puo' passare.
+			mortar_shots[i] = Vector3(1.0 + float(i) * 3.0, -2.0 - float(i) * 1.5,
+				0.80 - float(i) * 0.37)
+
+	func asked() -> int:
+		return mortar_shot_count
+
+	func mortar_shot_at(i: int) -> Vector3:
+		if i < 0 or i >= mortar_shot_count:
+			return Vector3.ZERO
+		var s: Vector3 = mortar_shots[i]
+		return Vector3(s.x, 0.0, s.y)
+
+	func mortar_shot_left(i: int) -> float:
+		if i < 0 or i >= mortar_shot_count:
+			return -1.0
+		return mortar_shots[i].z
 
 # --- Interno -------------------------------------------------------------------
 

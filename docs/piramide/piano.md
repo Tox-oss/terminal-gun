@@ -1273,8 +1273,8 @@ Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
 | boss fuori dall'onda 1 | **chiuso** | `8efa8c0` |
 | **600 s a 6 nemici** | **misurati** | `bf0e4fc`, §1.14-settadecima |
 | **mortar: simulazione, contratto, criteri** | **chiuso** | `00a3677`, §1.14-diciassettesima |
-| **mortar: la cupola rossa** | **PENDENTE, prossima onda** | `-arena` |
-| peso del mortar `0 → basso` | **dopo la cupola** | `-orda` |
+| **mortar: la cupola rossa** | **chiusa**, 8/8 | `-arena`, m13-w3 |
+| peso del mortar `0 → basso` | **prossima onda** | `-orda` |
 | danno per specie | **deciso: dopo il mortar** | utente, 2026-10-15 |
 | vista isometrica 2D | **mai fatta**, fuori strada critica | `-arena` |
 | vista nemici: modelli distinti per specie | **deliberazione dell'utente**, 5 GLB dall'artista | `-arena` quando arrivano |
@@ -1291,8 +1291,8 @@ criterio.
 | m11-quarta | `-orda` | morso sul contatto | 8/8 | **verde** |
 | m13-w1 | `-ui` | leak audio, poi pool su giocatore e arma | 8/8 | **verde** |
 | m13-w2 | `-orda` ∥ `-arena` | quinta specie e criterio a cinque specie | 8/8 | **verde** |
-| m13-w3 | `-arena` | **la cupola rossa del mortar** | — | **PENDENTE** |
-| m13-w4 | `-orda` | peso del mortar `0 → basso` | — | dopo w3 |
+| m13-w3 | `-arena` | **la cupola rossa del mortar** | 8/8 | **verde** |
+| m13-w4 | `-orda` | peso del mortar `0 → basso` | — | **prossima onda** |
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
@@ -2963,8 +2963,31 @@ un'onda separata.
 | 2 | vertice | interfaccia verso `-arena` congelata: `horde.mortar_shots` come `PackedVector3Array` di `(x, z, secondi)` e `horde.mortar_shot_count` | fatto, `00a3677` |
 | 3 | `-orda` | quinta voce in ogni tabella, comportamento, canale, criteri | fatto, `00a3677` |
 | 4 | `-arena` | criterio delle cinque specie, con il pilotaggio del peso **fatto dal test** | fatto, `00a3677` |
-| 5 | **`-arena`** | **la cupola rossa** | **PENDENTE** |
+| 5 | `-arena` | **la cupola rossa** | **fatto, misurato** |
 | 6 | `-orda` | peso del mortar `0 → basso` | dopo il 5 |
+
+**Il passo 5, misurato.** `src/render/mortar_renderer.gd`, una `MultiMeshInstance3D` sola per tutte
+le cupole, mesh procedurale scalata in codice su `Game.mortar_blast_m`, letta **a ogni refresh** e non
+in un campo: una copia passerebbe tutti i criteri e non servirebbe a niente.
+
+| criterio | misurato |
+|---|---|
+| sincronizzazione | 1 colpo in volo -> 1 istanza, scarto di posizione **0,000000000 m** (tolleranza dichiarata 0,0001 m) |
+| nessuna cupola fantasma | `instance_count == 0` con `mortar_shot_count == 0` |
+| il raggio è quello dichiarato | contratto **5,2100 m**, disegnato **5,2100 m** |
+| un nodo, non uno per colpo | **46 a vuoto contro 46 con 1 colpo in volo**, tetto 120 |
+| canale avvelenato | 5,2100 -> contratto a **99,0** -> riletto **99,0** sia dalla cupola già montata sia da una nuova; ripristinato, riletto 5,2100 |
+| capienza | chiesti 1024, disegnati 256, accorciati 768, `CAPACITY = 256` contro `MAX_ENEMIES = 200` |
+
+**Denti, provati e poi tolti**: canale finito vuoto -> criterio 1 **`FAIL: atteso 1, ottenuto 0`**, 6
+asserzioni cadute, uscita 1; ripristinato -> verde. Nel file finale resta il criterio, non la sonda.
+
+**`node_count` non è più 45: è 46, e diventa 21 il tetto di `-gameplay`.** Non è un cedimento: la
+cupola costa **un nodo qualunque sia il numero di colpi in volo**, cioè 46 a vuoto e 46 a pieno, e il
+tetto vero è 120. È la stessa forma del raggio degli ostacoli (27 dischi, un nodo). La conseguenza
+sulla ripartizione fra le foglie l'ha registrata `-gameplay` nel suo file, che è l'unico che poteva
+farlo: **`-arena` si è fermata e ha chiesto** invece di rientrare nei 45 con `top_level` o spostando
+un nodo altrove. Il protocollo era già scritto in quel file e ha funzionato.
 
 **Il peso non sale prima del 5 per una ragione che va detta come regola:** un nemico che ti
 danneggia senza avvisarti è peggio di un nemico che non ti tocca. Il verde del passo 3 è un verde
@@ -3031,6 +3054,17 @@ Il `checkout` è sicuro perché **`scenes/arena_main.tscn` è già committata co
 perché `-arena` non ha cambiato la scena in questa sessione. Se la scena fosse sporca di lavoro
 legittimo, il checkout perderebbe quel lavoro: per questo la prima riga è `git status`, e per questo
 **nessuna foglia viene lanciata su un albero che non ho guardato**.
+
+**E un secondo difetto di processo, che questa volta ha colpito una foglia invece della scena.**
+`tools/env.sh` insegnava la forma `. tools/env.sh && "$GODOT" --headless ...`, e le allowlist
+delle foglie dichiarano `godot *`. La variabile non è ancora espansa quando il permesso viene
+valutato, quindi **`"$GODOT"` non combacia con `godot`**: la riga cade su `shell "*" deny`. Misurato
+due volte, su `-ui` e poi su `-gameplay` il 2026-10-15, e in entrambi i casi la foglia ha perso la
+verifica per aver scritto il comando come gliel'avevano insegnato. Corretto in `tools/env.sh`, che è
+del vertice: adesso insegna la forma nuda e spiega perché quella sbagliata non funziona. La lezione
+non è «la foglia ha sbagliato il comando» — la foglia ha fatto esattamente quello che le era stato
+insegnato — è che **un file che insegna una forma deve essere eseguibile**, e questa laurea non
+lo era.
 
 **Un debetto che questa sezione rende visibile e non risolve:** `export_presets.cfg` ha
 `export_filter="all_resources"`, quindi i 8 test, `tools/gate.gdc`, le 5 sonde e i due file di

@@ -50,20 +50,20 @@ const PLACEMENT_TRIES := 8
 ## `static var` e non `const`: su Godot 4.7 un array compattato non e' un'espressione
 ## costante (vedi src/sim/enemy.gd, stessa cosa).
 ##
-## ## m14: la quinta voce, e perche' il suo peso e' **6,0**
+## ## m14: la quinta voce nasceva a **6,0**. Storico: **oggi e' 3,0** (vedi sotto)
 ##
 ## In m13 il peso era dichiarato a **0,0** in ogni onda, e non era un ripiego:
-## e non e' un ripiego: **un mortar senza cupola e' un danno senza preavviso**.
+## **un mortar senza cupola e' un danno senza preavviso**.
 ## `-orda` sa *quando* il colpo cade, ma chi lo disegna e' `-arena`, e finche' la
 ## cupola non c'e' il giocatore vede un danno improvviso senza sapere da dove
 ## arriva: peggio di non avere il nemico.
 ##
 ## La ragione e' caduta perche' la cupola c'e' (m13-w3, `-arena`:
 ## `mortar_renderer.gd`) e la simulazione e' chiusa (`00a3677`): la riga che era
-## in attesa sale. Il **perche'** di allora resta scritto qui, perche' un peso a
-## 6,0 senza il suo perche' sembrerebbe inventato fra sei mesi.
+## in attesa sale. Il **perche' di allora** resta scritto qui sotto, perche' un
+## peso a 3,0 senza il suo perche' sembrerebbe inventato fra sei mesi.
 ##
-## ## Perche' 6,0 e non un altro numero: tre fatti gia' misurati
+## ## Perche' 6,0 e non un altro numero (m14): tre fatti gia' misurati
 ##
 ## | fatto misurato | valore |
 ## |---|---|
@@ -80,16 +80,59 @@ const PLACEMENT_TRIES := 8
 ## respawn la tabella piatta somma 106 (`KIND_WEIGHTS` col boss al suo 3,0) e la
 ## quota diventa **5,66%**: due cifre, la stessa scelta su due denominatori.
 ##
+## **Queste due cifre sono quelle di m14** (0,0575 misurato su quattro semi) e
+## **non sono piu' quelle di oggi**: la tabella sotto spiega perche' scendono a
+## 3,0 e a circa 0,0300. Restano scritte perche' il confronto «prima/dopo» e' il
+## numero che rende leggibile la correzione, e perche' la banda del criterio e' stata
+## abbassata proprio a partire da questi due numeri.
+##
+## ## m17: la quinta voce scende a **3,0**, e perche' e' **3,0**
+##
+## In m14 valeva **6,0** e la ragione era una scelta di frequenza: piu' comune del
+## vecchio boss (3%), chiaramente piu' raro del brute (18%), e cosi' "peso basso"
+## restava una parola con un significato. Quel ragionamento **non e' stato
+## ribaltato**: e' che il numero di oggi e' la **conseguenza di due fatti nuovi**,
+## non una scelta estetica.
+##
+## | fatto | prima (m14) | adesso (m17) |
+## |---|---|---|
+## | soglia di nascita | nessuna (dall'onda 1) | `Run.elapsed_s >= 180,0 s` |
+## | fermata del mortar | 10,42 m (`2 x blast`) | **15,63 m** (`3 x blast`) |
+## | quota misurata in onda 1 | 0,0575 | **~0,0300** |
+##
+## I due fatti, e la direzione in cui spingono:
+##
+##   1. **La soglia di 180 s toglie al mortar i primi tre minuti di partita.**
+##      Prima nasceva dall'onda 1, cioe' subito, e il giocatore lo incontrava
+##      mentre stava ancora imparando a schivare una cupola: era la fifth species
+##      che non poteva essere difficile, e il suo peso era alto per compensare.
+##      Adesso arriva quando il giocatore ha gia' tre minuti di partita e ha
+##      incontrato tutto il resto: **non ha piu' bisogno di essere frequente per
+##      farsi conoscere**.
+##   2. **La fermata a 3 x blast lo mette piu' lontano e piu' presto** (vedi la
+##      tabella su `enemy.gd::engage_for`): lo stesso colpo arriva prima nella
+##      partita e arriva addosso a chi e' gia' dentro la folla. Un nemico che ti
+##      raggiunge prima e da piu' lontano **non e' un nemico da incontrare spesso**:
+##      la frequenza e' cioe' l'unica leva che si puo' abbassare tenendo fermo
+##      tutto il resto, ed e' la leva giusta perche' la **finestra di schivata non
+##      e' cambiata** (`mortar_telegraph_s` resta 0,8293 s, margine 2,00).
+##
+## `6,0 -> 3,0` e' meta' del peso di prima, e la quota se ne va con lui:
+## `3,0 / 103,0 = 0,0291` sull'onda 1 (denominatore 103: il boss vale 0,0 li') e
+## `3,0 / 106,0 = 0,0283` sul cammino del respawn, contro 0,0583 e 0,0566 di prima.
+## La quota **misurata** su quattro semi scende da **0,0575 a circa 0,0300**.
+##
 ## ## Il criterio e' sulla **quota**, non su questo numero
 ##
-## `tests/test_orda.gd` non asserisce `MORTAR_WEIGHT == 6.0`: il giorno che il
-## numero si ritocca per fare il mortar piu' raro, un criterio scritto sul peso va
-## rosso e non dice niente. Asserisce che la quota stia fra **4,0% e 8,0%** su
-## **entrambi** i cammini (popolazione iniziale e respawn) e su piu' semi: il peso
-## puo' muoversi dentro quella banda senza rompere niente, e se ne esce la porta lo
-## dice. I denti sono nella stessa sezione: con il peso tornato a 0,0 la quota
-## deve tornare a **0,0000** e poi risalire.
-static var MORTAR_WEIGHT := 6.0
+## `tests/test_orda.gd` non asserisce `MORTAR_WEIGHT == 3.0`: il giorno che il
+## numero si ritocca ancora, un criterio scritto sul peso va rosso e non dice
+## niente. Asserisce che la quota stia fra **2,0% e 4,0%** su **entrambi** i
+## cammini (popolazione iniziale e respawn) e su piu' semi: la banda e' scesa con
+## il numero e **non e' un allargamento di tolleranza per far passare** — 0,0575,
+## il valore di prima, e' **fuori** da 2,0%-4,0%, quindi il criterio di m17 va
+## rosso sul numero di ieri. I denti sono nella stessa sezione: con il peso
+## tornato a 0,0 la quota deve tornare a **0,0000** e poi risalire.
+static var MORTAR_WEIGHT := 3.0
 
 ## La quinta voce e' **la stessa riga della fonte**, non una copia scritta qui: e'
 ## `MORTAR_WEIGHT` letto al caricamento della classe (`PackedFloat32Array` non e' un

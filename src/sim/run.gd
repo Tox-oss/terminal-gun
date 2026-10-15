@@ -157,9 +157,64 @@ var wave: int = 1
 var wave_total: int = WAVE_BASE
 ## Uccisioni cadute nell'onda corrente.
 var wave_killed: int = 0
+## ## m17: i secondi di partita, e perche' esiste **adesso**
+##
+## Prima di m17 questo file non aveva **nessun segnale di tempo trascorso**: la
+## barra dell'onda sapeva quante uccisioni mancavano, la HUD mostrava l'avanzamento
+## dell'onda, e nessuno sapeva «quanti secondi di partita sono passati». Quindi un
+## numero che dipende dal tempo non aveva dove scriversi, e una soglia come
+## «il terzo minuto» non aveva modo di esistere: si poteva solo scrivere «dalla
+## terza onda», che e' una parola diversa da quello che il giocatore misura.
+##
+## `elapsed_s` e' l'orologio, ed e' **un addendo per passo**, non un contatore
+## ricostruito: `advance(delta)` e' l'unico posto in cui cresce, e `restart()` e'
+## l'unico posto in cui torna a zero (`horde.restart_run()` chiama `restart()`).
+##
+## ## Perche' un orologio e non un numero d'onda
+##
+## Misurato il 2026-10-15, l'onda 1 e' passata da **56,78 s a 46,68 s** (-19%)
+## quando `-gameplay` ha cambiato l'involucro del proiettile (m14-a). Una soglia
+## scritta «dalla terza onda» avrebbe continuato a chiamarsi «terzo minuto» mentre
+## non lo era piu', **senza che nessuno se ne accorgesse**: il numero dell'onda non
+## si muove quando il tempo si muove, quindi la soglia avrebbe continuato a
+## mentire sul nome che ha. Il tempo e' l'unica grandezza che il giocatore misura
+## davvero, e l'unica che sopravvive a `-gameplay`.
+var elapsed_s: float = 0.0
 
 func _init() -> void:
 	wave_total = wave_size(1)
+
+## ## m17: **180,0 s** — il terzo minuto, e la soglia che rende spendibile il mortar
+##
+## Prima nasceva dall'onda 1 (m14, `Spawner.MORTAR_WEIGHT` in ogni onda). Da qui in
+## poi il mortar **non e' spendibile** prima di questo numero di secondi, e solo
+## lui: il **brute** e il **boss** non hanno soglia e restano quelli che erano.
+##
+## | | prima (m14, per onda) | adesso (m17, per tempo) |
+## |---|---|---|
+## | soglia | nessuna: nasceva dall'onda 1 | `elapsed_s >= 180,0 s` |
+## | chi la guarda | `Spawner.wave_weights(wave)` | `Run.mortar_unlocked()` |
+##
+## Il numero e' **180,0 s** e non «l'onda N» perche' l'onda 1 non dura piu' 180 s
+## al ritmo di oggi (vedi `elapsed_s` qui sopra): «terzo minuto» deve dire il
+## terzo minuto anche se `-gameplay` cambia ancora il ritmo dell'onda 1.
+static var MORTAR_AFTER_S := 180.0
+
+## Un passo di partita: il tempo passa **qui e solo qui**.
+##
+## Nessuna allocazione, nessun nodo, un solo `+=`. E' chiamata da `horde.step()`
+## **dopo** il controllo di `game_over`: a partita finita l'orologio si ferma con
+## il gioco, invece di continuare a scorrere mentre nessuno gioca piu'.
+func advance(delta: float) -> void:
+	if delta > 0.0:
+		elapsed_s += delta
+
+## Il mortar e' spendibile? E' l'unica domanda che questo file fa al tempo, ed e'
+## scritta qui e non in `horde.gd` perche' e' **la stessa soglia** che il test
+## avvelena per accendere i denti: se la soglia vivesse nella foglia che spawna,
+## avvelenarla significherebbe toccare il codice di produzione.
+func mortar_unlocked() -> bool:
+	return elapsed_s >= MORTAR_AFTER_S
 
 # --- I numeri dell'onda --------------------------------------------------------
 
@@ -270,3 +325,12 @@ func restart() -> void:
 	wave = 1
 	wave_total = wave_size(1)
 	wave_killed = 0
+	# ## m17: l'orologio riparte da zero **qui**, non in `horde.restart_run()`
+	#
+	# Perche' qui e non li': `horde.restart_run()` chiama `restart()`, quindi
+	# scriverlo anche li' sarebbe una seconda riga che dice la stessa cosa e che
+	# un giorno qualcuno toglie da una delle due. E perche' il restart della
+	# **partita** e' il solo modo di tornare a `PLAYING` (vedi `enter_game_over`):
+	# se ci fosse un'altra strada, l'orologio ripartirebbe da solo
+	# e la soglia dei 180 s cambierebbe da una partita all'altra.
+	elapsed_s = 0.0

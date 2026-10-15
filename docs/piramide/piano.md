@@ -1259,8 +1259,9 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
-**Stato al 2026-10-15, sommario.** `GATE: 8/8` e `PERM: 15/15` misurati dal vertice su `00a3677`.
-Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
+**Stato al 2026-10-15, sommario.** `GATE: 8/8` e `PERM: 15/15` **rimesurati dal vertice** dopo
+m17+m18 (le due porte sono due fatti distinti e si riportano separati). Milestone chiuse: **da m1 a
+m10**. **m11 aperta**, e dentro m11:
 
 | pezzo di m11 | stato | dove |
 |---|---|---|
@@ -1275,7 +1276,9 @@ Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
 | **mortar: simulazione, contratto, criteri** | **chiuso** | `00a3677`, §1.14-diciassettesima |
 | **mortar: la cupola rossa** | **chiusa**, 8/8 | `-arena`, m13-w3 |
 | **bug dell'utente, metà proiettile** (`ENEMY_RADIUS` 0,55) | **chiusa**, 8/8, banda 0,0000 | `-gameplay`, m14-a |
-| peso del mortar `0 → basso` | **chiuso**: `6,0`, quota **5,75%** misurata | `-orda`, m14-b |
+| peso del mortar `0 → basso` | **chiuso**: `3,0`, quota **3,02%** misurata su n=4800, banda 2-4% | `-orda`, m14-b poi m17 |
+| **mortar solo dal terzo minuto** | **chiuso**: `Run.MORTAR_AFTER_S = 180,0 s`, quota **onda 4** misurata su 3 semi | `-orda`, m17 |
+| **traiettoria del colpo** | **chiusa**: dal mortar alla cupola, scarto **0,000000000 s** per costruzione | `-arena`, m18 |
 | danno per specie | **deciso: dopo il mortar** | utente, 2026-10-15 |
 | vista isometrica 2D | **mai fatta**, fuori strada critica | `-arena` |
 | vista nemici: modelli distinti per specie | **deliberazione dell'utente**, 5 GLB dall'artista | `-arena` quando arrivano |
@@ -1295,7 +1298,10 @@ criterio.
 | m13-w3 | `-arena` | **la cupola rossa del mortar** | 8/8 | **verde** |
 | m14-a | `-gameplay` | **l'involucro del proiettile**, l'altra metà del bug segnalato | 8/8 | **verde** |
 | m14-b | `-orda` | peso del mortar `0 → 6,0`, quota 5,75% | 8/8 | **verde** |
-| m15 | `-orda` | **taratura del danno per specie**, sui numeri nuovi | — | **prossima onda** |
+| m15 | `-arena` | **il colpo del mortar** e i tre modelli per cinque specie, `node_count` 46 → 49 | 8/8 | **verde** |
+| m16 | `-gameplay` | **invulnerabilità 0,7 s → 0,25 s**, decisione dell'utente | 8/8 | **verde** |
+| m17 | `-orda` | **`Run.elapsed_s`**: il terzo minuto è un orologio, non un numero d'onda; fermata `3 x blast`; peso `6,0 → 3,0` | 8/8 | **verde** |
+| m18 | `-arena` | **la traiettoria**: il colpo parte dal mortar e arriva alla cupola | 8/8 | **verde** |
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
@@ -3342,6 +3348,105 @@ Resta un difetto vero emerso dalla stessa misura, **diverso e più serio del tim
 nella successiva, sullo stesso codice, con code che si sovrappongono (min 8,9–10,8 ms contro 8,3–11,2
 ms). Un criterio che cambia verdetto da solo è un criterio che non ha denti nella direzione giusta.
 `-orda` lo dichiara difetto di `spatial_grid.gd`; è **aperto**.
+
+### 1.14-ventitreesima **m17 e m18: l'utente chiede un orologio, e il colpo impara a viaggiare**
+
+Quattro richieste dell'utente in un messaggio: piu' range d'ingaggio per il mortar, il proiettile
+**in traiettoria** invece che in caduta, meno mortai, e i mortai **dal terzo minuto**. Tre numeri
+scelti dall'utente, il quarto costruito qui.
+
+#### m17 — l'orologio che non esisteva (`-orda`)
+
+Nel progetto **non c'era nessun segnale di tempo trascorso**: `Run` traccia onde e popolazione, e la
+HUD mostra l'avanzamento dell'onda, non i secondi. Quindi «terzo minuto» ha richiesto di costruire
+`Run.elapsed_s`, chiamato da `horde.step()` **dopo** il controllo di `game_over` e azzerato da
+`restart_run()`.
+
+**Perche' un orologio e non un numero d'onda:** l'onda 1 e' passata da **56,78 s a 46,68 s** quando
+m14-a ha cambiato l'involucro del proiettile (-19%). Una soglia su «onda N» avrebbe continuato a
+chiamarsi «terzo minuto» mentre non lo era piu', senza che nessuno se ne accorgesse.
+
+| numero | prima | dopo | misurato |
+|---|---|---|---|
+| fermata del mortar | `2 x blast` = 10,42 m | **`3 x blast` = 15,63 m** | 15,6300 m, finestra **0,8293 s invariata** |
+| `MORTAR_WEIGHT` | 6,0 | **3,0** | quota **0,0302 / 0,0298** (n=4800), banda **0,02-0,04** |
+| soglia | nessuna | **`Run.MORTAR_AFTER_S = 180,0 s`** | chiusa 0/2400, avvelenata 0/2400, ripristinata 82/2400 = 0,0342 |
+
+La finestra di schivata **non e' cambiata**: `mortar_telegraph_s` resta 0,8293 s e il margine resta
+2,00. Quello che cambia e' **quanto presto ti raggiunge**, non il danno.
+
+**«Terzo minuto» = onda 4**, misurato su 3 semi a `DT` 0,2 s con 1 uccisione per passo (5,0/s),
+`population_scale` 0,25. Il numero **vale per quella cadenza** e non per un'altra: a 180 s conta il
+ritmo delle uccisioni, non il seme.
+
+**Tre difetti veri trovati dalla foglia strada facendo**, tutti dichiarati:
+
+1. **Aliasing di un packed array.** `_pesi_senza_mortar = _weights` scriveva **anche dentro**
+   `_weights`: la soglia spegneva il mortar **per sempre**, non solo a soglia chiusa. Sintomo: quota
+   0,0000 ovunque con la soglia aperta. Risolto con `.duplicate()`.
+2. **L'orologio contaminava una misura dei primi 30 s**: una sezione che misurava la miscela in
+   onda 1 leggeva l'orologio e vi aggiungeva i secondi del test, quindi campionava oltre la soglia
+   quando non avrebbe dovuto.
+3. **Finestra di osservazione lunga zero**, che non poteva mai vedere il nemico che cercava.
+
+#### m18 — la traiettoria (`-arena`)
+
+Il colpo non cade piu' dritto: parte **dal mortar** e arriva alla **cupola** lungo una parabola che
+passa per tre punti noti — `(0, lancio)`, `(T/2, apice)`, `(T, 0)` — con `T = mortar_telegraph_s`
+**riletto dal contratto a ogni refresh** e mai messo in un campo. Scarto sull'impatto
+**0,000000000 s per costruzione**, non per taratura.
+
+`LAUNCH_HEIGHT = 9,52 m` (= 2 x corpo del mortar, sopra i 6,46 m del corpo piu' alto, sotto il quale il
+colpo sparirebbe dentro la folla) e `APEX_HEIGHT = 28,0 m` (= `HEIGHT` 34 − `EDGE_MARGIN` 6, sopra il
+quale esce dall'inquadratura proprio quando serve guardarlo).
+
+**Tre difetti, e il terzo e' il piu' importante:**
+
+1. **Il `lerp` aveva gli argomenti scambiati.** `lerp(world, launch, s)` invece di
+   `lerp(launch, world, s)`: a `s = 0` il colpo era **sulla cupola** e a `s = 1` **sul mortar**. Il
+   tempo era giusto e il posto no, quindi **`m15` non lo aveva mai guardato**: era un criterio sulla
+   quota e nessuno sull'origine. Ora c'e' il criterio speculare che asserisce i **due estremi**.
+2. **2,85 cm che non erano l'interpolazione**: a `s = 0` il `lerp` restituisce il primo argomento
+   esatto, quindi lo scarto veniva dal fatto che **il mortar si e' mosso di 2,85 cm** nel passo che ha
+   fatto sparire il colpo, e il confronto usava la posizione catturata **prima** di quel passo.
+   Risolto leggendo `horde.transforms[0]` nello stesso istante del refresh: scarto **0,000000000 m**,
+   tolleranza **non allargata**.
+3. **Una misura sparita in silenzio.** `%.1e` **non e' un formato valido in Godot**
+   (`unsupported format character`): l'intera riga `m18 arco:` tornava indietro non formattata e i
+   numeri dell'arco **non erano mai stati stampati**. Un criterio verde che stampa una frase falsa.
+
+**E una frase che era falsa anche senza errori di formato.** La riga diceva «la corda misura 17,475 m,
+**la stessa fermata** a 15,630 m». I due numeri non sono uguali. Misurato: i 17,475 m erano uno
+**scarto diagonale che il test stesso si era messo sotto** (`15,630 x (sqrt(1,25) − 1)` = 1,8449 m).
+Sul canale vero la corda e' **15,130 m** e la differenza sono **0,500 m**, cioe' `CUPOLA_ENGAGE_MARGIN`,
+il mezzo metro dentro cui il test mette il giocatore perche' `fermo` sia vero al primo passo.
+
+**Il massimo in partita e' dichiarato e non entra nel margine di fuga**: `fermata + PLAYER_SPEED x
+mortar_telegraph_s` = **26,950 m**. Il margine di `-orda` e' `blast + TOUCH_REACH <= PLAYER_SPEED x
+telegraph`, e la lunghezza della corda non compare: il colpo resta schivabile a qualunque corda.
+
+**L'ipotesi del vertice era sbagliata e la foglia l'ha smentita invece di adottarla.** Avevo scritto
+che la corda crescesse perche' il giocatore si muove; ho mandato la domanda e l'ipotesi insieme, e la
+risposta e' stata che in quel test il giocatore **non si muove** (`horde.step()` non muove il
+giocatore, lo muove `player.gd`, che qui non gira). E' la seconda volta in due giorni che una mia
+ipotesi viene smentita da una misura, ed e' la seconda volta che la foglia sceglie la misura.
+
+**Nessun criterio nuovo sulla corda**, e il motivo vale: la relazione «corda = fermata ± 0,5 m» vale
+perche' **il test mette il giocatore li'**, non e' un invariante di nessun codice di produzione e
+nessuno puo' romperla. Un'asserzione su un numero che ha scritto il test sarebbe rumore.
+
+#### Il difetto di processo che questa coppia di onde ha scoperto
+
+`-arena` ha avuto `shell` **negata** per quattro round di fila: non poteva eseguire nulla, e ogni
+giro scriveva codice che non aveva girato. Il costo non e' stato il tempo di `-arena`, e' stato che
+**ogni refuso richiedeva una porta intera di 3 minuti per essere trovato**: in tre round sono usciti
+`spicie` per `specie`, due `:=` su valori senza tipo, e una premessa di sezione rimasta vera quando il
+peso di produzione era 0,0 ed e' diventata falsa quando `-orda` lo ha portato a 3,0.
+
+**Il rimedio e' stato cambiare il ciclo, non la foglia:** il vertice gira **solo `tests/test_arena.gd`**
+(8 secondi invece dei 3 minuti della porta intera) e rimanda la riga. Da quel momento i round sono
+costati secondi e la foglia ha potuto iterare. La divisione che funziona, quando una foglia non puo'
+eseguire, e' **la foglia scrive e il vertice misura** — e non l'inverso.
 
 ### Le onde della milestone 3
 

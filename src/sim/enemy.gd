@@ -392,24 +392,49 @@ static func telegraph_for(body_scale: float) -> float:
 # gia' decide quanto spesso un morso arriva addosso.
 static var DODGE_MARGIN := 2.0
 
-# ## La distanza a cui il mortar si ferma: **derivata**, e con un'identita'
+# ## La distanza a cui il mortar si ferma: **derivata**, da 2x a **3x** il raggio
 #
-#     engage = blast + bite = 2 x bite
+#     engage = 3 x blast = 3 x bite
 #
-# Non e' una distanza scelta: e' la somma delle due cose che il mortar puo' fare,
-# e la sua proprieta' e' un'identita', non una taratura. Sostituendo
+# Non e' una distanza scelta: e' un multiplo della somma delle due cose che il
+# mortar puo' fare — il suo corpo e la cupola che sta per disegnare — e la sua
+# proprieta' resta un'identita', non una taratura. Sostituendo
 # `bite = corpo_disegnato + TOUCH_REACH`:
 #
-#     engage - corpo_disegnato - blast  ==  TOUCH_REACH
+#     engage - corpo_disegnato - blast  ==  blast + TOUCH_REACH
 #
 # cioe' **fra il corpo disegnato del mortar e il bordo della cupola che sta per
-# disegnare ci sono esattamente 0,45 m**: il raggio del corpo del giocatore, lo
-# stesso numero che copre il morso. Zero spazio libero e zero sovrapposizione,
-# quindi il colpo non tocca mai il nemico che l'ha sparato, e il mortar non puo'
+# disegnare ci sono esattamente `blast + TOUCH_REACH` metri**: il raggio
+# d'esplosione piu' il raggio del corpo del giocatore. Con il multiplo di prima
+# (`2 x blast`) quel numero era `TOUCH_REACH` e il criterio lo asseriva cosi';
+# adesso e' piu' grande, quindi **l'identita' e' cambiata e va detta**, non
+# lasciata com'era con la formula nuova sotto.
+#
+# Il colpo non tocca mai il nemico che l'ha sparato, e il mortar non puo'
 # morderti da dove sta (la fermata e' fuori dalla sua stessa portata di morso,
 # per costruzione: `engage > bite`).
+#
+# ## Perche' **3x** e non 2x, e cosa cambia davvero per il giocatore
+#
+# | | prima (m13) | adesso (m17) |
+# |---|---|---|
+# | raggio del colpo | 5,21 m | 5,21 m (**invariato**) |
+# | fermata | 10,42 m | **15,63 m** |
+# | finestra di schivata | 0,8293 s | 0,8293 s (**invariata**) |
+# | margine di fuga | 2,00 | 2,00 (**invariato**) |
+#
+# **La finestra non si muove di un secondo e non si muove di un metro**: e' la
+# stessa disuguaglianza di prima, `telegraph_for()`, che di questa distanza non sa
+# niente. Quindi **la matematica della fuga e' identica**: chi schivava schiva
+# ancora, con lo stesso margine. Quello che cambia e' **quanto presto ti
+# raggiunge**: prima il mortar ti colpiva quando eri gia' vicino — la fermata a
+# 10,42 m metteva la cupola addosso a chi era gia' dentro il cerchio dei nemici —
+# adesso ti colpisce mentre sei **ancora lontano**, a 15,63 m. Non e' «piu'
+# danno»: il danno e' lo stesso identico numero (13,71 hp, il morso del boss).
+# E' un colpo che arriva **prima nella partita**, e quindi che ti costringe a
+# leggere la cupola da piu' lontano, con piu' nemici fra te e quella.
 static func engage_for(body_scale: float) -> float:
-	return blast_radius_for(body_scale) + bite_range_of(MORTAR, body_scale)
+	return 3.0 * blast_radius_for(body_scale)
 
 # ## Il danno di un colpo: **il morso peggiore del gioco**
 #

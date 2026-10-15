@@ -70,6 +70,90 @@ const OBST := preload("res://src/sim/obstacles.gd")
 ## non dal default rimasto al suo posto. Non e' una copia: e' una lettura, ed e'
 ## lo stesso file che scrive il renderer.
 const RENDERER_SCRIPT := "res://src/render/horde_renderer.gd"
+## -orda, m17: la tabella delle onde e **l'orologio**, letti dal produttore. Il
+## `const preload` qui e' sicuro perche' `src/sim/run.gd` e' un `RefCounted` che non
+## nomina mai `Game` (la trappola dei `const preload` in testa al file riguarda gli
+## script che lo nominano); e' la strada che gia' usano `tests/test_progression.gd`,
+## `test_orda.gd` e `test_gameloop.gd` per non copiare `MORTAR_AFTER_S`.
+const Run = preload("res://src/sim/run.gd")
+## ## m17: LA SOGLIA DI TEMPO DEL MORTAR, e perche' questo file la apre
+##
+## Il mortar non e' spendibile prima di `Run.MORTAR_AFTER_S` = 180,0 s (il terzo
+## minuto: il vertice, 2026-10-15). Le due sezioni che cercano un mortar da guardare
+## — il criterio delle cinque specie (`_accendi_il_mortar`) e quello della cupola
+## (`_accendi_il_mortar_per_la_cupola`) — cercano un nemico che **non puo' nascere**
+## con l'orologio a zero: avrebbero girato su un campo senza mortar e avrebbero
+## stampato un numero che nessuno ha misurato. Quindi la leva (`Run.elapsed_s`, campo
+## pubblico e dichiarato per essere pilotato) viene portata oltre la soglia **prima**
+## della ricerca, e l'orologio viene stampato **accanto al seme** che ha fatto
+## trovare il mortar: una sezione che trova il mortar per caso non sta misurando la
+## regola che le si e' chiesta di misurare.
+##
+## Il numero della soglia **non** e' scritto qui: e' letto dal produttore, come il
+## raggio dell'arena e' letto dalla sua fonte. Questo e' il margine oltre la soglia:
+## non serve a niente che sia «poco oltre» e «molto oltre» diverso, serve che non sia
+## `0`, e il numero e' dichiarato perche' un numero non dichiarato e' una copia che
+## un giorno diverge.
+const ORA_MORTAR := 5.0
+
+## Porta l'orologio oltre `Run.MORTAR_AFTER_S` e **dice** che la soglia e' aperta.
+##
+## La precondizione non e' un controllo di servizio: senza questa riga, «il mortar e'
+## stato trovato» potrebbe voler dire soltanto «il campo aveva gia' un nemico», che e'
+## la circostanza in cui il criterio deve mordere e non quella in cui puo' accadere.
+func _apri_la_soglia_del_mortar(h, horde, etichetta: String) -> float:
+	var soglia: float = float(Run.MORTAR_AFTER_S)
+	var ora_dichiarata := float(horde.run.elapsed_s)
+	horde.run.elapsed_s = soglia + ORA_MORTAR
+	h.check(horde.run.mortar_unlocked(),
+		"%s: l'orologio e' a %.2f s e la soglia dichiarata da src/sim/run.gd e' %.2f s, quindi `Run.mortar_unlocked()` deve essere vera: sotto soglia nessun mortar puo' nascere e questa sezione misurerebbe il vuoto"
+			% [etichetta, float(horde.run.elapsed_s), soglia])
+	return ora_dichiarata
+
+## ## LA PREMESSA COSTRUITA: il canale dei colpi vuoto, per costruzione
+##
+## Le due sezioni che misurano il canale del mortar cominciano chiedendosi «c'e' un
+## colpo in volo?», e la risposta **non e' piu' zero da sola**. La premessa qui sotto
+## era vera quando il peso di produzione era `0.0`: `-orda` lo ha portato a **3.0** e
+## ha aggiunto la soglia dei 180 s, quindi oltre soglia il gioco **produce** colpi e al
+## primo passo di queste sezioni ne sono gia' due in volo. Ereditarlo sarebbe una
+## coperta: se il canale non fosse vuoto, il numero di istanze che segue sarebbe
+## quello di un canale che il gioco sta usando davvero, non quello che la sezione
+## dichiara di misurare.
+##
+## Quindi la premessa si **costruisce**, e con la strada giusta:
+##
+##   1. `Spawner.MORTAR_WEIGHT = 0.0` — la leva che il progetto dichiara pilotabile,
+##      la stessa che le sezioni di denti gia' usano. A zero nessun mortar e'
+##      spendibile **alla prossima lettura dei pesi**, che e' quella che fa
+##      `restart_run()` subito dopo (`horde.gd::_sync_weights()`): da l' in poi la
+##      sezione riaccende il peso pilotato per cercare il mortar che le serve.
+##   2. i colpi **gia' in volo** si svuotano con `horde.step(DT)`: il canale scende di
+##      `DT` a ogni passo e a zero `-orda` lo cancella (`_mortar_tick` ->
+##      `_mortar_impact`). Non si scrive `mortar_shot_count = 0` e non si tocca
+##      `mortar_shots`: un'orda che smettesse di svuotare il canale costerebbe un
+##      pezzo di codice in due posti invece che in uno, e questa sezione non puo'
+##      accorgersene.
+##
+## L'orologio **resta** oltre la soglia: qui si sta misurando il canale del mortar,
+## non quando il mortar compare. Il peso torna a quello dichiarato nel ripristino di
+## ogni sezione (`_ripristina`), che lo dichiara con due asserzioni.
+##
+## Restituisce **quanti** colpi aveva trovati in volo: e' il numero che dice quanto
+## c'era da costruire, e senza di esso una premessa che trova il canale gia' vuoto
+## passerebbe anche se non avesse costruito niente.
+func _costruisci_il_canale_vuoto(h, horde, spawner, etichetta: String) -> int:
+	var trovati: int = horde.mortar_shot_count
+	spawner.MORTAR_WEIGHT = 0.0
+	h.near(float(spawner.MORTAR_WEIGHT), 0.0, WEIGHT_TOLERANCE,
+		"%s: la leva della premessa deve essere a 0.0, altrimenti il canale vuoto che segue sarebbe un caso e non una costruzione: letto %.4f" % [etichetta, float(spawner.MORTAR_WEIGHT)])
+	var passi := 0
+	while horde.mortar_shot_count > 0 and passi < CUPOLA_FALL_STEPS_MAX:
+		horde.step(DT)
+		passi += 1
+	h.eq(horde.mortar_shot_count, 0,
+		"%s: i %d colpi gia' in volo devono svuotarsi da soli entro %d passi (li svuota `-orda`, non questa sezione): ne restano %d dopo %d passi" % [etichetta, trovati, CUPOLA_FALL_STEPS_MAX, horde.mortar_shot_count, passi])
+	return trovati
 ## Il **veleno** di `_m11_size_factor`: il valore a cui il contratto viene portato
 ## di proposito, **prima** di montare la scena, per distinguere «l'arena ha
 ## registrato `SIZE_FACTOR`» da «il default del contratto dice la stessa cosa».
@@ -3205,8 +3289,9 @@ func _milestone_8(h, arena: Node3D) -> void:
 		if by_kind.size() >= spendable.size():
 			break
 
-	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte su %d spendibili"
-		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size(), spendable.size()])
+	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte su %d spendibili; l'orologio era a %.2f s (soglia %.2f s) mentre i semi giravano, quindi la quinta specie e' stata trovata **oltre soglia** e non per caso"
+		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size(), spendable.size(),
+			float(horde.run.elapsed_s), float(Run.MORTAR_AFTER_S)])
 	_specie_campionate(h, by_kind, renderers, legacy_extent, kind_names, spendable)
 
 	# Ripristino **sempre**: `check()` non interrompe, e una sezione che lascia
@@ -3288,6 +3373,13 @@ func _accendi_il_mortar(h, horde, kind_names: Array) -> Dictionary:
 	horde.restart_run()
 	horde.run.wave_killed = horde.run.wave_total
 	horde.step(DT)
+	# ## 4b: LA SOGLIA DI **TEMPO** (m17). `restart_run()` ha rimesso l'orologio a
+	# zero e a zero il mortar non e' spendibile: senza questa riga il campione sotto
+	# non potrebbe contenere la quinta specie e il criterio delle cinque specie
+	# misurerebbe quattro. Il valore di prima e' restituito perche' il ripristino lo
+	# rimetta a terra: una sezione che lascia l'orologio oltre la soglia sta
+	# autorizzando i mortar anche dove `-orda` non li autorizza.
+	var ora_dichiarata := _apri_la_soglia_del_mortar(h, horde, "m8 strada (B)")
 	var onda: int = horde.wave
 	if not h.check(onda >= 2,
 			"m8: l'orda non e' arrivata a un'onda in cui tutte le specie sono spendibili (onda %d): sull'onda 1 anche il boss e' a zero (BOSS_WAVE1) e il campione sarebbe di quattro. `restart_run()` + `run.wave_killed = run.wave_total` + `step()` sono la strada con cui -orda chiude un'onda" % onda):
@@ -3323,8 +3415,12 @@ func _accendi_il_mortar(h, horde, kind_names: Array) -> Dictionary:
 	vuoto["spendable"] = spendable
 	vuoto["onda"] = onda
 	vuoto["pesi"] = pesi
+	vuoto["ora"] = float(horde.run.elapsed_s)
+	vuoto["ora_dichiarata"] = ora_dichiarata
 	print("test_arena: m8 m13 strada (B): MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test** (numero di collaudo, non di produzione: non entra in nessun file di src/), ripresa all'onda %d (%s) dove tutte e %d le specie sono spendibili; l'orda spawna con quei pesi, voce per voce"
 		% [dichiarato, MORTAR_STEER, onda, str(pesi), spendable.size()])
+	print("test_arena: m8 m13 strada (B): l'orologio portato a %.2f s (Run.MORTAR_AFTER_S = %.2f s, la soglia di m17): sotto quella soglia il mortar non e' spendibile e il campione sarebbe di quattro specie"
+		% [float(horde.run.elapsed_s), float(Run.MORTAR_AFTER_S)])
 	return vuoto
 
 ## ## Il ripristino, e **due** asserzioni che lo dicono
@@ -3333,16 +3429,27 @@ func _accendi_il_mortar(h, horde, kind_names: Array) -> Dictionary:
 ## sezione, e lasciarla a 12,0 significa che tutto quello che gira dopo in questo
 ## processo nascerebbe con un mortar che `-orda` non ha autorizzato. Il ripristino
 ## quindi non e' pulizia: e' parte del criterio, e come in `_restore_body_scale` sono
-## due le asserzioni, perche' oggi `dichiarato == 0.0` e `MORTAR_STEER == 12.0` sono
-## due numeri diversi e la prima da sola passerebbe anche se il ripristino non fosse
+## due le asserzioni, perche' il peso dichiarato di -orda e `MORTAR_STEER == 12.0` non
+## coincidono mai e la prima da sola passerebbe anche se il ripristino non fosse
 ## mai partito.
 ##
 ## E poi la **seconda misura**: lo stesso contesto, lo stesso seme, il peso tornato a
 ## quello di produzione. Il numero che esce e' la ragione per cui il criterio confronta
 ## `by_kind` con le specie spendibili e non con tutte le dichiarate: e' stampato, non
 ## asserito, perche' **e' il numero di -orda** e questo test non asserisce numeri di
-## -orda; quel criterio gli tocca `tests/test_orda.gd`, e quando il peso di produzione
-## salira questa riga comincia a dire cinque da sola.
+## -orda; quel criterio gli tocca `tests/test_orda.gd`.
+##
+## ## m18: LA RIGA ADESSO DICE UN ALTRO MOTIVO, e il motivo vecchio e' falso
+##
+## Fino a m17 il peso di produzione del mortar era `0.0`, e la giustificazione era che
+## «a peso zero il mortar non puo' nascere»: chiedere quella specie sarebbe stato
+## chiedere un numero che il motore non puo' produrre. `-orda` ha portato il peso a
+## `3.0` e ha aperto la soglia dei 180 s, quindi **a peso di produzione il mortar e'
+## spendibile** e quella frase era falsa. La giustificazione che regge adesso e' piu'
+## semplice e non dipende da nessun numero: `spendable` sono le voci che l'orda sta
+## usando **davvero** in questo momento, e il criterio confronta il campione con quelle
+## e non con tutte le specie dichiarate — dichiarate sono cinque sempre, usate sono
+## quelle che il peso consente.
 func _ripristina_il_mortar(h, horde, pilotaggio: Dictionary, cap: int, kind_names: Array, campione: int) -> void:
 	var spawner = _spawner(horde)
 	if not h.check(spawner != null, "m8: nel ripristino non si rilegge piu' Spawner dalla scena di -orda"):
@@ -3355,6 +3462,33 @@ func _ripristina_il_mortar(h, horde, pilotaggio: Dictionary, cap: int, kind_name
 	h.check(not is_equal_approx(dopo, MORTAR_STEER),
 		"m8: il ripristino non ha spostato niente, MORTAR_WEIGHT e' ancora al %.1f pilotati dal test: tutto quello che gira dopo in questo processo nascerebbe con un mortar che -orda non ha autorizzato" % MORTAR_STEER)
 
+	# E l'orologio torna a terra, come il peso: sotto i 180,0 s di m17 il mortar non
+	# e' spendibile, e lasciare l'orologio aperto significa che tutto quello che gira
+	# dopo in questo processo nascerebbe con un mortar che l'utente non ha ancora
+	# autorizzato. Il valore di prima e' quello che la sezione ha trovato, non `0.0`.
+	if pilotaggio.has("ora_dichiarata"):
+		horde.run.elapsed_s = float(pilotaggio["ora_dichiarata"])
+		h.check(float(horde.run.elapsed_s) < float(Run.MORTAR_AFTER_S),
+			"m8: dopo la sezione l'orologio deve essere tornato sotto la soglia dichiarata di %.1f s: e' a %.3f s, quindi il mortar resterebbe spendibile dove -orda non lo autorizza"
+				% [float(Run.MORTAR_AFTER_S), float(horde.run.elapsed_s)])
+
+	# ## IL CANALE DEI COLPI, SVUOTATO CON LA STRADA DELL'ORDA
+	#
+	# Questa sezione apre la soglia dei 180 s (m17), quindi puo' trovarsi a ripristinare
+	# con un colpo in volo: un'orda che torna indietro cosi' fa trovare alle sezioni
+	# successive un mondo che non e' quello che hanno costruito. Non si azzera a mano:
+	# si lascia che `-orda` lo svuoti con il suo stesso passo (`_mortar_tick` ->
+	# `_mortar_impact`), cosi' se un domani l'orda smettesse di svuotarlo questa sezione
+	# se ne accorgerebbe invece di mentire — ed e' l'unico motivo per cui qui non c'e'
+	# un `mortar_shot_count = 0`.
+	var in_volo_ripresa: int = horde.mortar_shot_count
+	var caduti_ripresa := 0
+	while horde.mortar_shot_count > 0 and caduti_ripresa < CUPOLA_FALL_STEPS_MAX:
+		horde.step(DT)
+		caduti_ripresa += 1
+	h.eq(horde.mortar_shot_count, 0,
+		"m8: il canale dei colpi deve essere vuoto quando la sezione finisce: ne restano %d dopo %d passi (erano %d al ritorno). Li svuota `-orda`, non questa sezione" % [horde.mortar_shot_count, caduti_ripresa, in_volo_ripresa])
+
 	# L'orda rilegge i pesi di produzione e si rimette a `cap`: e' la stessa via
 	# della sezione, cosi' il numero stampato qui sotto e' **lo stesso contesto** con
 	# il peso di prima e non un contesto diverso.
@@ -3364,9 +3498,10 @@ func _ripristina_il_mortar(h, horde, pilotaggio: Dictionary, cap: int, kind_name
 	horde.reseed(SEED_A)
 
 	var viste := _specie_presenti(horde)
-	print("test_arena: m8 m13 denti, MISURATI nello stesso contesto: col peso pilotato a %.1f il campione contiene %d specie su %d spendibili, col peso di produzione tornato a %.1f ne contiene %d su %d dichiarate, e sono %s. E' per questo che il criterio confronta by_kind con le specie SPENDIBILI: a peso zero il mortar non puo' nascere, e chiedere che ci sia sarebbe chiedere un numero che il motore non puo' produrre"
+	print("test_arena: m8 m13 denti, MISURATI nello stesso contesto: col peso pilotato a %.1f il campione contiene %d specie su %d spendibili, col peso di produzione tornato a %.1f ne contiene %d su %d dichiarate, e sono %s. Il peso di produzione del mortar non e' piu' 0.0 (m17 lo ha aperto a %.1f con la soglia dei %.1f s), quindi il mortar e' spendibile anche a peso di produzione e la seconda misura non e' piu' un'impossibilita': e' un confronto. Il criterio confronta `by_kind` con le specie SPENDIBILI perche' quelle sono le voci che l'orda sta usando davvero, e chiedere una specie a peso zero sarebbe chiedere un numero che il motore non puo' produrre"
 		% [MORTAR_STEER, campione, kind_names.size(), dichiarato,
-			viste.size(), kind_names.size(), ", ".join(_nomi_di(viste, kind_names))])
+			viste.size(), kind_names.size(), ", ".join(_nomi_di(viste, kind_names)),
+			dichiarato, float(Run.MORTAR_AFTER_S)])
 	h.check(viste.size() > 0,
 		"m8: la misura col peso di produzione deve vedere almeno una specie, altrimenti la riga sopra racconta uno zero che nessuno ha misurato")
 
@@ -3738,6 +3873,38 @@ const CUPOLA_FALL_STEPS_MAX := 75
 ## letto un numero e lo ha tenuto». Lontanissimo dai 0,8293 s di produzione.
 const TELEGRAPH_POISON := 7.5
 
+## ## m18: LA TRAIETTORIA, e i numeri che la misurano
+##
+## Il colpo **deve** partire dal mortar e arrivare alla cupola: prima il renderer lo
+## faceva cadere dritto da una quota fissa, quindi la cupola diceva *dove* e nienti
+## diceva *da dove*. Un avvertimento senza causa e' un avvertimento che il giocatore
+## impara a ignorare.
+##
+## Il canale finto di questa sezione ha quindi **due tabelle in piu'** rispetto a
+## quello delle cupole — `kinds` e `transforms`, che sono gia' dell'orda — perche' il
+## punto di lancio e' il **mortar piu' vicino alla cupola** e il test deve poterlo
+## mettere dove vuole e guardarlo. Senza un mortar nel canale finto il lancio cade
+## sulla cupola (il fallback dichiarato in `mortar_shot_renderer.gd`), quindi le due
+## tabelle vuote sono esse stesse un caso: quello in cui il difetto si aprirebbe
+## dall'altra parte.
+##
+## La distanza fra mortar e cupola nel canale finto e' quella **vera**
+## (`3 x mortar_blast_m`, la fermata di `-orda`) e non allineata agli assi, cosi' uno
+## scambio fra `x` e `z` nella posizione di lancio non puo' passare.
+##
+## Quanta parte dello **scarto misurato** e' la soglia che separa la quota disegnata
+## col tempo vero da quella disegnata col contratto avvelenato. Non e' un numero in
+## metri e non puo' esserlo: i due numeri li legge il test, quindi la soglia sta fra
+## loro per costruzione e segue il contratto se il contratto si muove. Quello che ha
+## denti e' la riga che chiede uno scarto **positivo**: una copia del tempo vero darebbe
+## scarto zero e cadrebbe.
+const SCARTO_AVVELENATO := 0.25
+
+## Tolleranza del confronto fra la quota **disegnata** e i tre punti dichiarati
+## dell'arco. Stessa natura di `DOME_TOLERANCE`: il valore passa per una `Transform3D`
+## a 32 bit, quindi il confronto non e' mai esatto.
+const ARCO_TOLERANCE := 0.0001
+
 func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 	var t0 := Time.get_ticks_msec()
 	var horde = arena.get_node_or_null("Horde")
@@ -3758,11 +3925,16 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 	var pos_dichiarata: Vector3 = player.global_position
 	var vita_dichiarata: float = player.hp
 
-	# ## LA PREMESSA MISURATA: il canale e' lo stesso della cupola, quindi a vuoto
-	# ## anche il colpo e' a vuoto
+	# ## LA PREMESSA COSTRUITA, come in `_m13_cupola`: il canale dei colpi e' lo
+	# ## stesso, quindi lo spegne la sezione e non lo eredita
+	#
+	# Il peso di produzione e' `3.0` e l'orologio e' oltre i 180 s, quindi a questo
+	# punto il gioco PUO' avere un colpo in volo: senza la costruzione, il numero di
+	# nodi a vuoto qui sotto sarebbe quello di un canale che il gioco sta usando.
+	var trovati_m15 := _costruisci_il_canale_vuoto(h, horde, spawner, "m15 colpo")
 	colpo.refresh()
 	h.eq(colpo.drawn_count(), 0,
-		"m15: nessun colpo in volo, nessun corpo disegnato")
+		"m15: nessun colpo in volo, nessun corpo disegnato (la sezione ne aveva trovati %d e li ha svuotati pilotando il peso a 0.0)" % trovati_m15)
 	var nodi_vuoto := _count_nodes(arena)
 	h.eq(nodi_vuoto, NODI_ATTESI,
 		"m15: la scena deve avere %d nodi a vuoto (46 di prima di m15, piu' 1 per il colpo e 2 per i due modelli in piu' dell'orda): sono %d"
@@ -3794,43 +3966,159 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 			"m15: criterio 2, instance_count deve essere il numero di colpi in volo")
 		h.eq(mm.visible_instance_count, in_volo,
 			"m15: criterio 2, tutti i corpi devono essere visibili: quelli nascosti sono colpi senza avviso")
+	# ## CRITERIO 2: LA SINCRONIZZAZIONE, e cosa significa adesso che il colpo
+	# ## ** parte dal mortar**
+	#
+	# Prima la posizione disegnata era confrontata con il punto della cupola, e
+	# combaciava perche' il colpo cadeva **dritto**: il renderer metteva il corpo
+	# sopra l'impronta per tutta la caduta. Adesso il colpo parte dal mortar, quindi
+	# al primo fotogramma la posizione disegnata e' **diversa** dalla cupola, ed e'
+	# quella la differenza che il criterio misura: il punto disegnato sta sulla
+	# **corda mortar -> cupola** e non altrove. Una corda e' la forma che regge senza
+	# rileggere la formula: se il renderer interpola su un'altra linea, o mette il
+	# punto fuori dai due estremi, questa riga va rossa.
+	var mortar_pos: Vector3 = accesa.get("mortar", Vector3.ZERO)
+	var cupola_pos: Vector3 = horde.mortar_shot_at(0)
+	var corda := Vector2(cupola_pos.x - mortar_pos.x, cupola_pos.z - mortar_pos.z)
+	var lung := corda.length()
+	h.check(lung > 1.0,
+		"m15: criterio 2, precondizione, il mortar deve essere a qualche metro dalla cupola perche' la corda sia misurabile: e' a %.3f m" % lung)
 	for i in mini(colpo.drawn_count(), in_volo):
 		var punto: Vector3 = horde.mortar_shot_at(i)
 		var t: Transform3D = colpo.written_transform(i)
-		h.near(t.origin.x, punto.x, DOME_TOLERANCE,
-			"m15: criterio 2, colpo %d: la x disegnata deve combaciare con la x del canale" % i)
-		h.near(t.origin.z, punto.z, DOME_TOLERANCE,
-			"m15: criterio 2, colpo %d: la z disegnata deve combaciare con la z del canale" % i)
+		var da := Vector2(t.origin.x - mortar_pos.x, t.origin.z - mortar_pos.z)
+		var proiettione := da.dot(corda)
+		h.check(proiettione >= -DOME_TOLERANCE and proiettione <= lung * lung + DOME_TOLERANCE,
+			"m15: criterio 2, colpo %d: la posizione disegnata deve stare **fra** il mortar e la cupola, e non oltre: proiezione %.3f m su una corda di %.3f m (canale: x %.3f, z %.3f)"
+				% [i, proiettione, lung, punto.x, punto.z])
+		var fuori := absf(da.cross(corda)) / maxf(lung, 0.001)
+		h.near(fuori, 0.0, DOME_TOLERANCE,
+			"m15: criterio 2, colpo %d: il punto disegnato deve stare **sulla corda** che va dal mortar alla cupola, a %.6f m dalla corda" % [i, fuori])
+
+	# ## IL RAMO, DICHIARATO: questo e' l'arco e non il ramo di riserva
+	#
+	# Il ramo di riserva (lancio sulla cupola, senza mortar nel canale) e' un caso
+	# **chiesto**, non un caso in cui si cade: qui il canale e' quello vero e c'e' il
+	# mortar che ha sparito, quindi se il renderer non l'avesse trovato questa riga
+	# sarebbe rossa invece di passare misurando il fallback.
+	h.eq(colpo.fallback_launchs(), 0,
+		"m15: il canale vero ha un mortar vivo, quindi nessun colpo deve essere partito dal ramo di riserva (lancio sulla cupola): ne sono partiti %d su %d" % [colpo.fallback_launchs(), in_volo])
+	# ## IL PUNTO DI LANCIO SUL CANALE VERO, e **dove** va letto il mortar
+	#
+	# Il numero che `_accendi_il_mortar_per_la_cupola` ha messo in mano era la posizione
+	# **prima** del passo che ha fatto sparire il colpo, e in un passo di simulazione il
+	# mortar si sposta di qualche centimetro. Confrontare il punto disegnato con quella
+	# posizione vecchia misurerebbe **il movimento del nemico**, non l'errore del
+	# renderer: e' il motivo per cui il confronto era a 2,85 cm con una tolleranza di
+	# 0,0001 m. Il numero giusto e' quello che il renderer ha letto, e si legge **adesso**:
+	# `lerp(mortar, cupola, 0)` e' il mortar esatto, quindi qui l'attesa e' zero.
+	#
+	# ## L'ESTREMO ESATTO lo guarda `_m15_arco`, sul canale finto: questa e' la scelta
+	# ## dichiarata fra le due, e il perche'
+	# ##
+	# Il canale vero **non permette** di campionare `s = 0`: il primo istante
+	# disponibile e' il colpo gia' partito, e i suoi secondi residivi sono un passo sotto
+	# il telegrrafo (`caduti in 49 passi` con `DT = 1/60`), quindi il punto disegnato e'
+	# gia' dentro la corda. Allargare la tolleranza sarebbe misurare quanto e' lontano il
+	# primo passo e chiamarlo tolleranza; riportare la formula del `lerp` qui significherebbe
+	# verificare la formula invece di cio' che e' stato scritto. Il canale finto ha
+	# `remaining = T` scritto dal test, che e' l'istante in cui la posizione iniziale e'
+	# davvero quella dichiarata — e li' la tolleranza resta `ARCO_TOLERANCE`, 0,0001 m.
+	var mortar_ora: Vector3 = horde.transforms[0]
+	h.vec_near(colpo.launch_point(0), Vector3(mortar_ora.x, 0.0, mortar_ora.z), ARCO_TOLERANCE,
+		"m18: criterio 1, il colpo appena sparito deve partire **dal mortar**: il punto di lancio disegnato e' a (%.4f, %.4f) e il mortar, letto in questo istante, e' a (%.4f, %.4f). Un punto di lancio inventato e' una curva che dice al giocatore un'origine che non esiste"
+			% [colpo.launch_point(0).x, colpo.launch_point(0).z, mortar_ora.x, mortar_ora.z])
+
+	# ## E IL VERSO, che e' la domanda che il canale vero puo' fare
+	#
+	# Il primo punto disegnato deve essere **molto piu' vicino al mortar che alla
+	# cupola**: il `lerp` girato del 2026-10-15 metteva quel fotogramma a 0,3 m dalla
+	# **cupola** e a 14,8 m dal mortar, quindi questa riga lo prende con quindici metri
+	# di margine e non con tre centimetri — mentre l'estremo esatto resta al canale
+	# finto.
+	var al_mortar: float = Vector2(colpo.launch_point(0).x - mortar_ora.x, colpo.launch_point(0).z - mortar_ora.z).length()
+	var alla_cupola: float = Vector2(colpo.launch_point(0).x - cupola_pos.x, colpo.launch_point(0).z - cupola_pos.z).length()
+	h.check(al_mortar < alla_cupola,
+		"m18: criterio 1, il verso: il primo fotogramma e' a %.3f m dal mortar e a %.3f m dalla cupola, e deve essere **dall'altra parte**. Un tiro che parte dalla cupola e atterra sul mortar si vede cosi', e la quota resterebbe giusta in entrambi i casi" % [al_mortar, alla_cupola])
+	print("test_arena: m18 lancio, sul canale vero: il mortar e' a (%.4f, %.4f) quando lo legge il renderer e a (%.4f, %.4f) quando la sezione lo aveva catturato prima del passo che ha fatto sparire il colpo: %.4f m di spostamento in un passo di DT, ed e' quello che faceva il confronto a 2,85 cm. Scarto residuo del punto di lancio: %.9f m"
+		% [mortar_ora.x, mortar_ora.z, mortar_pos.x, mortar_pos.z,
+			Vector2(mortar_ora.x - mortar_pos.x, mortar_ora.z - mortar_pos.z).length(),
+			Vector2(colpo.launch_point(0).x - mortar_ora.x, colpo.launch_point(0).z - mortar_ora.z).length()])
+
+	# ## LA CORDA **MISURATA**, e i due numeri che non vanno confusi
+	#
+	# Qui la corda e' la distanza vera fra il mortar e la cupola, e piu' corta della
+	# fermata per un motivo **dichiarato**: `CUPOLA_ENGAGE_MARGIN` = 0,5 m, cioe' il
+	# test mette il giocatore mezzo metro **dentro** la fermata perche' `fermo` in
+	# `src/sim/enemy.gd` e' `dist <= engage_for()` e il mortar deve sparire al primo
+	# passo. Nessun altro spostamento c'e': il giocatore lo muove `src/player/player.gd`,
+	# che qui non gira, e `horde.step()` non lo tocca — quindi la differenza fra i due
+	# numeri e' **misurata** e vale mezzo metro, non e' una differenza comparsa.
+	var e_m18 = _enemy_script(horde)
+	var blast_m18 := _contract_float(game, "mortar_blast_m")
+	if h.check(e_m18 != null and blast_m18 > 0.0,
+			"m18: per la corda servono la tabella delle specie di -orda e `mortar_blast_m`: letti %s e %.4f m" % ["null" if e_m18 == null else "ok", blast_m18]):
+		var fermata_m18 := 3.0 * blast_m18
+		var dentro := fermata_m18 - lung
+		print("test_arena: m18 corda, sul canale VERO e misurata: distanza mortar -> cupola %.3f m; fermata dichiarata 3 x mortar_blast_m = %.3f m; differenza %.3f m, che e' CUPOLA_ENGAGE_MARGIN = %.3f m, il mezzo metro dentro cui questa sezione mette il giocatore perche' `fermo` sia vero al primo passo. Il giocatore non si e' mosso fra l'arrivo e il tiro: lo muove src/player/player.gd, che qui non gira"
+			% [lung, fermata_m18, dentro, CUPOLA_ENGAGE_MARGIN])
+		# ## IL MASSIMO DICHIARABILE, e la domanda che decide se il mortar e' onesto
+		#
+		# In partita la corda **non** e' fermata piu' alla fermata: il giocatore si
+		# muove, quindi il tiro puo' attraversare la fermata piu' la strada che il
+		# giocatore percorre fra l'arrivo del mortar e l'istante in cui parte. Il
+		# massimo che questo file puo' **leggere** (non stimare) e' la fermata piu' la
+		# corsa in un telegrrafo: `PLAYER_SPEED x mortar_telegraph_s`, entrambi
+		# dichiarati, nessuno dei due copiato qui.
+		var corsa := float(e_m18.PLAYER_SPEED) * _contract_float(game, "mortar_telegraph_s")
+		print("test_arena: m18 corda, in partita: la fermata e' %.3f m e il giocatore puo' percorrere %.3f m in un telegrrafo (PLAYER_SPEED x mortar_telegraph_s, numeri di -orda), quindi la corda puo' arrivare a %.3f m. Questo numero NON entra nel margine di fuga di -orda, che e' `blast + TOUCH_REACH <= PLAYER_SPEED x telegraph`: li' la lunghezza della corda non compare, e il colpo resta schivabile a qualunque corda. Quello che cambia per -arena e' che l'arco va seguito fino a %.3f m, e l'apice non dipende dalla corda"
+			% [fermata_m18, corsa, fermata_m18 + corsa, fermata_m18 + corsa])
 
 	# ## CRITERIO 1: LA CADUTA. Il tempo di caduta **disegnato** contro quello che
 	# ## il contratto dichiara
 	#
-	# La misura non rilegge la formula: prende **due fotogrammi consecutivi** del
-	# colpo cosi' come e' stato scritto nel buffer e ricava da quelli la velocita'
-	# (`(h0 - h1) / DT`), poi il tempo che ci vuole a coprire l'altezza di partenza
-	# (`h0 / v`). Quel numero e' quello che **l'occhio** legge dalla caduta, e viene
-	# confrontato con `Game.mortar_telegraph_s`: sotto il passo di simulazione e'
-	# invisibile, sopra no.
+	# La misura non rilegge la formula: guarda **quando il corpo sparisce**. Un
+	# passo di `horde.step(DT)` toglie `DT` secondi residui, quindi il numero di passi
+	# che servono perché `mortar_shot_count` arrivi a zero **e'** il tempo di caduta
+	# **disegnato**, e quel numero viene confrontato con `Game.mortar_telegraph_s`:
+	# sotto il passo di simulazione e' invisibile, sopra no.
 	var telegrrafo := _contract_float(game, "mortar_telegraph_s")
 	var h0: float = colpo.tip_height(0)
 	var left0 := float(horde.mortar_shot_left(0))
 	h.near(left0, telegrrafo, DOME_TOLERANCE,
 		"m15: il colpo appena sparito deve avere tutto il tempo del telegrrafo: %.6f s contro %.6f s" % [left0, telegrrafo])
-	h.near(h0, colpo.start_height(), DOME_TOLERANCE,
-		"m15: la quota di partenza del colpo deve essere quella dichiarata in src/render/mortar_shot_renderer.gd (%.4f m), non %.4f m"
-			% [colpo.start_height(), h0])
+	# ## CRITERIO 1b: LA QUOTA DI LANCIO SUL CANALE VERO, con la tolleranza
+	# ## **derivata** e non tollerata a occhio
+	#
+	# Sul canale vero `remaining` vale il telegrrafo piu' un epsilon che nessuno
+	# controlla, e sull'arco la quota e' **sensibile** a quell'epsilon: la pendenza
+	# dell'arco al lancio e' `4 x apice - 3 x lancio` metri per unita' di percorso, e
+	# un secondo di `remaining` sposta il percorso di `1 / mortar_telegraph_s`. Quindi
+	# la tolleranza e' quella pendenza divisa per il telegrrafo e moltiplicata per
+	# `DOME_TOLERANCE` secondi, piu' il rumore della `Basis`: con i numeri dichiarati
+	# sono 83,44 m di quota per unita' di percorso su 0,8293 s, cioe' **0,0102 m**.
+	# Il confronto esatto della quota di lancio (dove `remaining = T` e' un numero che
+	# il test ha messo lui) e' in `_m15_arco`.
+	var lancio := _const_of(SHOT_SCRIPT, "LAUNCH_HEIGHT")
+	var apice := _const_of(SHOT_SCRIPT, "APEX_HEIGHT")
+	if h.check(lancio > 0.0 and apice > lancio and telegrrafo > 0.0,
+			"m18: per la tolleranza derivata servono LAUNCH_HEIGHT, APEX_HEIGHT e un telegrrafo positivo: letti %.4f, %.4f e %.6f" % [lancio, apice, telegrrafo]):
+		var pendenza := (4.0 * apice - 3.0 * lancio) / telegrrafo
+		var tol_quota := pendenza * DOME_TOLERANCE + ARCO_TOLERANCE
+		h.near(h0, lancio, tol_quota,
+			"m18: criterio 1, la quota di lancio deve essere quella dichiarata in src/render/mortar_shot_renderer.gd (%.4f m), non %.4f m. La tolleranza (%.4f m) e' la pendenza dell'arco al lancio (%.2f m per unita' di percorso) divisa per il telegrrafo e moltiplicata per %.6f s di epsilon ammesso su `remaining`"
+				% [lancio, h0, tol_quota, pendenza, DOME_TOLERANCE])
 	h.near(colpo.telegraph_used(), telegrrafo, DOME_TOLERANCE,
 		"m15: il colpo deve aver letto Game.mortar_telegraph_s all'ultimo refresh")
 
+	# Un passo dopo il lancio il colpo e' **piu' alto**, non piu' basso: e' l'arco che
+	# si legge, e il ricordo che questo e' un mortaio e non una tonnellata. E' anche
+	# la riga che distingue un arco da una caduta dritta, quindi non e' decorativa.
 	horde.step(DT)
 	colpo.refresh()
 	var h1: float = colpo.tip_height(0)
-	var v: float = (h0 - h1) / DT
-	var caduta_disegnata: float = h0 / maxf(v, 0.000001)
-	var errore := absf(caduta_disegnata - telegrrafo)
-	h.check(errore < DT,
-		"m15: criterio 1, l'errore fra la caduta **disegnata** (%.6f s) e Game.mortar_telegraph_s (%.6f s) deve essere sotto il passo di simulazione %.6f s: e' %.6f s, cioe' %.2f passi. Sopra il passo l'occhio vede il colpo atterrare e la cupola sparire un attimo dopo"
-			% [caduta_disegnata, telegrrafo, DT, errore, errore / DT])
+	h.check(h1 > h0,
+		"m15: un passo dopo il lancio il colpo deve essere **piu' alto** di %.4f m (e' a %.4f m): una parabola sale prima di scendere, e senza la salita l'arco e' una caduta dritta" % [h0, h1])
 
 	# ## CRITERIO 3: un nodo, non uno per colpo, e la caduta fino all'impatto
 	var nodi_pieno := _count_nodes(arena)
@@ -3841,12 +4129,44 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 	h.check(nodi_pieno < NODE_BUDGET,
 		"m15: node_count deve restare sotto %d con i colpi in volo: e' %d" % [NODE_BUDGET, nodi_pieno])
 
+	# ## IL PUNTO **PENULTIMO**: sul canale vero l'impatto non si puo' campionare
+	# ##
+	# ## a `remaining = 0` perche' il colpo e' gia' sparito, e quindi il finale lo
+	# ## guarda il penultimo fotogramma in cui esiste
+	#
+	# A un passo dall'impatto il colpo deve essere **gia' oltre il mezzo** della corda
+	# mortar -> cupola: se la curva girasse al contrario arriverebbe al mortar e questa
+	# proiezione sarebbe negativa, che e' la stessa domanda del canale finto (dove il
+	# finale e' esatto) con i numeri del mondo vero.
+	var penultimo := 0.0
 	var caduti := 0
 	while horde.mortar_shot_count > 0 and caduti < CUPOLA_FALL_STEPS_MAX:
 		horde.step(DT)
 		caduti += 1
+		if horde.mortar_shot_count > 0:
+			colpo.refresh()
+			var p: Vector3 = colpo.launch_point(0)
+			penultimo = Vector2(p.x - mortar_pos.x, p.z - mortar_pos.z).dot(corda)
 	h.eq(horde.mortar_shot_count, 0,
 		"m15: il colpo deve essere caduto entro %d passi: ne restano %d" % [CUPOLA_FALL_STEPS_MAX, horde.mortar_shot_count])
+	if lung > 1.0:
+		h.check(penultimo > 0.5 * lung * lung,
+			"m18: criterio 1, FINE: all'ultimo fotogramma in cui il colpo esiste il punto disegnato deve essere gia' oltre il **mezzo** della corda mortar -> cupola (proiezione %.3f m su una corda di %.3f m). Un arco girato al contrario arriva al mortar e questa proiezione e' negativa: la quota a terra resterebbe giusta e il danno sarebbe quello di un'altra cupola"
+				% [penultimo, lung])
+
+	# ## CRITERIO 1, MISURATO: il tempo di caduta **disegnato** e' il numero di
+	# ## passi che il corpo e' rimasto a schermo
+	#
+	# `remaining` scende di `DT` a ogni passo e il canale si svuota quando arriva a
+	# zero, quindi `caduti x DT` **e'** il tempo di caduta disegnato, letto da cio' che
+	# l'occhio ha visto e non dalla formula del renderer. Lo scarto con
+	# `mortar_telegraph_s` deve stare sotto il passo di simulazione: sopra, l'occhio
+	# vede il colpo atterrare e la cupola sparire un attimo dopo.
+	var caduta_disegnata: float = float(caduti) * DT
+	var errore := absf(caduta_disegnata - telegrrafo)
+	h.check(errore < DT,
+		"m15: criterio 1, l'errore fra la caduta **disegnata** (%.6f s) e Game.mortar_telegraph_s (%.6f s) deve essere sotto il passo di simulazione %.6f s: e' %.6f s, cioe' %.2f passi. Sopra il passo l'occhio vede il colpo atterrare e la cupola sparire un attimo dopo"
+			% [caduta_disegnata, telegrrafo, DT, errore, errore / DT])
 
 	# ## IL COLPO FANTASMA: la riga che non si perdona
 	colpo.refresh()
@@ -3860,14 +4180,185 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 		h.check(mm.mesh != null, "m15: il colpo deve avere una mesh: un corpo che non si vede non e' un avvertimento")
 
 	_m15_colpo_tempo(h, game, colpo, horde)
+	# Il criterio nuovo: la traiettoria parte dal mortar, arriva alla cupola e
+	# atterra puntuale. Va **dopo** `_m15_colpo_tempo` perche' quella rimette il
+	# renderer sul canale vero e libera il canale finto: se fosse prima, questa
+	# sezione leggerebbe il canale dell'altra e misurerebbe il suo numero.
+	_m15_arco(h, game, colpo, horde)
 
-	print("test_arena: m15 colpo: %d in volo -> %d istanze, caduta disegnata %.6f s contro mortar_telegraph_s %.6f s, scarto %.6f s = %.3f x DT (DT %.6f s), velocità %.3f m/s, caduti in %d passi"
-		% [in_volo, in_volo, caduta_disegnata, telegrrafo, errore, errore / DT, DT, v, caduti])
+	print("test_arena: m15 colpo: %d in volo -> %d istanze, caduta disegnata %.6f s contro mortar_telegraph_s %.6f s, scarto %.6f s = %.3f x DT (DT %.6f s), lancio a %.4f m e un passo dopo a %.4f m, caduti in %d passi"
+		% [in_volo, in_volo, caduta_disegnata, telegrrafo, errore, errore / DT, DT, h0, h1, caduti])
 	print("test_arena: m15 colpo, nodi: %d a vuoto contro %d con %d colpi in volo, tetto %d: il colpo costa UN nodo qualunque sia il numero di colpi (la scena e' a 46 nodi di prima di m15, piu' 1 per il colpo e 2 per i due modelli dell'orda)"
 		% [nodi_vuoto, nodi_pieno, in_volo, NODE_BUDGET])
 	_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
 	print("test_arena: m15 colpo, sezione in %d ms" % (Time.get_ticks_msec() - t0))
 
+## ## m18: LA TRAIETTORIA. Il colpo parte dal mortar, arriva alla cupola e atterra
+## ## puntuale
+##
+## Tre criteri in una sezione, e ognuno cerca un difetto diverso:
+##
+##   1. **la posizione iniziale e' il mortar e quella finale e' l'impatto**. Difetto
+##      cercato: un punto di lancio inventato, cioe' una curva che parte dal vuoto e
+##      dice al giocatore un origine che non esiste. Prima di m18 questo non era
+##      nemmeno una domanda: il colpo cadeva dritto e la sua posizione era sempre la
+##      cupola, quindi non c'era nessun punto di lancio da confrontare.
+##   2. **l'apice sta fra le due**, e alle due quote dichiarate. Difetto cercato: un
+##      arco che non sale (una caduta dritta travestita) o che sale troppo.
+##   3. **i tre parametri sono entro i numeri che il progetto ha dichiarati**: il
+##      lancio sopra il corpo piu' alto che il gioco disegna (altrimenti il colpo
+##      sparisce dentro la folla nei primi passi) e l'apice sotto l'altezza della
+##      camera (altrimenti esce dall'inquadratura proprio quando serve guardarlo).
+##      Difetto cercato: un numero decorativo che nessuna porta guarda.
+##
+## La parabola e' **parametrizata sul tempo del contratto**: i tre punti dell'arco
+## sono campionati a `remaining` che il test sceglie lui (`T`, `T/2`, `0`) e tutti
+## e tre devono trovarsi dove li dichiara il renderer. Nessuna formula qui dentro:
+## quello che si confronta e' cio' che e' stato **scritto nel buffer**, e `T` non e'
+## mai messo in un campo dal renderer — e' riletto dal contratto a ogni refresh.
+func _m15_arco(h, game: Node, colpo, horde) -> void:
+	var telegrrafo := _contract_float(game, "mortar_telegraph_s")
+	var lancio := _const_of(SHOT_SCRIPT, "LAUNCH_HEIGHT")
+	var apice := _const_of(SHOT_SCRIPT, "APEX_HEIGHT")
+	var specie := _const_of(SHOT_SCRIPT, "MORTAR_KIND")
+	if not h.check(lancio > 0.0 and apice > 0.0 and specie >= 0.0 and telegrrafo > 0.0,
+			"m18: src/render/mortar_shot_renderer.gd deve dichiarare LAUNCH_HEIGHT, APEX_HEIGHT e MORTAR_KIND, e il contratto un tempo di caduta positivo: letti %.3f, %.3f, %.1f e %.6f" % [lancio, apice, specie, telegrrafo]):
+		return
+
+	# ## CRITERIO 3: i tre parametri sono dentro i numeri dichiarati dal progetto
+	#
+	# Il corpo piu' alto che il gioco disegna e' il boss, e la sua taglia e'
+	# `SIZE_FACTOR x RADIUS[BOSS]`: entrambi i numeri sono **letti** (il fattore dalla
+	# sua fonte di m11, il raggio dalla tabella delle specie di `-orda` chiamando la
+	# sua funzione), quindi il tetto si muove se il progetto cambia una tabella.
+	var e = _enemy_script(horde)
+	var size_factor := _const_of(RENDERER_SCRIPT, "SIZE_FACTOR")
+	var altezza_camera := _const_of(CAMERA_SCRIPT, "HEIGHT")
+	if not h.check(e != null and size_factor > 0.0 and altezza_camera > 0.0,
+			"m18: per i due tetti servono la tabella delle specie di -orda, SIZE_FACTOR e l'altezza della camera: letti %s, %.3f e %.3f"
+				% ["null" if e == null else "ok", size_factor, altezza_camera]):
+		return
+	var corpo_piu_alto: float = size_factor * float(e.radius_of(e.BOSS))
+	h.check(lancio > corpo_piu_alto,
+		"m18: criterio 3, la quota di lancio deve stare **sopra** il corpo piu' alto che il gioco disegna (SIZE_FACTOR x RADIUS[BOSS] = %.4f m), altrimenti nei primi passi — quando il colpo e' vicino al mortar — il colpo e' dentro la folla: lancio %.4f m" % [corpo_piu_alto, lancio])
+	h.check(apice < altezza_camera,
+		"m18: criterio 3, l'apice deve stare **sotto** l'altezza della camera (%.1f m, `HEIGHT` di src/render/arena_camera.gd): oltre quella quota il colpo esce dall'inquadratura proprio quando il giocatore ha bisogno di vederlo: apice %.4f m" % [altezza_camera, apice])
+	h.check(apice > lancio,
+		"m18: criterio 3, l'apice (%.4f m) deve stare sopra la quota di lancio (%.4f m): un arco che non sale non e' un arco" % [apice, lancio])
+	# E la copia dichiarata dell'indice di specie: `MORTAR_KIND` nel renderer e'
+	# `MORTAR` in `src/sim/enemy.gd`. Una sesta specie, o un riordino, la farebbero
+	# cercare il lancio sulla voce sbagliata senza che nessun'altra porta lo vedesse.
+	h.eq(specie, float(e.MORTAR),
+		"m18: criterio 3, MORTAR_KIND nel renderer deve essere MORTAR in src/sim/enemy.gd (%.1f): e' %.1f" % [float(e.MORTAR), specie])
+
+	# ## IL CANALE FINTO, con un mortar in un punto noto
+	#
+	# `FakeShots` ha le stesse tre superfici delle cupole **piu'** `kinds` e
+	# `transforms`, che sono le due tabelle che il renderer legge per trovare il
+	# mortar: e ci mette un mortar davvero, lontano da un nemico di un'altra specie,
+	# cosi' il renderer non puo' essere scattato il ramo di riserva. Il canale finto
+	# serve per i tre punti dell'arco, dove `remaining` deve essere **esattamente**
+	# `T/2` e il canale vero non ci arriva mai (i suoi secondi residui scendono di
+	# `DT` a ogni passo).
+	var blast := _contract_float(game, "mortar_blast_m")
+	var fermata := 3.0 * blast
+	var cupola_finta := Vector3(7.0, 0.0, -4.0)
+	# Non allineata agli assi: uno scambio fra `x` e `z` nel punto di lancio deve
+	# cadere, e su una corda diagonale un punto scambiato finisce fuori dal segmento.
+	var mortar_finto := cupola_finta + Vector3(fermata, 0.0, fermata * 0.5)
+	var finta := FakeShots.new()
+	finta.name = "FakeShotsArco"
+	finta.fill_con_mortar(cupola_finta, mortar_finto)
+	colpo.set_horde(finta)
+
+	var medio := Vector3(
+		0.5 * (mortar_finto.x + cupola_finta.x), 0.0,
+		0.5 * (mortar_finto.z + cupola_finta.z))
+
+	# I tre punti dell'arco, ai tre tempi che il contratto dichiara. `T` letto dal
+	# contratto, non dalla costante: se il contratto cambiasse, l'arco si muoverebbe
+	# con lui e questa sezione continuerebbe a dire la verita'.
+	for t in [
+		{"left": telegrrafo, "quota": lancio, "punto": mortar_finto, "nome": "lancio (T)"},
+		{"left": telegrrafo * 0.5, "quota": apice, "punto": medio, "nome": "apice (T/2)"},
+		{"left": 0.0, "quota": 0.0, "punto": cupola_finta, "nome": "impatto (0)"},
+	]:
+		finta.set_left(float(t["left"]))
+		colpo.refresh()
+		h.eq(colpo.drawn_count(), 1,
+			"m18: precondizione, col canale finto da un colpo il renderer ne deve disegnare uno (%s)" % str(t["nome"]))
+		# ## IL RAMO, OGNI VOLTA: il canale finto ha un mortar vivo, quindi qui il
+		# ## renderer **non** puo' essere scattato il lancio di riserva. Senza questa
+		# ## riga un arco rotto che tornasse alla cupola passerebbe per un arco.
+		h.eq(colpo.fallback_launchs(), 0,
+			"m18: il canale finto ha un mortar vivo in (%.3f, %.3f), quindi il lancio non deve cadere sul ramo di riserva (%s): ne sono caduti %d"
+				% [mortar_finto.x, mortar_finto.z, str(t["nome"]), colpo.fallback_launchs()])
+		h.near(colpo.tip_height(0), float(t["quota"]), ARCO_TOLERANCE,
+			"m18: criterio 2, %s: la quota disegnata della punta deve essere %.4f m, e' %.4f m. L'arco passa per tre punti noti — lancio, apice, terra — e la parabola e' la curva che li contiene tutti e tre"
+				% [str(t["nome"]), float(t["quota"]), colpo.tip_height(0)])
+		var atteso: Vector3 = t["punto"]
+		h.vec_near(colpo.launch_point(0), Vector3(atteso.x, 0.0, atteso.z), ARCO_TOLERANCE,
+			"m18: criterio 1, %s: la posizione orizzontale disegnata deve essere %s, e' a (%.4f, %.4f)" % [str(t["nome"]),
+				"il mortar" if str(t["nome"]) == "lancio (T)" else ("il mezzo fra mortar e cupola" if str(t["nome"]) == "apice (T/2)" else "la cupola"),
+				colpo.launch_point(0).x, colpo.launch_point(0).z])
+
+	# ## I DUE ESTREMI, INSIEME E NELLA STESSA TOLLERANZA
+	#
+	# «dal mortar alla cupola» e' una frase con **due** numeri. Asserirne uno solo lascia
+	# meta' della frase senza porta, ed e' esattamente meta' frase che un `lerp` al
+	# contrario produce: il 2026-10-15 il colpo partiva dalla cupola e atterrava sul
+	# mortar, la quota e la cupola erano giuste, e l'unico criterio che se ne accorse fu
+	# quello sul punto di lancio. Quindi qui i due estremi si rileggono uno dopo l'altro
+	# dalla **stessa istanza**, con la **stessa** tolleranza, e si confronta anche la
+	# distanza fra loro: due estremi giusti ma coincidenti non sarebbero un arco.
+	finta.set_left(telegrrafo)
+	colpo.refresh()
+	var inizio: Vector3 = colpo.launch_point(0)
+	var quota_inizio: float = colpo.tip_height(0)
+	finta.set_left(0.0)
+	colpo.refresh()
+	var fine: Vector3 = colpo.launch_point(0)
+	var quota_fine: float = colpo.tip_height(0)
+	h.vec_near(inizio, Vector3(mortar_finto.x, 0.0, mortar_finto.z), ARCO_TOLERANCE,
+		"m18: criterio 1, INIZIO: a `remaining = T` il punto disegnato deve essere il mortar (%.4f, %.4f), e' a (%.4f, %.4f)" % [mortar_finto.x, mortar_finto.z, inizio.x, inizio.z])
+	h.vec_near(fine, Vector3(cupola_finta.x, 0.0, cupola_finta.z), ARCO_TOLERANCE,
+		"m18: criterio 1, FINE: a `remaining = 0` il punto disegnato deve essere la cupola (%.4f, %.4f), e' a (%.4f, %.4f). Senza questo numero il colpo potrebbe atterrare dove e' partito e la sola quota a terra lo coprirebbe: e' meta' della frase senza porta" % [cupola_finta.x, cupola_finta.z, fine.x, fine.z])
+	h.near(quota_inizio, lancio, ARCO_TOLERANCE,
+		"m18: criterio 1, INIZIO: la quota di lancio dichiarata (%.4f m), disegnata %.4f m" % [lancio, quota_inizio])
+	h.near(quota_fine, 0.0, ARCO_TOLERANCE,
+		"m18: criterio 1, FINE: la punta deve essere **a terra** quando `remaining` arriva a zero, e sta a %.6f m: e' l'impatto che il giocatore vede e quello che `mortar_shot_left(0) == 0` significa" % quota_fine)
+	var corda_misurata: float = Vector2(fine.x - inizio.x, fine.z - inizio.z).length()
+	h.check(corda_misurata > 1.0,
+		"m18: criterio 1, i due estremi devono essere **diversi**: mortar e cupola sono a %.3f m e il percorso misurato e' %.3f m. Due estremi giusti e coincidenti sarebbero un tiro che parte e cade nello stesso punto" % [Vector2(mortar_finto.x - cupola_finta.x, mortar_finto.z - cupola_finta.z).length(), corda_misurata])
+
+	# ## IL RAMO DI RISERVA, DICHIARATO E PROVATO
+	#
+	# Un ramo che nessuna porta guarda e' un ramo che un giorno si rompe in silenzio.
+	# Quindi anche l'altro ramo e' un caso: senza mortar vivo il lancio cade **sulla
+	# cupola** e il colpo sale diritto. E' l'unica cosa che il ciclo qui sopra dichiara
+	# di non tollerare, quindi il suo contrario va verificato.
+	finta.set_left(0.0)
+	finta.svuota_mortai()
+	colpo.refresh()
+	h.eq(colpo.drawn_count(), 1,
+		"m18: il canale finto senza mortar deve comunque disegnare il colpo: senza nemico da cui partire si cade sul ramo di riserva, non nel vuoto")
+	h.eq(colpo.fallback_launchs(), 1,
+		"m18: senza mortar vivo il ramo di riserva deve essere quello dichiarato (lancio sulla cupola), ed e' successo %d volta su 1" % colpo.fallback_launchs())
+	h.vec_near(colpo.launch_point(0), cupola_finta, ARCO_TOLERANCE,
+		"m18: il ramo di riserva deve partire **dalla cupola** (%.3f, %.3f), e' a (%.4f, %.4f): e' il punto che `-orda` conosce, mai un punto inventato"
+			% [cupola_finta.x, cupola_finta.z, colpo.launch_point(0).x, colpo.launch_point(0).z])
+
+	colpo.set_horde(horde)
+	colpo.refresh()
+	finta.free()
+
+	print("test_arena: m18 arco: lancio %.4f m (sopra il corpo piu' alto, %.4f m) e apice %.4f m (sotto la camera, %.1f m); i tre punti campionati a remaining T / T/2 / 0 sono caduti sulle quote dichiarate entro %.6f m"
+		% [lancio, corpo_piu_alto, apice, altezza_camera, ARCO_TOLERANCE])
+	print("test_arena: m18 arco, corda del canale FINTO: lunghezza misurata %.3f m. Non e' la fermata e non deve esserlo: e' 3 x mortar_blast_m = %.3f m sullo **spostamento assiale** piu' %.3f m sullo **scarto diagonale** che questo test ha scelto di mettere, perche' una corda in linea con gli assi non distingue uno scambio fra x e z. I due numeri hanno due etichette diverse e la somma dei due quadrati fa la corda"
+		% [corda_misurata, fermata, fermata * 0.5])
+	print("test_arena: m18 arco: il tempo dell'arco e' quello del contratto (%.6f s), quindi l'impatto e' a quello zero: scarto %.9f s, sotto il passo di simulazione %.6f s per costruzione e non per taratura"
+		% [telegrrafo, 0.0, DT])
+##
 ## ## CRITERIO 4: il tempo viene riletto, col veleno
 ##
 ## Come `_m13_cupola_canale` per il raggio: qui si avvelena `mortar_telegraph_s` e si
@@ -3891,8 +4382,25 @@ func _m15_colpo_tempo(h, game: Node, colpo, horde) -> void:
 	colpo.refresh()
 	h.eq(colpo.drawn_count(), 1,
 		"m15: precondizione, col canale finto da un colpo il renderer ne deve disegnare uno")
+	# Il ramo: `FakeShots.fill()` mette un mortar vivo, quindi qui si sta guardando
+	# l'arco e non il lancio di riserva sulla cupola.
+	h.eq(colpo.fallback_launchs(), 0,
+		"m15: il canale finto ha un mortar vivo, quindi il lancio non deve cadere sul ramo di riserva: ne sono caduti %d" % colpo.fallback_launchs())
 	h.near(colpo.telegraph_used(), vero, DOME_RADIUS_TOLERANCE,
 		"m15: prima dell'avvelenamento il colpo deve leggere il tempo vero %.6f s: %.6f" % [vero, colpo.telegraph_used()])
+
+	# ## LA QUOTA **PRIMA**, letta qui e non piu' in giu'
+	#
+	# Il 2026-10-15 questa lettura stava **dopo** `game.set("mortar_telegraph_s", ...)`:
+	# misurava l'arco avvelenato due volte, i due numeri erano identici (9,8735 m
+	# entrambi) e il criterio con i denti non poteva distinguere «il tempo entra nella
+	# traiettoria» da «il tempo e' una copia» — diceva solo che due numeri uguali sono
+	# due numeri uguali. Il canale e' lo stesso (stesso `remaining`, stessa istanza), a
+	# cambiare e' **solo** il contratto, ed e' per questo che i due confronti sono
+	# quello che il criterio promette: a parita' di secondi residui.
+	var prima_del_veleno: float = colpo.tip_height(0)
+	h.check(prima_del_veleno > colpo.launch_height(),
+		"m15: precondizione: con il tempo vero il colpo doveva essere **salito** dalla bocca del mortar, non esserci appena partito: %.4f m contro una quota di lancio di %.4f m. Sotto questa riga la prova del veleno non avrebbe niente da dire" % [prima_del_veleno, colpo.launch_height()])
 
 	# 2. IL VELENO, e la precondizione che lo mette al suo posto.
 	game.set("mortar_telegraph_s", TELEGRAPH_POISON)
@@ -3905,12 +4413,31 @@ func _m15_colpo_tempo(h, game: Node, colpo, horde) -> void:
 	h.near(colpo.telegraph_used(), TELEGRAPH_POISON, DOME_RADIUS_TOLERANCE,
 		"m15: il colpo aveva gia' letto %.6f s e deve rivedere il veleno %.1f s: se dice ancora %.6f s sta usando una copia"
 			% [vero, TELEGRAPH_POISON, colpo.telegraph_used()])
-	# E la geometria cambia davvero: con un tempo piu' corto la quota del colpo nella
-	# stessa posizione della caduta e' piu' alta, quindi la copia non e' solo un numero
-	# stampato diverso.
+	# E la geometria cambia davvero: a parita' di secondi residui, un tempo di caduta
+	# piu' lungo vuol dire che il colpo ha percorso una **frazione** molto piu' piccola
+	# del suo arco, quindi e' piu' vicino alla bocca del mortar e piu' basso. Il confronto
+	# e' con la quota disegnata **prima** dell'avvelenamento, che e' gia' in mano: non
+	# si ricalcola la parabola qui, perche' un test che rifa la formula verifica la
+	# formula e non quello che e' stato scritto.
 	var t_veleno: Transform3D = colpo.written_transform(0)
-	h.near(colpo.tip_height(0), colpo.start_height() * (float(finta.mortar_shots[0].z) / TELEGRAPH_POISON), 0.0001,
-		"m15: con il veleno a terra la caduta deve essere quella del contratto avvelenato: la punta e' a %.4f m" % colpo.tip_height(0))
+	h.check(t_veleno.origin.y > 0.0,
+		"m15: con il veleno il colpo deve restare in volo sopra il terreno: %.4f m" % t_veleno.origin.y)
+	h.check(prima_del_veleno - colpo.tip_height(0) > 0.0,
+		"m15: a parita' di secondi residui, con il contratto avvelenato a %.1f s il colpo deve essere **piu' basso** (vero %.4f m, avvelenato %.4f m): un tempo di caduta piu' lungo vuol dire una frazione di arco percorsa minore. Con lo scarto a zero il tempo letto non entra nella traiettoria, cioe' e' una copia di quello di prima"
+			% [TELEGRAPH_POISON, prima_del_veleno, colpo.tip_height(0)])
+	# ## LA SOGLIA, DALLO SCARTO MISURATO
+	#
+	# Il numero che separa i due valori e' il **quarto** della loro differenza
+	# **misurata**, non un metro e mezzo scritto qui: i due numeri li legge il test
+	# e la soglia sta nel mezzo fra loro per costruzione, quindi se il contratto si
+	# muove la soglia la segue. Quello che ha denti resta la riga sopra — una copia
+	# del tempo vero dà scarto **zero** — e questa dice solo che la soglia esiste:
+	# una soglia fuori dai due numeri non distingue niente e va detto, non taciuto.
+	var scarto: float = prima_del_veleno - colpo.tip_height(0)
+	var soglia := scarto * SCARTO_AVVELENATO
+	h.check(soglia > 0.0 and soglia < scarto,
+		"m15: la soglia (quarta parte dello scarto misurato, %.6f m) deve stare **fra** i due numeri che ha separato: vera %.4f m, avvelenata %.4f m, scarto %.6f m. Una soglia fuori dai due non distingue il tempo letto da una copia"
+			% [soglia, prima_del_veleno, colpo.tip_height(0), scarto])
 
 	# 4. IL RIPRISTINO, e un'altra istanza che rivede il valore vero.
 	game.set("mortar_telegraph_s", vero)
@@ -3967,13 +4494,21 @@ func _m13_cupola(h, arena: Node3D, game: Node) -> void:
 	var pos_dichiarata: Vector3 = player.global_position
 	var vita_dichiarata: float = player.hp
 
-	# ## LA PREMESSA, MISURATA: a peso di produzione non c'e' nessun mortar
+	# ## LA PREMESSA COSTRUITA: il canale lo spegne la sezione, non lo eredita
 	#
-	# Senza questa, tutta la sezione potrebbe essere verde perche' il canale e'
-	# vuoto: e' il caso a risposta nota di `_poison_body_scale`, e la ragione per cui
-	# il peso viene pilotato **dopo** e non prima.
+	# Era «a peso di produzione non c'e' nessun mortar»: vero quando il peso di
+	# produzione era `0.0`, falso da quando `-orda` lo ha portato a `3.0` e ha aperto
+	# la soglia dei 180 s. Il numero giusto da dichiarare e' **il peso pilotato a
+	# zero**, non «il peso di produzione»: la riga sul peso di produzione va letta come
+	# «il gioco **puo'** produrre un colpo, quindi la sezione lo spegne per poter
+	# misurare il canale vuoto». Senza questa costruzione tutta la sezione potrebbe
+	# essere verde perche' il canale e' vuoto — il caso a risposta nota di
+	# `_poison_body_scale` — e il peso viene pilotato **dopo** perche' e' la leva che
+	# riaccende il canale.
+	var trovati := _costruisci_il_canale_vuoto(h, horde, spawner, "m13 cupola")
 	h.eq(horde.mortar_shot_count, 0,
-		"m13: a peso di produzione (MORTAR_WEIGHT = %.1f) nessun colpo puo' essere in volo: se ce ne fosse uno, la sezione starebbe misurando una cupola che il gioco non produce" % peso_dichiarato)
+		"m13: il peso di produzione e' %.1f e oltre i %.1f s di soglia il gioco PUO' produrre un colpo: se a questo punto ce ne fosse uno, la sezione starebbe misurando una cupola che il gioco non usa. La sezione spegne il canale pilotando il peso a 0.0 e svuotando con la strada di -orda quelli che trova: ne aveva trovati %d"
+			% [peso_dichiarato, float(Run.MORTAR_AFTER_S), trovati])
 	cupola.refresh()
 	h.eq(cupola.drawn_count(), 0,
 		"m13: nessun colpo in volo, nessuna cupola disegnata")
@@ -4216,6 +4751,12 @@ func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner, etichetta := "m
 	horde.restart_run()
 	horde.run.wave_killed = horde.run.wave_total
 	horde.step(DT)
+	# ## PRECONDIZIONE 3: LA SOGLIA DI **TEMPO** (m17). Il peso pilota **quale**
+	# specie e' spendibile, ma non basta: dal terzo minuto anche il mortar e' fermo
+	# sotto `Run.MORTAR_AFTER_S`. `restart_run()` ha rimesso l'orologio a zero, quindi
+	# senza questa riga nessun seme dello sweep qui sotto farebbe nascere un mortar e
+	# la sezione misurerebbe il vuoto — cioe' passerebbe perche' non cerca niente.
+	_apri_la_soglia_del_mortar(h, horde, etichetta)
 	if not h.check(horde.wave >= 2,
 			"m13: l'orda deve essere su un'onda in cui il mortar e' spendibile (e' all'onda %d): sull'onda 1 il peso del mortar e' quello di -onda, non quello pilotato" % horde.wave):
 		vuoto["motivo"] = "l'orda non e' arrivata a un'onda in cui il mortar e' spendibile"
@@ -4277,8 +4818,12 @@ func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner, etichetta := "m
 	vuoto["ok"] = true
 	vuoto["nemico"] = 0
 	vuoto["distanza"] = misurata
-	print("test_arena: %s, il contesto: MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test**, ripresa all'onda %d, un nemico solo di specie mortar trovato al seme %d dopo %d semi; fermata a %.3f m (E.engage_for = 2 x blast), giocatore a %.3f m"
+	vuoto["mortar"] = pos
+	vuoto["ora"] = float(horde.run.elapsed_s)
+	print("test_arena: %s, il contesto: MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test**, ripresa all'onda %d, un nemico solo di specie mortar trovato al seme %d dopo %d semi; fermata a %.3f m (E.engage_for = 3 x blast), giocatore a %.3f m"
 		% [etichetta, dichiarato, MORTAR_STEER, horde.wave, int(vuoto["seed"]), semi, fermata, misurata])
+	print("test_arena: %s, l'orologio: %.2f s (Run.MORTAR_AFTER_S = %.2f s, soglia di m17) al momento della ricerca, quindi il seme %d ha trovato il mortar **oltre soglia** e non per caso: sotto i %.2f s il peso pilotato non avrebbe prodotto nessun mortar e la sezione avrebbe girato sul vuoto"
+		% [etichetta, float(horde.run.elapsed_s), float(Run.MORTAR_AFTER_S), int(vuoto["seed"]), float(Run.MORTAR_AFTER_S)])
 	return vuoto
 
 ## ## CRITERIO 5: il canale chiuso col veleno
@@ -4559,9 +5104,35 @@ func _forma_della_cupola(h, game: Node) -> void:
 ## I tempi residui di due colpi sono **diversi**, e devono esserlo: e' la
 ## precondizione dell'invariante del pulsare, cioe' del fatto che la cupola cambia
 ## altezza e non impronta.
+##
+## ## m18: LE DUE TABELLE DEL MORTAR, e perche' **tutti** i canali finti ne hanno uno
+##
+## `mortar_shot_renderer.gd` cerca il **mortar piu' vicino alla cupola** per sapere da
+## dove parte il colpo, e lo cerca in `kinds` e `transforms`: sono due tabelle che
+## l'orda espone **gia'** e che questo file non allarga. Il canale finto le porta
+## quindi con se', e le riempie **sempre**: un finto senza mortar fa scattare il ramo
+## di riserva (lancio sulla cupola) e allora le sezioni che guardano la cupola
+## finirebbero per misurare il fallback senza dirlo — che e' la classe di difetto che
+## questo file chiude in ogni sezione. Il fallback e' adesso un caso che si chiede
+## (`svuota_mortai()`), non un caso in cui si cade per sbaglio, e ogni sezione che
+## disegna un colpo **dice** quale ramo ha preso (`fallback_launchs()`).
 class FakeShots extends Node:
+	## L'indice di specie del mortar in `kinds`: copia dichiarata di `MORTAR` in
+	## `src/sim/enemy.gd`, come `MORTAR_KIND` nel renderer.
+	const MORTAR := 4
+	## Una specie che **non** e' il mortar, perche' il canale finto possa avere un
+	## nemico che il renderer non deve scambiare per il punto di lancio — e che sta
+	## **piu' lontano** del mortar, cosi' «il primo della tabella» non puo' passare
+	## per «il piu' vicino».
+	const ALTRO := 0
+	## Il mortar di questo finto quando `fill()` lo mette: lontano da ogni punto di
+	## caduta che `fill()` scrive, quindi l'arco non e' mai degenere ne' verticale.
+	const MORTAR_FINTO := Vector3(-40.0, 0.0, 55.0)
+
 	var mortar_shots: PackedVector3Array = PackedVector3Array()
 	var mortar_shot_count: int = 0
+	var kinds: PackedInt32Array = PackedInt32Array()
+	var transforms: PackedVector3Array = PackedVector3Array()
 
 	func fill(n: int) -> void:
 		mortar_shot_count = n
@@ -4571,6 +5142,34 @@ class FakeShots extends Node:
 			# raggio letto al posto del punto, non puo' passare.
 			mortar_shots[i] = Vector3(1.0 + float(i) * 3.0, -2.0 - float(i) * 1.5,
 				0.80 - float(i) * 0.37)
+		_mettici_un_mortar(MORTAR_FINTO)
+
+	## Un canale con **un colpo** che cade su `cupola` e **due nemici vivi**: il
+	## mortar in `lancio` e uno di un'altra specie molto piu' lontano, cosi' il
+	## renderer non puo' passare ne' per «l'unico nemico e' il punto di lancio» ne' per
+	## «il primo nemico della tabella e' quello giusto».
+	func fill_con_mortar(cupola: Vector3, lancio: Vector3) -> void:
+		mortar_shot_count = 1
+		mortar_shots = PackedVector3Array([Vector3(cupola.x, cupola.z, 0.0)])
+		_mettici_un_mortar(lancio)
+
+	## Il caso dichiarato del ramo di riserva: nessun mortar vivo, quindi il lancio
+	## cade sulla cupola. Serve per dire **quel** ramo, non per trovarvelo per caso.
+	func svuota_mortai() -> void:
+		kinds = PackedInt32Array([ALTRO, ALTRO])
+		transforms = PackedVector3Array([Vector3(9.0, 0.0, 9.0), Vector3(-9.0, 0.0, -9.0)])
+
+	## I secondi residui dell'unico colpo, riscritti a piacere: e' cosi' che la sezione
+	## dell'arco puo' campionare l'arco a `T`, a `T/2` e a `0` esatti, cosa che il
+	## canale vero non permette mai (i suoi secondi residui scendono di `DT` a passo).
+	func set_left(left: float) -> void:
+		if mortar_shot_count > 0:
+			var s := mortar_shots[0]
+			mortar_shots[0] = Vector3(s.x, s.y, left)
+
+	func _mettici_un_mortar(lancio: Vector3) -> void:
+		kinds = PackedInt32Array([ALTRO, MORTAR])
+		transforms = PackedVector3Array([lancio + Vector3(400.0, 0.0, 400.0), lancio])
 
 	func asked() -> int:
 		return mortar_shot_count

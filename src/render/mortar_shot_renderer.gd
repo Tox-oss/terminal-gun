@@ -16,60 +16,97 @@ extends MultiMeshInstance3D
 ## `horde.mortar_shot_left(i)`. Nessun campo nuovo, nessuna superficie nuova: e'
 ## la via che `mortar_renderer.gd` dichiara gia' e che questa onda non allarga.
 ##
-## ## LA QUOTA DI PARTENZA: PERCHE' 26 m E NON 2 m E NON 200 m
+## ## LA TRAIETTORIA: PARTE DAL MORTAR, ARRIVA ALLA CUPOLA, E ATTERRA PUNTUALE
 ##
-## Il vertice ha posto la domanda con i due numeri che decidono: **il nemico e'
-## alto 1,000 m** (AABB di `enemy_small.glb`, misurato: 0,894425 x 1,000000 x
-## 0,850640 m) e **l'arena ha 60 m di raggio**. Da quei due numeri, e dalla
-## moltiplicazione `SIZE_FACTOR x RADIUS[k]` del renderer, si ricava la banda in cui
-## un colpo e' **fuori dal campo visivo**:
+## La richiesta dell'utente (2026-10-15) e' una riga: «il colpo parte dal mortar e
+## arriva alla cupola, lungo una parabola, e atterra esattamente quando
+## `mortar_telegraph_s` finisce». Tre cose, e sono tre cose diverse:
 ##
-##   - **2 m**: il corpo piu' alto che il gioco disegna e' il boss,
-##     `3,4 x 1,90 = 6,46 m`, e la cupola che ne segnala la caduta ha raggio
-##     `Game.mortar_blast_m = 5,2100 m`. Un colpo a 2 m sta **dentro la propria
-##     cupola** e sotto la testa di 145 nemici su 200: si vede il tetto di una forma
-##     rossa e non il colpo. E' il difetto che questa sezione chiude.
-##   - **200 m**: la camera sta a 34 m sopra l'ancora (`arena_camera.gd::HEIGHT`)
-##     con 41,6 m di distanza di vista; un colpo a 200 m sarebbe **fuori dal
-##     frustum** per la quasi totalita' del telegrrafo, che e' 0,8293 s = 49,8 passi
-##     a 60 Hz: il giocatore vedrebbe un lampo e poi niente.
-##   - **26 m**: `26 / 6,46 = 4,03` volte il corpo piu' alto e `26 / 5,21 = 4,99`
-##     volte il raggio della cupola, quindi **fuori dalla folla e fuori dal proprio
-##     avvertimento**; e `26 / 34 = 0,765` dell'altezza della camera, quindi
-##     **dentro l'inquadratura** per tutta la caduta. La sua taglia (1,20 m di
-##     diametro) e' 17,3 px alla distanza di vista tipica, quindi non e' la
-##     dimensione il problema: e' l'altezza.
+##   - **da dove**: dal **mortar**, cioe' dal nemico che ha sparato. Non da un punto
+##     inventato: e' l'unica cosa che rende la curva leggibile, perche' l'occhio
+##     segue il colpo e arriva alla cupola sapendo *chi* ha tirato. `-orda` ha
+##     portato la fermata del mortar a `3 x mortar_blast_m` = **15,63 m**, quindi la
+##     distanza che il colpo attraversa **si vede**.
+##   - **che forma**: una **parabola**. Non un dettaglio estetico: e' il nome
+##     dell'arma. Un proiettile che sale e poi scende e' esattamente quello che fa
+##     un mortaio, quindi qui la traiettoria non e' un effetto: e' l enemy's name.
+##   - **quando**: al tempo che dice il contratto, non al tempo che dice qui.
 ##
-## Il numero e' **derivato** da quei tre (6,46 m, 5,21 m, 34 m) e dichiarato qui
-## accanto al motivo; `tests/test_arena.gd` lo rilegge dalla costante e verifica che
-## stia sopra `2 x corpo piu' alto` e sotto l'altezza della camera, quindi non puo'
-## diventare un numero decorativo.
-const START_HEIGHT := 26.0
+## ### LA PARABOLA: TRE PUNTI NOTI, E LO SCARTO ZERO PER COSTRUZIONE
 ##
-## ## LA CADUTA: LINEARE, E PERCHE' L'ERRORE E' ZERO PER COSTRUZIONE
+## Con `s` = frazione **volata** (`0` al lancio, `1` all'impatto, e
+## `s = 1 - remaining / mortar_telegraph_s`), l'arco e' la curva che passa per
+## `(0, LAUNCH_HEIGHT)`, `(1/2, APEX_HEIGHT)` e `(1, 0)`:
 ##
-##     quota(t) = START_HEIGHT x (t / mortar_telegraph_s)
+##     quota(s) = (1 - s) x ( LAUNCH_HEIGHT x (1 - 2 s) + 4 x APEX_HEIGHT x s )
 ##
-## Il canale porta **quanti secondi mancano** alla caduta, quindi `t = 0` e'
-## **esattamente** l'istante in cui `-orda` fa esplodere il colpo
-## (`horde.gd::_mortar_impact`). Una quota che e' funzione **pura** di `t` e' zero
-## in quell'istante e non prima: non c'e' un orologio che possa andare storto, e non
-## c'e' un secondo numero da accordare. Il tempo di caduta **disegnato** e'
-## `START_HEIGHT / START_HEIGHT x mortar_telegraph_s = mortar_telegraph_s`, quindi
-## lo scarto fra la cupola e l'impatto e' **0,000000000 s**, cioe' sotto il passo di
-## simulazione per costruzione e non per taratura.
+## I tre coefficienti non sono tarati: sono **la soluzione** di quei tre punti, e per
+## costruzione `quota(1) = 0` esattamente, cioe' l'istante in cui `-orda` fa
+## esplodere il colpo (`horde.gd::_mortar_impact`). Il tempo di caduta **disegnato**
+## e' `mortar_telegraph_s` letto **dal contratto a ogni refresh**
+## (`_contract_telegraph()`), quindi lo scarto fra la cupola e l'impatto e' **0 s**:
+## non c'e' un orologio che possa andare storto e non c'e' un secondo numero da
+## accordare. Un numero messo in un campo prenderebbe il valore giusto al primo frame
+## e mentirebbe per tutta la partita se il contratto cambiasse.
 ##
-## **Lineare e non accelerato**: con la caduta lineare la velocita' e' costante
-## (`26 / 0,8293 = 31,35 m/s`) e quindi **l'altezza del colpo e' l'orologio**: due
-## colpi con la stessa quota cadono dalla stessa altezza e l'occhio impara a leggere
-## il tempo che manca senza conoscere il numero. Una caduta che accelera passerebbe
-## piu' tempo in aria buia (dentro la folla) e accelererebbe proprio nell'ultimo
-## mezzo secondo, cioe' dove la lettura conta di piu'.
+## Il canale porta **quanti secondi mancano** alla caduta, quindi `remaining = 0`
+## e' l'impatto e `remaining = mortar_telegraph_s` e' il lancio: sono gli stessi due
+## estremi di prima, e la lettura e' la stessa di sempre.
 ##
-## Il tempo di caduta non e' scritto qui: `mortar_telegraph_s` arriva **dal
-## contratto a ogni refresh** (`_contract_telegraph()`), come il raggio della cupola
-## fa con `mortar_blast_m`. Un numero messo in un campo prenderebbe il valore giusto
-## al primo frame e mentirebbe per tutta la partita se il contratto cambiasse.
+## ### I TRE PARAMETRI, E DA CHE NUMERI SONO USCITI
+##
+## **1. L'altezza di lancio dal suolo: `LAUNCH_HEIGHT = 9,52 m`.** E' il **doppio
+## del corpo del mortar che spara**: `SIZE_FACTOR x RADIUS[MORTAR]` =
+## `3,4 x 1,40` = **4,76 m** (`RADIUS` e' di `-orda`, `SIZE_FACTOR` e' di m11 e la
+## moltiplicazione e' quella che m8 ha chiuso). Il vincolo che decide e' un altro e
+## e' dichiarato: nei **primi passi** il colpo e' vicino al mortar e i corpi sono
+## alti fino a `SIZE_FACTOR x RADIUS[BOSS]` = `3,4 x 1,90` = **6,46 m**, quindi un
+## lancio piu' basso di 6,46 m metterebbe il colpo **dentro la folla** per qualche
+## passo proprio quando l'occhio lo sta cercando. `9,52 / 6,46 = 1,47` volte il corpo
+## piu' alto, e `9,52 / 4,76 = 2,00` volte il corpo che spara: la bocca del tubo e'
+## sopra la testa del tubo e sopra la testa di chiunque altro. `tests/test_arena.gd`
+## rilegge la costante e verifica la disuguaglianza, quindi non puo' diventare un
+## numero decorativo.
+##
+## **2. L'altezza dell'apice: `APEX_HEIGHT = 28,0 m`.** Il tetto e' quello della
+## camera, e la camera e' dichiarata in `src/render/arena_camera.gd`: guarda da
+## `anchor + (0, 34, 24)`, quindi **oltre 34 m il colpo esce dall'inquadratura** nel
+## momento in cui il giocatore ha piu' bisogno di vederlo. Il numero e' la camera
+## meno il suo margine dichiarato, `HEIGHT - EDGE_MARGIN` = `34 - 6` = **28,0 m**:
+## l'apice sta 6 m sotto l'obiettivo, cioe' dentro il quadro con un margine che non
+## e' un filo. `28 / 6,46 = 4,33` volte il corpo piu' alto (l'apice e' lontano dalla
+## folla) e `28 / 15,63 = 1,79` volte la distanza percorsa in orizzontale (l'arco e'
+## piu' alto che largo, ed e' quello che da dalla **camera in alto** si vede come
+## una curva e non come una riga).
+##
+## **3. Da che lato si vede partire: dal mortar.** Il punto di lancio **non** e' un
+## numero qui dentro: e' la posizione del **mortar piu' vicino a quella cupola**,
+## letta dall'orda con i due canali che l'orda espone gia' e che questo file non
+## allarga (`kinds`, `transforms`) — `_mortar_piu_vicino()`. Il caso in cui il punto
+## di lancio **non** e' il mortar e' uno solo ed e' dichiarato: se l'orda non espone
+## quelle due tabelle, o non ha nessun mortar vivo, il lancio cade **sulla cupola
+## stessa** e il colpo sale diritto e la riattraversa. Meglio un tiro che non sa da
+## dove arriva di un tiro che parte da un punto inventato: il difetto che questa
+## sezione chiude non si ri-apre dalla parte opposta.
+##
+## I tre parametri sono **quelli descritti sopra** e sono i tre numeri che questa
+## sezione dichiara: `LAUNCH_HEIGHT` (doppio del corpo del mortar, `9,52 m`),
+## `APEX_HEIGHT` (la camera meno il suo margine, `34 - 6 = 28,0 m`) e il **mortar
+## piu' vicino alla cupola**, che non e' un numero ma' una lettura dell'orda.
+const LAUNCH_HEIGHT := 9.52
+const APEX_HEIGHT := 28.0
+
+## L'indice di specie del mortar in `horde.kinds`. E' una **copia dichiarata** di
+## `MORTAR` in `src/sim/enemy.gd`, come `KIND_SLOT` in `horde_renderer.gd` lo e' di
+## tutta la tabella delle specie: nessuno dei due file scrive il numero «4» per
+## conto proprio in un posto diverso, e `tests/test_arena.gd` confronta questa copia
+## con la fonte voce per voce, quindi una sesta specie o un riordino la farebbe
+## diventare rossa invece di far cercare il lancio sulla voce sbagliata.
+const MORTAR_KIND := 4
+##
+## Il canale e' **lo stesso** di quello delle cupole, scritto da `-orda` e letto con
+## i suoi metodi: `horde.mortar_shot_count`, `horde.mortar_shot_at(i)`,
+## `horde.mortar_shot_left(i)`. Nessun campo nuovo, nessuna superficie nuova.
 ##
 ## ## LA FORMA: un cono con la punta in basso, e perche' un cono
 ##
@@ -142,6 +179,16 @@ var _built: bool = false
 var _last_drawn: int = 0
 var _last_asked: int = 0
 var _last_telegraph: float = -1.0
+## Quanti colpi dell'ultimo `refresh()` sono partiti **dalla cupola** invece che da un
+## mortar, cioe' quante volte e' scattato il ramo di riserva di
+## `_mortar_piu_vicino()`. Non serve a disegnare: serve a dire **quale ramo e' stato
+## preso**, e senza questo numero un criterio che gira su un canale finto senza
+## mortar passerebbe misurando il fallback senza dirlo — che e' la classe di difetto
+## che questo file chiude in ogni sezione.
+var _last_fallback: int = 0
+## L'esito dell'ultima `_mortar_piu_vicino()`. Un campo e non un valore di ritorno
+## doppio: il ciclo di `refresh()` gira una volta per frame e non puo' allocare.
+var _lancio_era_una_cupola: bool = false
 
 ## Tre avvisi emessi **una volta sola**: un canale assente e' un difetto di `-orda`,
 ## non un rumore da ripetere ogni frame (cfr. `_warned_radii` in
@@ -223,7 +270,7 @@ func _aabb(points: Array) -> AABB:
 	if points.is_empty():
 		return AABB(Vector3(-1.0, -1.0, -1.0), Vector3(2.0, 2.0, 2.0))
 	var lo := Vector3(INF, -AABB_MARGIN, INF)
-	var hi := Vector3(-INF, START_HEIGHT + MESH_HEIGHT + AABB_MARGIN, -INF)
+	var hi := Vector3(-INF, APEX_HEIGHT + MESH_HEIGHT + AABB_MARGIN, -INF)
 	for p in points:
 		var v: Vector3 = p
 		lo = Vector3(minf(lo.x, v.x - AABB_MARGIN), lo.y, minf(lo.z, v.z - AABB_MARGIN))
@@ -290,10 +337,18 @@ func refresh() -> void:
 	# indice che non esiste ancora non scrive niente e non avvisa nessuno.
 	multimesh.instance_count = wanted
 	var punti: Array = []
+	var ramo_cupola := 0
 	for i in wanted:
 		var world: Vector3 = horde.mortar_shot_at(i)
 		var left: float = float(horde.mortar_shot_left(i))
-		var t := shell_transform(world, left, telegraph)
+		# Il punto di lancio e' una **lettura dell'orda**, non un numero di questo
+		# file: il mortar piu' vicino a quella cupola. Nessuna allocazione e nessuna
+		# tabella intermedia: un colpo in volo sono poche decine al massimo e
+		# l'orda e' al massimo `MAX_ENEMIES`, quindi il ciclo e' `colpi x nemici`.
+		var lancia := _mortar_piu_vicino(horde, world)
+		if _lancio_era_una_cupola:
+			ramo_cupola += 1
+		var t := shell_transform(world, left, telegraph, lancia)
 		multimesh.set_instance_transform(i, t)
 		punti.append(t.origin)
 		if i < _written.size():
@@ -310,6 +365,7 @@ func refresh() -> void:
 	_last_drawn = wanted
 	_last_asked = asked
 	_last_telegraph = telegraph
+	_last_fallback = ramo_cupola
 
 ## Nessun colpo a schermo. E' una funzione e non un valore: un colpo che resta dopo
 ## l'impatto e' un colpo che cade da solo nella cupola di un impatto che e' gia'
@@ -325,6 +381,7 @@ func _clear() -> void:
 	_written.clear()
 	_last_drawn = 0
 	_last_asked = 0
+	_last_fallback = 0
 
 ## La superficie di m13 c'e' tutta? Un canale a meta' e' un canale che non esiste:
 ## senza `mortar_shot_left` il colpo non saprebbe a che quota mettersi.
@@ -368,29 +425,81 @@ func _resolve_horde() -> Node:
 ## dovrebbe fare.
 ##
 ## `world` e' il punto **del mondo** come lo restituisce `horde.mortar_shot_at(i)`,
-## cioe' con `y` gia' a zero e gia' nel suo ordine vero. `remaining` sono i secondi
-## che mancano alla caduta; `telegraph` e' `Game.mortar_telegraph_s`, rilesso ora.
+## cioe' con `y` gia' a zero e gia' nel suo ordine vero: e' la **cupola**, cioe' il
+## punto d'impatto. `remaining` sono i secondi che mancano alla caduta, `telegraph` e'
+## `Game.mortar_telegraph_s` rilesso adesso, e `launch` e' il **mortar** da cui il
+## colpo parte (quello piu' vicino a questa cupola).
 ##
-## L'origine e' il **centro** del cono e la punta sta a `height` metri dal terreno:
-## la punta e' la parte che tocca, quindi e' la quota che deve arrivare a zero
-## nello stesso istante in cui i secondi residui arrivano a zero. Il centro e' mezza
+## Il piano e' `lerp(mortar, cupola, s)`: **`s = 0` e' il lancio e `s = 1` e' l'impatto**,
+## quindi l'ordine degli argomenti e' il verso del tiro. Scritto al contrario (`lerp` da
+## `world`) il colpo **partiva dalla cupola e atterrava sul mortar**: la cupola e la
+## quota erano giuste, la curva girata, e la sola riga che se ne accorgeva era il
+## confronto del punto di lancio col mortar. Perche' non torni e' `tests/test_arena.gd`,
+## che asserisce **entrambi** gli estremi nella stessa tolleranza.
+##
+## L'origine e' il **centro** del cono e la punta sta a `quota` metri dal terreno: la
+## punta e' la parte che tocca, quindi e' la quota che deve arrivare a zero nello
+## stesso istante in cui i secondi residui arrivano a zero. Il centro e' mezza
 ## altezza piu' in su, e `tip_height()` sottrae esattamente quella meta'.
-func shell_transform(world: Vector3, remaining: float, telegraph: float) -> Transform3D:
-	var punta := _height_of(remaining, telegraph)
-	# La `Basis` ruota di 180 gradi attorno a X: il cono della primitiva ha la punta
-	# in alto, e un colpo che cade con la punta in alto e' un colpo che sale.
+##
+## La `Basis` ruota di 180 gradi attorno a X e **non** ruota con la tangente
+## dell'arco: la punta deve restare **sotto** il centro perche' e' la quota del
+## `tip_height()` a definire l'impatto, e un cono inclinato farebbe dipendere quella
+## quota dalla funzione che calcola la punta invece che dall'altezza scritta.
+func shell_transform(world: Vector3, remaining: float, telegraph: float, launch: Vector3) -> Transform3D:
+	var s := 1.0 if telegraph <= 0.0 else clampf(1.0 - remaining / telegraph, 0.0, 1.0)
+	var punta := arc_height(s)
 	var b := Basis(Vector3.RIGHT, PI).scaled(Vector3(MESH_RADIUS, MESH_HEIGHT, MESH_RADIUS))
-	return Transform3D(b, Vector3(world.x, punta + 0.5 * MESH_HEIGHT, world.z))
+	var piano := Vector3(launch.x, 0.0, launch.z).lerp(Vector3(world.x, 0.0, world.z), s)
+	return Transform3D(b, Vector3(piano.x, punta + 0.5 * MESH_HEIGHT, piano.z))
 
-## La quota della **punta** sopra il terreno, in metri: funzione **pura** del solo
-## canale e del contratto, quindi due istanti con lo stesso `remaining` danno lo
-## stesso colpo e `remaining == 0` dà esattamente terra. Nessun orologio: un
+## La quota della **punta** sopra il terreno, in metri, alla frazione volata `s`:
+## funzione **pura** dei tre punti noti dell'arco, quindi due istanti con lo stesso
+## `s` danno lo stesso colpo e `s == 1` da' esattamente terra. Nessun orologio: un
 ## orologio qui sarebbe il secondo numero da accordare con quello di `-orda`, che e'
 ## il difetto che la sezione chiude.
-func _height_of(remaining: float, telegraph: float) -> float:
-	if remaining <= 0.0 or telegraph <= 0.0:
-		return 0.0
-	return START_HEIGHT * clampf(remaining / telegraph, 0.0, 1.0)
+##
+##     quota(s) = (1 - s) x ( LAUNCH_HEIGHT x (1 - 2 s) + 4 x APEX_HEIGHT x s )
+##
+## I tre coefficienti sono la soluzione di `quota(0) = LAUNCH_HEIGHT`,
+## `quota(1/2) = APEX_HEIGHT`, `quota(1) = 0`: non sono tarati e non si possono
+## spostare senza rompere uno dei tre punti.
+func arc_height(s: float) -> float:
+	var u := clampf(s, 0.0, 1.0)
+	return (1.0 - u) * (LAUNCH_HEIGHT * (1.0 - 2.0 * u) + 4.0 * APEX_HEIGHT * u)
+
+## ## IL PUNTO DI LANCIO: il mortar piu' vicino alla cupola, letto dall'orda
+##
+## Due tabelle che l'orda **gia' espone** (`kinds`, `transforms`) e che questo file
+## non allarga: nessun canale nuovo per `-orda`, nessuna superficie nuova. La scelta
+## e' il **piu' vicino** e non «quello che ha sparito»: l'orda non dice quale dei suoi
+## mortar ha sparato il colpo `i`, e fra due candidate la verita' geometrica e' che il
+## colpo e' partito dal piu' vicino — il mortar e' **fermo** (`fermo` in
+## `src/sim/enemy.gd`), quindi la risposta non cambia mentre il colpo e' in volo e il
+## punto di lancio non sbandiera.
+##
+## Se l'orda non espone le due tabelle, o non ha un solo mortar vivo, la risposta e'
+## la **cupola stessa**: il colpo sale diritto e la riattraversa. E' il caso
+## dichiarato sopra, e non e' un fallback silenzioso: il test lo copre.
+func _mortar_piu_vicino(horde, bersaglio: Vector3) -> Vector3:
+	var kinds = horde.get("kinds")
+	var tras = horde.get("transforms")
+	if not (kinds is PackedInt32Array) or not (tras is PackedVector3Array):
+		_lancio_era_una_cupola = true
+		return bersaglio
+	var meglio := bersaglio
+	var distanza := INF
+	var n: int = mini(kinds.size(), tras.size())
+	for i in n:
+		if int(kinds[i]) != MORTAR_KIND:
+			continue
+		var p: Vector3 = tras[i]
+		var d := Vector2(p.x - bersaglio.x, p.z - bersaglio.z).length_squared()
+		if d < distanza:
+			distanza = d
+			meglio = p
+	_lancio_era_una_cupola = distanza == INF
+	return meglio
 
 # --- Lettura (per il test e per il debug) -------------------------------------
 
@@ -409,9 +518,24 @@ func tip_height(i: int) -> float:
 	return t.origin.y - 0.5 * absf(t.basis.get_scale().y)
 
 ## La quota di partenza dichiarata, perche' il test debba rileggerla dalla fonte e
-## non da una copia scritta li'.
-func start_height() -> float:
-	return START_HEIGHT
+## non da una copia scritta li'. Sono due numeri adesso (lancio e apice) e sono le
+## due estremita' dell'arco: il test li rilegge entrambi dalla fonte.
+func launch_height() -> float:
+	return LAUNCH_HEIGHT
+
+## L'altezza dell'apice dichiarata, per lo stesso motivo di `launch_height()`: e' il
+## numero che il tetto della camera (34 m) tiene sotto di se'.
+func apex_height() -> float:
+	return APEX_HEIGHT
+
+## Il **mortar** da cui parte il colpo `i`, cioe' il punto di lancio cosi' come e'
+## stato scritto nel buffer, con `y` portato a zero perche' e' un punto del terreno
+## e non una quota. E' il numero che il confronto con la posizione del mortar
+## dell'orda misura: il criterio dice che il colpo parte da li', non da un punto
+## che il test si e' scelto.
+func launch_point(i: int) -> Vector3:
+	var o := written_transform(i).origin
+	return Vector3(o.x, 0.0, o.z)
 
 ## Quanti colpi sono stati messi sul serio nel buffer all'ultimo `refresh()`.
 func drawn_count() -> int:
@@ -426,6 +550,13 @@ func requested_count() -> int:
 ## Quanti ne sono stati **accorciati** dalla guardia di capienza.
 func clamped_count() -> int:
 	return maxi(0, _last_asked - _last_drawn)
+
+## Quanti colpi dell'ultimo `refresh()` sono partiti dalla **cupola** invece che da
+## un mortar, cioe' quante volte e' scattato il ramo di riserva. Il test ci mette le
+## mani perche' un canale finto senza mortar porterebbe ogni criterio dell'arco a
+## misurare il ramo di riserva senza che nessuno lo dica.
+func fallback_launchs() -> int:
+	return _last_fallback
 
 ## Il tempo di caduta **letto dal contratto** all'ultimo `refresh()`, o `-1.0` se non
 ## e' arrivato. Serve perche' `tests/test_arena.gd` debba poter dire *quale* valore ha

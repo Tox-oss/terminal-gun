@@ -514,6 +514,22 @@ var run = null
 ## in `_build()`: ogni spawn legge questo array e non ne costruisce uno, quindi lo
 ## spawn non alloca nel ciclo di gioco.
 var _weights: PackedFloat32Array = PackedFloat32Array()
+## ## m17: gli stessi pesi **con la voce del mortar a zero**, gia' costruiti
+##
+## Il mortar non e' spendibile prima di `Run.MORTAR_AFTER_S` (180,0 s: il terzo
+## minuto, vedi la dichiarazione di `elapsed_s` in `src/sim/run.gd`), quindi lo
+## spawn ha bisogno di due tabelle e non di una. Sono **due array gia' scaldati**,
+## non due calcoli: `_sync_weights()` scrive entrambi e `_pick_kind()` sceglie
+## l'uno o l'altro con un `if`, quindi il cammino di spawn non alloca e non
+## ricostruisce niente (8 spawn al secondo, ma la regola vale comunque: nel ciclo
+## di gioco non si costruisce un array).
+##
+## **Perche' `_weights` resta la tabella dichiarata e non quella col mortar a
+## zero**: `_weights` e' quello che l'orda *dichiara* di usare, e un test che lo
+## legge (`horde.get("_weights")`, `-arena` in `tests/test_arena.gd`) lo confronta
+## voce per voce con `Spawner.wave_weights(onda)`. La soglia e' una condizione
+## sul **tempo**, quindi vive nel ramo che sceglie, e non dentro la tabella.
+var _pesi_senza_mortar: PackedFloat32Array = PackedFloat32Array()
 
 # --- Interno ------------------------------------------------------------------
 
@@ -863,14 +879,57 @@ func _populate(n: int) -> void:
 	_grid_dirty = true
 
 ## I pesi delle specie dell'onda in corso.
+##
+## ## m17: qui si costruiscono **due** tabelle, non una
+##
+## `_weights` e' la tabella dichiarata dell'onda (quella che `Spawner.wave_weights`
+## restituisce) e `_pesi_senza_mortar` e' la stessa con la voce del mortar a
+## zero. La seconda si costruisce **qui** e non nel ramo di spawn perche' qui
+## cambia una volta per onda, e li' cambierebbe otto volte al secondo.
 func _sync_weights() -> void:
 	_weights = Spawner.wave_weights(1 if run == null else run.wave)
+	# ## Il `.duplicate()` **non e' un dettaglio**: e' il difetto che questa riga
+	# aveva senza, e la sua firma e' stata vista.
+	#
+	# `var b = a` su un `PackedFloat32Array` **condivide il buffer**: scrivere
+	# `b[4] = 0.0` scriveva anche `a[4]`, quindi `_pesi_senza_mortar` e `_weights`
+	# erano lo stesso array e la soglia aveva spento il mortar **per sempre**, non
+	# solo a soglia chiusa. Il sintomo era la quota a 0,0000 su tutti e due i
+	# cammini con l'orologio a 180 s e la soglia dichiarata aperta: la tabella che
+	# l'orda «dichiara di usare» aveva il mortar a zero, e la stampa di
+	# `tests/test_orda.gd::_porta_oltre_il_mortar` la mostrava voce per voce accanto
+	# a `soglia aperta true`. Una `duplicate()` su cinque float, una volta per
+	# cambio d'onda: e' il prezzo di due tabelle, e il prezzo e' dichiarato.
+	_pesi_senza_mortar = _weights.duplicate()
+	_pesi_senza_mortar[E.MORTAR] = 0.0
 
 ## Una specie per lo spawn di adesso: un peso solo, non uno studio di insieme.
+##
+## ## m17: **il mortar ha una soglia di tempo, e la domanda e' qui**
+##
+## «Siamo oltre 180,0 s?» e' `Run.mortar_unlocked()`, e nessun'altra species fa
+## questa domanda: il brute e il boss nascono dall'onda 1 come prima. La soglia si
+## legge **per spawn**, non una volta per frame: cosi' il cambio di soglia non ha
+## bisogno di nessun cache e non puo' desincronizzarsi da un array che qualcuno ha
+## dimenticato di ricalcolare — il difetto che aveva `BOSS_WAVE1` quando la
+## soglia era per onda e i pesi si ricalcolavano solo al cambio d'onda.
 func _pick_kind() -> int:
-	if _weights.is_empty():
+	var pesi := _pesi_effettivi()
+	if pesi.is_empty():
 		return Spawner.pick_kind(_rng)
-	return Spawner.pick_kind_with(_rng, _weights)
+	return Spawner.pick_kind_with(_rng, pesi)
+
+## La tabella che questo spawn usa davvero: quella dell'onda, o la stessa senza
+## la voce del mortar se l'orologio non e' ancora oltre `Run.MORTAR_AFTER_S`.
+##
+## `run == null` (l'orda montata senza partita, il caso dei test che misurano la
+## tabella delle specie) non ha orologio, quindi **non ha soglia**: legge la
+## tabella piena. E' la scelta dichiarata perche' la soglia e' una domanda sul
+## tempo di partita, e un'orda senza partita non ha un tempo.
+func _pesi_effettivi() -> PackedFloat32Array:
+	if run == null or run.mortar_unlocked():
+		return _weights
+	return _pesi_senza_mortar
 
 ## La vita di un nemico appena nato: la tabella della specie per il
 ## moltiplicatore dell'onda. Sull'onda 1 il moltiplicatore e' 1.0 esatto, quindi
@@ -921,6 +980,15 @@ func step(delta: float) -> void:
 	_poll_run()
 	if run != null and run.is_game_over():
 		return
+	# ## m17: **l'orologio avanza qui**, e in nessun altro posto
+	#
+	# Dopo il controllo di `game_over` e prima di qualunque spawn: a partita
+	# finita il tempo non scorre (nessuno sta giocando), e quando scorre e' gia'
+	# dentro questo passo, quindi la soglia dei 180 s del mortar non ha un passo
+	# di ritardo rispetto al resto della simulazione. Un `+=` e una domanda: non
+	# c'e' `new()`, non c'e' `instantiate()`, non c'e' `queue_free()`.
+	if run != null:
+		run.advance(delta)
 
 	_rebuild_grid()
 	hit_count = 0

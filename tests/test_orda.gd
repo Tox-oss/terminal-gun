@@ -337,6 +337,14 @@ func _run() -> void:
 	# sezione deve parlare con l'orda isolata, e deve poter cambiare onda e
 	# riempire il campo senza che nessuno dopo trovi l'orda com'era.
 	_miscela_respawn(h, horde)
+	_sez("orologio")
+	# ## m17: il terzo minuto. Sta **dopo** `_miscela_respawn` perche' quella sezione
+	# cambia il peso del mortar due volte (denti spenti e ripristinati) e finisce con
+	# `restart_run()`, che azzera anche l'orologio: quindi la sezione che segue
+	# comincia da un clock pulito e non eredita niente. E sta **prima** di
+	# `_scena_vera` perche' lavora sull'orda isolata: la scena vera registra sul
+	# contratto l'orda del gioco, e qui si deve parlare con l'altra.
+	_m17_orologio(h, horde)
 	_sez("scena_vera")
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
@@ -473,12 +481,22 @@ const PLAYER_HP_REFERENCE := 100.0
 ## forma del passaggio di m9, ed e' per questo che la colonna si aggiunge invece
 ## di sostituire una costante.
 ##
-## | banda | m7 (1.2, R=28) | m8 (0.45, R=28) | m9 (0.45, R=46) | **m11 (0.45, R=60)** | perche' |
-## |---|---|---|---|---|---|
-## | cadenza misurata | 1.07-1.57 morsi/s | 0.60-1.17 | 0.50-1.07 | **0.57-1.03** | 3-5 corpi a portata invece di 5-20; poi l'anello su un disco 2,7 volte piu' largo |
-## | danno al secondo | 3.3-8.5 hp/s | 3.42-11.19 | 2.39-14.37 | **3.37-14.17** | le due estremita' vanno in **direzioni opposte** |
-## | sopravvivenza massima | 16.5 s | 29.2 s | 41.8 s | **29.7 s** | segue la cadenza dell'onda piccola |
-## | rapporto danno pieno/piccolo | 2.56 | 3.27 | 6.01 | **4.21** | vedi sotto: non e' l'orda piena che e' cresciuta |
+## **E una quarta volta in m17**, quando il numero che le muove e' **il tempo**:
+## il mortar non e' spendibile prima di `Run.MORTAR_AFTER_S` = 180,0 s, quindi nei
+## primi 30 s di una partita — che e' la finestra che questa sezione misura — il
+## campo **non contiene la quinta specie**, come nel 2019 di m11 quando la quinta
+## specie non esisteva. Il numero che esce e' quindi tornato alla situazione per
+## cui la banda era stata scritta, e non e' una banda allargata: nessuna delle due
+## estremita' si e' mossa, e quello che si e' mosso e' il **contesto** in cui la
+## misura viene presa (`_misura_morso` ora chiama `restart_run()`, quindi entra con
+## l'orologio a zero invece che con l'orologio accumulato dalle sezioni precedenti).
+##
+## | banda | m7 (1.2, R=28) | m8 (0.45, R=28) | m9 (0.45, R=46) | m11 (0.45, R=60) | **m17 (orologio a zero)** | perche' |
+## |---|---|---|---|---|---|---|
+## | cadenza misurata | 1.07-1.57 morsi/s | 0.60-1.17 | 0.50-1.07 | 0.57-1.03 | ristampata a ogni lancio | 3-5 corpi a portata invece di 5-20; poi l'anello su un disco 2,7 volte piu' largo |
+## | danno al secondo | 3.3-8.5 hp/s | 3.42-11.19 | 2.39-14.37 | 3.37-14.17 | ristampata a ogni lancio | le due estremita' vanno in **direzioni opposte** |
+## | sopravvivenza massima | 16.5 s | 29.2 s | 41.8 s | 29.7 s | ristampata a ogni lancio | segue la cadenza dell'onda piccola |
+## | rapporto danno pieno/piccolo | 2.56 | 3.27 | 6.01 | 4.21 | ristampata a ogni lancio | vedi sotto: non e' l'orda piena che e' cresciuta |
 ##
 ## **Le quattro colonne, e cosa dice il passaggio a 60 m.** Il quoziente scende
 ## da 6,01 a **4,21** e il tetto `DPS_RATIO_MAX = 7.5` **non e' stato toccato**:
@@ -1767,8 +1785,27 @@ func _due_fonti(h, horde: HORDE, seme: int) -> void:
 func _misura_morso(h, horde: HORDE, seme: int, pop: int) -> Dictionary:
 	horde.auto_respawn = true
 	horde.set_focus(FAKE_PLAYER)
-	horde.run.wave = 1
-	horde.run.wave_killed = 0
+	# ## m17: **la partita riparte**, e non con due campi scritti a mano
+	#
+	# Prima di m17 bastava `run.wave = 1` e `run.wave_killed = 0`: la sezione
+	# misura **l'economia del morso nei primi secondi di una partita**, e senza
+	# orologio «prima di una partita» non aveva un significato. Adesso c'e' un
+	# orologio, e se questa sezione entrasse con il clock **accumulato** dalle
+	# sezioni precedenti (m9 e m10 fanno 4800 passi, cioe' 80 s, e questa sezione ne
+	# fa altri 7200) allora a meta' della quarta finestra il clock supererebbe i
+	# 180,0 s **dentro una misura che descrive i primi 30 s**, e il mortar
+	# comincerebbe a nascere e a mordere a meta' del campione. Misurato: il
+	# seme 4242 passava da 38,2 s a 59,1 s di sopravvivenza secondo quante sezioni
+	# erano passate prima, cioe' il numero dipendeva dall'ordine di lettura del
+	# file e non dal gioco.
+	#
+	# Quindi qui si chiama `restart_run()`, che azzera onda, barra **e orologio**,
+	# ed e' la strada vera di una partita nuova: `reseed(seme)` viene **dopo** e
+	# rimette il seme dichiarato, quindi la disposizione resta riproducibile (il
+	# reroll del restart non tocca il `_rng` usato da `_populate`, che `reseed`
+	# sovrascrive). Il numero che esce torna a essere «una partita nuova», che e'
+	# quello che la banda di sotto è stata tarata.
+	horde.restart_run()
 	horde.reseed(seme)
 	horde.population = pop
 	while horde.count > 0:
@@ -4210,11 +4247,34 @@ func _mortar(h, horde: HORDE) -> void:
 			+ "fermata a %.4f m, danno %.4f hp"
 			% [ENEMY.engage_for(horde.body_scale), ENEMY.MORTAR_BLAST_HP])
 	# ## La fermata e' derivata, e lo dice con un'identita', non con una stima
+	#
+	# **m17: l'identita' e' cambiata col numero.** Con `engage = 2 x blast` lo
+	# spazio fra il corpo disegnato e il bordo della cupola era `TOUCH_REACH`; con
+	# `engage = 3 x blast` e' `blast + TOUCH_REACH`. La riga sotto asserisce la
+	# formula **nuova**: se qualcuno tornasse a 2x senza toccare questa sezione,
+	# andrebbe rossa invece di passare con l'identita' vecchia ancora scritta.
 	var corpo := horde.body_scale * ENEMY.RADIUS[ENEMY.MORTAR]
-	h.near(ENEMY.engage_for(horde.body_scale) - corpo - blast, ENEMY.TOUCH_REACH, 0.000001,
+	h.near(ENEMY.engage_for(horde.body_scale), 3.0 * blast, 0.000001,
+		"m17: la fermata e' 3 x blast (%.4f m contro i %.4f m di prima, 2 x blast): il numero "
+			% [ENEMY.engage_for(horde.body_scale), 2.0 * blast]
+		+ "cambiato e' la distanza d'ingaggio, non il raggio del colpo, che resta %.4f m" % blast)
+	h.near(ENEMY.engage_for(horde.body_scale) - corpo - blast, blast + ENEMY.TOUCH_REACH,
+		0.000001,
 		"fra il corpo disegnato del mortar e il bordo della cupola che sta per disegnare "
-			+ "ci sono esattamente %.2f m (il corpo del giocatore), non uno spazio libero"
-				% ENEMY.TOUCH_REACH)
+			+ "ci sono blast + corpo del giocatore = %.2f + %.2f m, non uno spazio libero"
+				% [blast, ENEMY.TOUCH_REACH])
+	# ## E la cosa che **non** e' cambiata: la finestra di schivata
+	#
+	# E' la disuguaglianza di fuga, e non contiene `engage_for`: quindi i 2 x blast
+	# non l'hanno toccata e non la toccano i 3 x. Senza questa riga un numero
+	# cambiato sulla fermata potrebbe essere scambiato per «e' piu' difficile da
+	# schivare», che e' la lettura sbagliata: e' **piu' lontano**, non meno tempo.
+	h.near(tele, (blast + ENEMY.TOUCH_REACH) / ENEMY.PLAYER_SPEED * ENEMY.DODGE_MARGIN,
+		0.000001,
+		"m17: la finestra di schivata resta quella dichiarata (%.4f s) e non dipende dalla "
+			% tele
+		+ "fermata a 3 x blast: la matematica della fuga e' quella di prima, quello che cambia e' "
+		+ "quanto presto il colpo ti raggiunge")
 	h.check(ENEMY.engage_for(horde.body_scale) > ENEMY.bite_range_of(ENEMY.MORTAR, horde.body_scale),
 		"il mortar si ferma fuori dalla propria portata di morso, quindi da dove sta non morde")
 	# ## Il numero del giocatore viene dal contratto, non da una copia qui
@@ -4339,10 +4399,19 @@ func _m13_peso_fonte(h, horde: HORDE) -> void:
 	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], prima,
 		"denti: ripristino 2, e i pesi ricalcolati tornano al valore di produzione")
 	# E nel gioco vero adesso il mortar **nasce**: non dalla tabella, dal campo. Un
-	# solo riempimento non basterebbe a dichiararlo (con 25 vivi e quota 5,8% la
-	# probabilita' di zero mortar e' 0,23), quindi qui si contano i quattro semi
-	# dichiarati: 100 nascite, e la probabilita' che le quattro popolazioni non
-	# tirino nessun mortar e' **0,003**. La quota per esteso la guarda `_quota_mortar`.
+	# solo riempimento non basterebbe a dichiararlo (con 25 vivi e quota 2,9% la
+	# probabilita' di zero mortar su 800 nascite e' 1 su 10 milioni), quindi qui si
+	# contano i quattro semi dichiarati: 100 nascite per giro, e la probabilita'
+	# che le quattro popolazioni non tirino nessun mortar e' **0,10**. La quota per
+	# esteso la guarda `_quota_mortar`.
+	#
+	## ## m17: **qui l'orologio va oltre 180 s, e lo dice**
+	#
+	# Il campione nasce da `_pick_kind()`, cioe' dallo spawn, quindi senza l'orologio
+	# la sezione misurerebbe «il mortar non nasce» — che e' vero fino al terzo
+	# minuto e non e' piu' quello che questa sezione dichiara. La strada e' scritta
+	# in `_porta_oltre_il_mortar` e viene stampata li'.
+	_porta_oltre_il_mortar(h, horde, "_m13_peso_fonte (sonda di nascita)")
 	var visti := 0
 	for s in SEMI_MISELA:
 		horde.reseed(int(s))
@@ -4498,6 +4567,17 @@ func _m13_sonda(h, nome: String) -> float:
 ## campo sbagliato non cambierebbe niente a `-arena`: romperebbe la sua onda e
 ## lascerebbe questo file verde.
 func _m13_volo(h, horde: HORDE, tele: float, blast: float) -> void:
+	# ## m17: l'orologio a **zero**, e la soglia chiusa, **mentre la cupola parte**
+	#
+	# La sezione misura il colpo in volo e la sua caduta: il mortar lo scrive
+	# `_m13_prepara` nell'array, quindi non ha bisogno di passare dallo spawn. La
+	# soglia dei 180 s riguarda **chi nasce**, non chi spara, e questa e' la sezione
+	# che lo dice: con la soglia chiusa il colpo parte lo stesso e cade quando
+	# `mortar_telegraph_s` finisce. Senza la riga qui sotto, un futuro
+	# «il mortar non spara finche' non e' il terzo minuto» passerebbe questa sezione
+	# senzache nessuno se ne accorgesse, perche' il mortar di qui non e' mai passato
+	# dallo spawn.
+	_azzera_l_orologio(h, horde, "_m13_volo (colpo in volo)")
 	_m13_prepara(horde, ENEMY.MORTAR)
 	h.eq(horde.mortar_shot_count, 0, "m13: nessun colpo in volo prima di spari")
 	var danno_prima := _totale_danno
@@ -4708,6 +4788,463 @@ func _m13_prepara(horde: HORDE, kind: int) -> void:
 func _nomi_tabelle() -> String:
 	return "HP/SPEED/RADIUS/MASS/KNOCKBACK_RESIST/COLOR"
 
+## # --- m17: l'orologio di partita, e **come** una sezione lo porta oltre --------
+##
+## Il mortar dal terzo minuto in poi (`Run.MORTAR_AFTER_S`, `src/sim/run.gd`) non
+## nasce piu' dall'onda 1: nasce **quando l'orologio di partita supera i
+## 180,0 s**. Quindi ogni sezione di questo file che cerca un mortar **per
+## spawn** deve dire come porta l'orologio, e la strada e' **una sola** ed e'
+## dichiarata qui sotto invece di essere riscritta in ogni sezione.
+##
+## ## La strada: **una scrittura del campo**, non 10 800 passi
+##
+## `run.elapsed_s` e' un campo **pubblico e dichiarato** di `src/sim/run.gd`,
+## come `wave_killed` che questa sezione gia' scrive: il test guida il contesto
+## con le leve che il progetto dichiara, invece di accorgersi che ci sono 10 800
+## passi (= 180,0 s a `DT = 1/60`) da fare e che il file ha 13 s di margine
+## sui 120 s del gate.
+##
+## **Non e' una scorciatoia e non e' una scorciatoia lo e' due volte**: la soglia
+## non ha nessuna cache (`horde._pick_kind()` la rilunge a ogni spawn), quindi
+## scrivere il campo e' lo stesso stato che 10 800 passi produrrebbero — non
+## approssimato, **uguale**. La differenza e' solo quanti passi di simulazione ci
+## sono dietro: se ne vuole uno, il numero e' `180,0 / DT`, ed e' scritto qui e
+## stampato sotto, non lasciato a chi legge.
+##
+## Ogni sezione che chiama questa funzione **stampa** con quanti secondi e con
+## quale strada, cosi' il numero che la sezione misura non sembra arrivato da
+## qualche parte.
+func _porta_oltre_il_mortar(h, horde: HORDE, sezione: String) -> float:
+	var r = horde.run
+	var scritto := SOGLIA_MORTAR
+	r.elapsed_s = scritto
+	h.check(r.mortar_unlocked(),
+		"m17: %s ha scritto elapsed_s = %.1f s e la soglia doveva aprirsi: senza questo il "
+			% [sezione, scritto]
+		+ "mortar non nasce e la sezione misurerebbe il vuoto")
+	# ## La stampa che rende la sezione controllabile da fuori
+	#
+	# Tre numeri, e sono i tre che servono per capire **dove** una sezione sta
+	# guardando: il peso che l'orda **dichiara** di usare (`_weights`), lo stesso con
+	# la voce del mortar spenta (`_pesi_senza_mortar`), e la risposta della soglia.
+	# Senza questi tre, «zero mortar» e «mortar spento» sono la stessa frase.
+	var dichiarati: PackedFloat32Array = horde.get("_weights")
+	var spenti: PackedFloat32Array = horde.get("_pesi_senza_mortar")
+	print("orda: m17, %s porta l'orologio a %.1f s scrivendo `run.elapsed_s` (le leve dichiarate, "
+			% [sezione, scritto]
+		+ "come `wave_killed`): il gioco ci arriverebbe in %d passi a DT %.4f, e la soglia non ha "
+			% [int(ceil(scritto / DT)), DT]
+		+ "cache, quindi il numero che segue e' lo stesso stato, non un'approssimazione | "
+		+ "pesi dichiarati %s, pesi senza il mortar %s, soglia aperta %s"
+			% [str(dichiarati), str(spenti), str(r.mortar_unlocked())])
+	return r.elapsed_s
+
+## ## m17: le quattro sezioni di questo file che cercano un mortar, e **come**
+##
+## | sezione | da dove prende il mortar | cosa serve |
+## |---|---|---|
+## | `_m13_peso_fonte` (sonda di nascita) | `_pick_kind()`, cioe' **spawn** | l'orologio oltre 180 s |
+## | `_due_cammini` (miscela, sezione 17) | `_pick_kind()`, cioe' **spawn** | l'orologio oltre 180 s |
+## | `_m13_volo` / `_m13_stazionario` | `_m13_prepara` scrive `kinds[0]` | **niente**, e la soglia resta **chiusa** |
+##
+## Le ultime due scrivono la specie **nell'array**, quindi non passano da
+## `_pick_kind()` e la soglia non le tocca: e' il motivo per cui possono misurare
+## la cupola e la schivata **prima** del terzo minuto senza falsare niente. Non e'
+## un caso fortunato e' la distinzione che rende la soglia vera: la soglia dice
+## «il mortar **non e' spendibile**», cioe' «il peso non si spende su di lui», e
+## non dice «un mortar gia' nato smette di sparare». Le due cose diverse hanno due
+## criteri diversi, e `_azzera_l_orologio` verifica la seconda **con la prima
+## chiusa**: a zero secondi la soglia e' chiusa e la cupola cade lo stesso.
+##
+## Il contrario e' vero e viene verificato dalla sezione `_m17_orologio`: a
+## soglia chiusa `_pick_kind()` **non puo'** tirare fuori un mortar, su nessun
+## seme. Se una delle due metà non fosse vera, la soglia non starebbe guardando
+## niente.
+
+## L'altra strada: l'orologio **a zero**, con la soglia chiusa.
+##
+## Serve alle due sezioni che misurano la **cupola** (`_m13_volo`,
+## `_m13_stazionario`) e serve a farlo in modo verificabile: l'orologio e' un
+## contatore che questa sezione incrementera' perche' il file lo porta a zero prima
+## e poi, nella sezione `_m17_orologio`, gli si chiede di crescere. Quindi qui non
+## basta scrivere il campo: si **asserisce** che la soglia e' chiusa mentre il
+## mortar spara, altrimenti la sezione non saprebbe di star guardando «un mortar
+## che esiste gia'» e non «il mortar che nasce».
+func _azzera_l_orologio(h, horde: HORDE, sezione: String) -> void:
+	var r = horde.run
+	r.elapsed_s = 0.0
+	h.check(not r.mortar_unlocked(),
+		"m17: %s ha azzerato l'orologio e la soglia doveva essere CHIUSA: questa sezione misura "
+			% sezione
+		+ "un mortar che esiste gia' (lo scrive nell'array con `_m13_prepara`), quindi la soglia "
+		+ "le deve essere indifferente, e non lo e' piu'")
+
+## Il numero della soglia, scritto qui e non letto da `Run`.
+##
+## Se il valore di produzione cambiasse, questa costante resterebbe indietro e il
+## criterio continuerebbe a misurare 180 s senza dirlo: quindi la sezione
+## confronta le due e va rossa quando divergono. Non e' una copia del numero
+## (quella sarebbe una seconda fonte): e' la **riga che obbliga la fonte a non
+## muoversi in silenzio**.
+const SOGLIA_MORTAR := 180.0
+
+# --- 19. m17: il terzo minuto: l'orologio, la soglia con denti, e la misura ----
+#
+# ## Perche' questa sezione esiste
+#
+# Il mortar non nasce piu' dall'onda 1 ma **dopo 180,0 s di partita** (`Run.
+# MORTAR_AFTER_S`), e `Run.elapsed_s` e' il segnale che non esisteva prima di m17.
+# Senza un criterio che lo guardi, quelle due righe sono un commento: il file
+# potrebbe dire «180 s» e continuare a far nascere mortar dall'onda 1, e la porta
+# resterebbe verde. Qui sotto ci sono le tre cose che servono, ognuna con i suoi
+# numeri: **l'orologio e' vero**, **la soglia ha denti**, **il terzo minuto e'
+# l'onda N**.
+#
+# ## I tre semi della misura, e perche' la misura non dipende da loro
+#
+# `SEMI_OROLOGIO` sono tre semi di produzione (nessuno e' «quello di prima»). Ma
+# la cosa da scrivere accanto al numero non e' «ho usato tre semi»: e' che a
+# 180 s **conta il ritmo delle uccisioni, non il seme**. L'onda avanza quando la
+# barra si riempie, e la barra si riempie di uccisioni: chi e' morto e con quale
+# disposizione non entra nel conto. Quindi il numero che esce vale **per quella
+# cadenza** e per nessun'altra, ed e' per questo che la cadenza e' dichiarata qui
+# sotto e stampata a ogni lancio.
+
+## I semi della misura del terzo minuto.
+const SEMI_OROLOGIO := [4242, 20260912, 13579]
+
+## Il passo con cui gira la misura, e **perche' e' grosso**.
+##
+## `DT = 1/60` farebbe 10 800 passi per seme, e il file ha 12,5 s di margine sui
+## 120 s del gate (`TEST_TIMEOUT_MS`, decisione dell'utente). A `0,2 s` sono 900
+## passi e la misura entra. **Non e' un'approssimazione del numero**: l'unica
+## cosa che `DT` cambia dentro il conto e' quanti secondi di partita servono per
+## un certo numero di uccisioni — e la cadenza qui sotto e' dichiarata in
+## «uccisioni per secondo», quindi il passo **e' parte del numero** e va detto.
+const DT_OROLOGIO := 0.2
+
+## Quanti passi coprono 180,0 s a `DT_OROLOGIO`: 900. Scritto, non calcolato, per
+##che' il numero che il piano si porta via e' leggibile senza fare la divisione.
+const PASSI_OROLOGIO := 900
+
+## Quante **uccisioni per passo** la misura mette al campo: una.
+##
+## Con `DT_OROLOGIO = 0,2` e un'uccisione per passo la cadenza e' **5/s**, e il
+## numero che ne esce e' «l'onda a cui si e' alla soglia dei 180 s **uccidendo a 5
+## al secondo**». Un giocatore vero uccide piu' lento, quindi il numero che
+## vedra e' **minore** di questo: quello che esce qui e' il **limite superiore**
+## dell'onda, non la sua stima. E' scritto cosi' perche' un numero che non dice
+## quale cadenza ha misurato e' un numero che il piano leggera come se valesse per
+## tutte.
+const UCCISIONI_PER_PASSO := 1
+
+## Quanti vivi per passo la misura tiene in campo.
+##
+## `population_scale` e' la leva dichiarata dalla sezione 15 (`_scala_popolazione`)
+## e serve per un solo motivo: 900 passi con 200 nemici costano piu' dei 120 s
+## del file. La **barra** non dipende da quanti vivi ci sono in campo — dipende
+## dalle uccisioni — quindi il numero della misura non cambia, e il codice che
+## gira e' quello di sempre.
+const SCALA_OROLOGIO := 0.25
+
+## Quanti **giri** per seme nel campione della soglia.
+##
+## Quattro semi per un giro danno 800 nascite e una quota di 0,0400: dentro la
+## banda, ma **esattamente sul bordo**, e un numero sul bordo non e' un numero. Con
+## tre giri il campione e' 2400 nascite e la quota esce al centro della banda
+## (0,029-0,030 come sulla sezione 17), quindi il criterio misura il peso e non la
+## sua posizione rispetto al limite. Costa dodici riempimenti: niente.
+const GIRI_SOGLIA := 3
+
+## Quanti passi **oltre la soglia** la misura lascia correre, e perche' non zero.
+##
+## Il difetto di questa sezione alla prima stesura: la corsa finiva a 180,0 s
+## esatti, cioe' all'istante in cui la soglia si apre, e quindi **non c'era un solo
+## passo nel quale il mortar potesse nascere** (0 su 2700 passi, letto). Non era un
+## difetto della regola: era una finestra di osservazione di lunghezza zero.
+##
+## 600 passi oltre la soglia sono 30 s di partita con la soglia **aperta da sola**:
+## a cadenza di spawn piu' di un nemico per passo sono ~600 nascite, cioe' ~17
+## mortar con quota 2,9%, e la probabilita' che **nessuno** ne nasca e' 1 su
+## 100 milioni. Il numero che esce (quanti passi dopo la soglia compare il primo)
+## e' stampato, perche' e' la misuravera e non un si'.
+const PASSI_DOPO_LA_SOGLIA := 600
+
+## La soglia di denti: un valore che il gioco non raggiunge mai, cosi' il criterio
+## accende il difetto senza toccare il numero di produzione.
+const SOGLIA_ASSURDA := 1.0e9
+
+func _m17_orologio(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var r = horde.run
+	h.check(r != null and r.has_method("mortar_unlocked"),
+		"m17: `run.elapsed_s` e `Run.mortar_unlocked()` devono esistere: senza i due la regola "
+			+ "del terzo minuto non ha nessun numero dietro")
+	h.near(SOGLIA_MORTAR, float(RUN.MORTAR_AFTER_S), 0.000001,
+		"m17: la soglia di produzione e' %.1f s, il numero scritto in questo file" % SOGLIA_MORTAR)
+
+	# ## (a) l'orologio e' vero: cresce di `delta`, si ferma a `game_over`, e
+	# `restart_run()` lo azzera
+	horde.restart_run()
+	h.near(r.elapsed_s, 0.0, 0.000001,
+		"m17: `restart_run()` azzera l'orologio: una partita nuova comincia al secondo 0")
+	h.check(not r.mortar_unlocked(),
+		"m17: al secondo 0 il mortar non e' spendibile (partita nuova)")
+	var t: float = r.elapsed_s
+	horde.step(DT)
+	h.near(r.elapsed_s, t + DT, 0.000001,
+		"m17: un passo aggiunge esattamente `delta`: %.4f s diventano %.4f s" % [DT, t + DT])
+	horde.step(DT)
+	horde.step(DT)
+	h.near(r.elapsed_s, 3.0 * DT, 0.000001,
+		"m17: tre passi, tre `delta`: l'orologio e' un contatore, non una stima")
+	# ## Il fermo a `game_over`: **un difetto, se non c'e'**
+	#
+	# Un orologio che corre mentre la partita e' finita fa diventare casuale *quando*
+	# compare il mortar, e allora «180 s» non e' una soglia: e' un numero che
+	# dipende da quanto tempo il giocatore ha passato a guardare il menu di morte.
+	h.check(r.enter_game_over(),
+		"m17: `enter_game_over()` deve entrare davvero, altrimenti il fermo sotto non si misura")
+	var fermo: float = r.elapsed_s
+	horde.step(DT)
+	horde.step(DT)
+	h.near(r.elapsed_s, fermo, 0.000001,
+		"m17: a partita finita il tempo NON scorre (%.4f s fermi su %d passi): un orologio che "
+			% [fermo, 2]
+		+ "corre con `game_over` farebbe dipendere il mortar da quanto tempo nessuno gioca")
+	h.eq(r.elapsed_s, fermo,
+		"m17: e non e' un'approssimazione: la differenza e' zero, non «piccola»")
+	horde.restart_run()
+	h.near(r.elapsed_s, 0.0, 0.000001,
+		"m17: e il restart dopo `game_over` rimette l'orologio a zero (e' l'unica strada a PLAYING)")
+
+	# ## (b) la soglia, **con denti**: chiusa -> zero mortar, ripristinata -> 2%-4%
+	#
+	# I due lati sono due difetti diversi, quindi due misure diverse: sotto, il
+	# difetto e' «il tempo c'e' ma nessuno lo guarda» (l'orologio e' a 180 s e il
+	# mortar non nasce); sopra, il difetto e' «la soglia non c'e'» (l'orologio e' a
+	# zero e il mortar nasce). Un criterio che guardasse solo il primo passerebbe
+	# anche senza la regola, che e' il modo peggiore di passare.
+	var pop_sonda := horde.population
+	var scala_sonda := horde.population_scale
+	horde.auto_respawn = true
+	horde.population_scale = 1.0
+	horde.population = HORDE.MAX_ENEMIES
+	# ## Quanti semi sono passati: due varianti, e la differenza e' il difetto
+	var nati := SEMI_MISELA.size() * GIRI_SOGLIA * HORDE.MAX_ENEMIES
+	_azzera_l_orologio(h, horde, "_m17_orologio (lato chiuso)")
+	var chiusi := _census_su_quattro_semi(h, horde)
+	h.eq(chiusi, 0,
+		"m17 lato chiuso: a soglia chiusa (%d semi x %d giri x %d nascite) non deve nascere un "
+			% [SEMI_MISELA.size(), GIRI_SOGLIA, HORDE.MAX_ENEMIES]
+		+ "mortar solo, ottenuti %d: se ne nasce uno, il tempo c'e' ma nessuno lo guarda" % chiusi)
+	# ## E le **altre tre** specie non cambiano: la soglia e' del mortar, solo
+	#
+	# Il boss non e' in questo elenco perche' sull'onda 1 vale `BOSS_WAVE1 = 0,0` e
+	# non nasce comunque: e' un'altra soglia, dichiarata altrove, e metterlo qui
+	# darebbe un criterio che cerca un numero che non deve esistere. Il brute e'
+	# invece la specie che **non** doveva muoversi quando il numero del mortar e'
+	# sceso, quindi e' il confronto che rende vera la regola «solo lui».
+	var specie := _specie_oltre_il_mortar(h, horde)
+	h.check(specie[ENEMY.RUNNER] > 0 and specie[ENEMY.GRUNT] > 0 and specie[ENEMY.BRUTE] > 0,
+		"m17 lato chiuso: a soglia chiusa le altre specie devono nascere come sempre, ottenuto "
+			+ "runner %d, grunt %d, brute %d su %d nascite: una regola che accendesse il mortar "
+				% [specie[ENEMY.RUNNER], specie[ENEMY.GRUNT], specie[ENEMY.BRUTE], nati]
+		+ "spegnesse anche il brute sarebbe verde qui e falsa nel gioco")
+	# --- lato B2: i denti. La soglia diventa un numero che il gioco non raggiunge,
+	# e l'orologio ci va **oltre**: cosi' la prova e' sulla soglia e non sul clock.
+	var soglia_produzione := float(RUN.MORTAR_AFTER_S)
+	RUN.MORTAR_AFTER_S = SOGLIA_ASSURDA
+	# ## L'orologio va **oltre la soglia di produzione e sotto quella assurda**
+	#
+	# 181,0 s: piu' dei 180,0 s che avrebbero aperto la soglia vera, e molto meno
+	# dei %s s assurdi appena messi. Quindi la prova e' sulla **soglia** e non sul
+	# valore del clock — ed e' la stessa identica riga di clock che sta nel ripristino
+	# qui sotto, quindi il «prima» e il «dopo» differiscono **solo** per
+	# `MORTAR_AFTER_S`. (La prima stesza di questa prova scriveva l'orologio a
+	# 1e9 come la soglia: la soglia risultava aperta per costruzione e la prova
+	# misurava il confronto fra due numeri uguali. E' la ragione per cui qui il
+	# clock non e' il numero assurdo.)
+	r.elapsed_s = SOGLIA_MORTAR + 1.0
+	h.check(not r.mortar_unlocked(),
+		"denti: orologio a %.1f s, soglia di produzione %.1f s e soglia assurda %s s: la soglia "
+			% [SOGLIA_MORTAR + 1.0, SOGLIA_MORTAR, SOGLIA_ASSURDA]
+		+ "deve essere CHIUSA (l'orologio non arriva a %s s), altrimenti questa prova non sta "
+			% SOGLIA_ASSURDA
+		+ "guardando la soglia")
+	var denti := _census_su_quattro_semi(h, horde)
+	h.eq(denti, 0,
+		"denti: soglia a %s s (irraggiungibile) e orologio a %.1f s, oltre la soglia vera: zero "
+			% [SOGLIA_ASSURDA, SOGLIA_MORTAR + 1.0]
+		+ "mortar su %d nascite, ottenuti %d. Se qui ne nascessero, la soglia non starebbe "
+				% [nati, denti]
+		+ "guardando niente")
+	# --- ripristino asserito **prima** di rimisurare: un ripristino non asserito e'
+	# una riga che puo' non partire senza che nessuno lo veda.
+	RUN.MORTAR_AFTER_S = soglia_produzione
+	h.near(float(RUN.MORTAR_AFTER_S), SOGLIA_MORTAR, 0.000001,
+		"denti: ripristino 1, la soglia torna a %.1f s" % SOGLIA_MORTAR)
+	_porta_oltre_il_mortar(h, horde, "_m17_orologio (lato aperto)")
+	var aperti := _census_su_quattro_semi(h, horde)
+	var quota := float(aperti) / maxf(1.0, float(nati))
+	h.check(aperti > 0,
+		"m17 lato aperto: ripristinata la soglia e aperto l'orologio il mortar DEVE nascere, "
+			+ "ottenuti %d su %d: con la soglia chiusa erano %d, quindi nessun numero di questa "
+				% [aperti, nati, chiusi]
+		+ "sezione sta guardando il caso fortunato")
+	h.check(quota >= QUOTA_MORTAR_MIN and quota <= QUOTA_MORTAR_MAX,
+		"m17 lato aperto: la quota appena passata la soglia e' %.4f (%d su %d) e deve stare "
+			% [quota, aperti, nati]
+		+ "fra %.1f%% e %.1f%%: sotto il 2%% il nemico da schivare non si impara, sopra il 4%% "
+				% [100.0 * QUOTA_MORTAR_MIN, 100.0 * QUOTA_MORTAR_MAX]
+		+ "un'onda di mortar non e' piu' un'onda mista")
+	print("orda: m17, soglia -- chiusa (orologio %.1f s): %d mortar su %d nascite | "
+			% [0.0, chiusi, nati]
+		+ "denti (soglia %s s): %d su %d | ripristinata a %.1f s: %d su %d = %.4f"
+			% [SOGLIA_ASSURDA, denti, nati, SOGLIA_MORTAR, aperti, nati, quota])
+
+	# ## (c) **terzo minuto = onda N**: la misura che il piano si porta via
+	#
+	# Nessuno scrive l'orologio in questo blocco: corre una partita vera e si legge
+	# `run.wave` quando l'orologio supera da solo i 180,0 s. E' la stessa regola
+	# guardata dall'altra parte — non «il test ha aperto la soglia», ma «la soglia
+	# si e' aperta da sola al terzo minuto e da li' il mortar c'e'».
+	horde.population_scale = SCALA_OROLOGIO
+	horde.restart_run()
+	horde.auto_respawn = true
+	h.check(not r.mortar_unlocked(),
+		"m17 misura: la partita ricomincia col clock a zero e la soglia chiusa")
+	var onde := PackedInt32Array()
+	var visti := 0
+	var passi_alla_soglia := PackedInt32Array()
+	for s in SEMI_OROLOGIO:
+		# ## Il restart e' **dentro** il ciclo, e fuori darebbe tre partite diverse
+		#
+		# `restart_run()` azzera onda, barra e orologio: senza questa riga il secondo
+		# seme partirebbe dall'onda in cui era finito il primo (misurato: 4, poi 7,
+		# poi 9 — la serie che ha fatto capire che il ciclo stava contando le
+		# partite sommate invece che tre partite). Ogni seme qui e' una **partita
+		# nuova**, ed e' l'unico modo perché i tre semi siano confrontabili.
+		horde.restart_run()
+		horde.reseed(int(s))
+		r.elapsed_s = 0.0
+		var passi := 0
+		var nati_mortar := 0
+		# L'onda si legge **all'istante in cui l'orologio supera la soglia**, non in
+		# fondo alla corsa: dopo la soglia la partita continua e l'onda sale, quindi
+		# leggere in fondo misurerebbe l'onda di 210 s e la chiamerebbe «onda a 180 s».
+		var onda_alla_soglia := 0
+		var passi_soglia := 0
+		while passi < PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA:
+			# Il censimento a ogni passo e' la prova che **il mortar compare da
+			# solo**, e non perche' il test abbia aperto qualcosa: e' una lettura,
+			# non una scrittura (costa `O(count)` su 6-50 vivi, e la sezione lo dice).
+			if horde.census()[ENEMY.MORTAR] > 0:
+				nati_mortar += 1
+			horde.step(DT_OROLOGIO)
+			for _k in UCCISIONI_PER_PASSO:
+				if horde.count > 0:
+					horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+			passi += 1
+			if onda_alla_soglia == 0 and r.elapsed_s >= SOGLIA_MORTAR - 0.5 * DT_OROLOGIO:
+				onda_alla_soglia = r.wave
+				passi_soglia = passi
+				# E il primo mortar deve arrivare **dopo** questo passo, non prima:
+				# quindi si smette di contare quando compare, e il numero di passi
+				# che ci e' volto e' la misura «quanto ci mette a farsi vedere».
+				break
+		var primo := passi
+		while nati_mortar == 0 and primo < PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA:
+			if horde.census()[ENEMY.MORTAR] > 0:
+				nati_mortar += 1
+			horde.step(DT_OROLOGIO)
+			if horde.count > 0:
+				horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+			primo += 1
+		onde.append(onda_alla_soglia)
+		passi_alla_soglia.append(primo - passi_soglia)
+		visti += nati_mortar
+		# ## La tolleranza e' `DT/2` e non `0`: 900 addizioni di `0,2` in `float64`
+		# non fanno esattamente 180, e il numero che conta qui e' **quanti passi**
+		# (`PASSI_OROLOGIO`, dichiarato), non la somma. Senza questa tolleranza il
+		# criterio misurerebbe la precisione dell'accumulazione e non la regola, che
+		# e' la classe di difetto che questo file chiude in ogni altro punto.
+		h.check(passi_soglia > 0,
+			"m17 misura seme %d: in %d passi l'orologio non ha mai raggiunto i %.1f s"
+				% [int(s), passi, SOGLIA_MORTAR])
+		h.check(passi_soglia <= PASSI_OROLOGIO,
+			"m17 misura seme %d: la soglia e' stata raggiunta al passo %d oltre il tetto dichiarato "
+				% [int(s), passi_soglia]
+			+ "di %d: il numero che segue sarebbe su un orologio fermo prima" % PASSI_OROLOGIO)
+	# La parte da scrivere accanto al numero, e quella che rende il numero onesto:
+	# **l'onda a 180 s dipende dal ritmo delle uccisioni, non dal seme**. Quindi i
+	# tre semi devono dare lo stesso numero, e se non lo dessero quello che cambierebbe
+	# cambiare non sarebbe «la disposizione» ma il fatto che la misura sta legendo
+	# qualcos'altro.
+	h.eq(onde[0], onde[1],
+		"m17 misura: semi %d e %d danno onde diverse (%d e %d): a 180 s conta il ritmo delle "
+			% [SEMI_OROLOGIO[0], SEMI_OROLOGIO[1], onde[0], onde[1]]
+		+ "uccisioni, non chi e' morto, quindi i semi non possono cambiare il numero")
+	h.eq(onde[1], onde[2],
+		"m17 misura: semi %d e %d danno onde diverse (%d e %d), stessa ragione"
+			% [SEMI_OROLOGIO[1], SEMI_OROLOGIO[2], onde[1], onde[2]])
+	h.check(visti > 0,
+		"m17 misura: la soglia si e' aperta **da sola** al passo %s (%s passi dopo la soglia) e "
+			% [str(passi_alla_soglia), str(passi_alla_soglia)]
+		+ "in %d passi oltre la soglia il mortar non e' mai comparso in campo: una soglia che "
+			% (PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA)
+		+ "nessuno ha attraversato e' una soglia che non esiste")
+	print("orda: m17, terzo minuto = **onda %d** -- misurata su %d semi (%s) a DT %.1f s con "
+			% [onde[0], SEMI_OROLOGIO.size(), str(SEMI_OROLOGIO), DT_OROLOGIO]
+		+ "%d uccisioni per passo = %.1f uccisioni/s, %d passi fino alla soglia + %d oltre, "
+			% [UCCISIONI_PER_PASSO, float(UCCISIONI_PER_PASSO) / DT_OROLOGIO, PASSI_OROLOGIO,
+				PASSI_DOPO_LA_SOGLIA]
+		+ "`population_scale` %.2f; il primo mortar e' comparso %s passi dopo la soglia, da solo. "
+			% [SCALA_OROLOGIO, str(passi_alla_soglia)]
+		+ "Il numero vale per QUELLA cadenza (un giocatore vero uccide piu' lento, quindi vede "
+		+ "un'onda minore o uguale) e non dipende dal seme: a 180 s conta il ritmo delle "
+		+ "uccisioni, non chi e' morto")
+
+	# ## L'orda torna com'era
+	horde.population_scale = scala_sonda
+	horde.population = pop_sonda
+	horde.restart_run()
+	h.near(r.elapsed_s, 0.0, 0.000001,
+		"m17: la sezione rimette l'orologio a zero con `restart_run()`, e non con una "
+			+ "scrittura: la strada vera resta la strada vera")
+	print("orda: m17, sezione intera in %d us" % (Time.get_ticks_usec() - t0))
+
+## Quanti mortar nascono su quattro semi, `GIRI_SOGLIA` volte ciascuno.
+##
+## E' il campione di entrambi i lati della soglia: 4 x 3 x 200 = 2400 nascite. Con
+## una quota del 2,9% la probabilita' che un campione cosi' faccia **zero** mortar
+## e' `0,971^2400 = 1 su 10 milioni`: il numero e' scelto perche' «nessuno e' nato»
+## non possa essere confusedo con «non puo' nascere». Il giro usa il seme
+## `s + g * 7919`, cioe' lo stesso trucco della sezione 17: ripetere lo stesso seme
+## darebbe la stessa riga quattro volte, e un campione deve essere un campione.
+func _census_su_quattro_semi(h, horde: HORDE) -> int:
+	var tot := 0
+	for s in SEMI_MISELA:
+		for g in GIRI_SOGLIA:
+			horde.reseed(int(s) + g * 7919)
+			tot += horde.census()[ENEMY.MORTAR]
+	return tot
+
+## Quattro specie su cinque: il mortar non e' l'unica voce che il campione guarda, e
+## l'unico modo per saperlo e' guardarle tutte. Serve al lato «chiuso» della soglia,
+## dove il mortar non deve nascere **e le altre tre devono nascere come prima**: e'
+## la meta' della regola dell'utente («solo lui: il brute e il boss non cambiano»)
+## che un criterio sul solo mortar non potrebbe vedere.
+func _specie_oltre_il_mortar(h, horde: HORDE) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(ENEMY.KIND_COUNT)
+	for s in SEMI_MISELA:
+		horde.reseed(int(s))
+		var c := horde.census()
+		for k in ENEMY.KIND_COUNT:
+			out[k] += c[k]
+	return out
+
 # --- 17. I due cammini della miscela: popolazione iniziale e respawn -------------
 #
 # ## Il difetto, come stava, in due righe di `src/sim/horde.gd`
@@ -4834,6 +5371,18 @@ func _miscela_respawn(h, horde: HORDE) -> void:
 	# ## Le onde da 2 in poi non si toccano
 	_onde_2_e_avanti(h)
 
+	# ## m17: i due cammini della miscela nascono dallo spawn, quindi **anche loro**
+	#
+	# `_due_cammini` passa da `_pick_kind()` (cammino A, `_populate`) e da
+	# `_spawn_one` (cammino B): i due posti in cui si decide chi nasce. Con
+	# l'orologio a zero la quota del mortar sarebbe **0,0000** su entrambi i
+	# cammini, e `_quota_mortar` andrebbe rosso per la ragione sbagliata (crederebbe
+	# che il peso sia spento, invece che non sia ancora passato il terzo minuto).
+	# Quindi l'orologio si porta oltre **prima** della misura, e resta oltre per
+	# tutta la sezione: anche `_denti_quota_mortar` (peso a 0,0 e poi ripristinato)
+	# deve girare con la soglia aperta, altrimenti i suoi denti misurerebbero due
+	# volte zero.
+	_porta_oltre_il_mortar(h, horde, "_miscela_respawn (due cammini, onde 1 e %d)" % ONDA_MISELA)
 	var uno := _due_cammini(h, horde, 1)
 	_confronta_cammini(h, 1, uno[0], uno[1])
 	_zero_boss(h, 1, uno[0], uno[1])
@@ -4997,20 +5546,29 @@ func _pesi_onda1(h) -> void:
 ## Scrivere `18.8` in un confronto `float` darebbe un numero diverso per il solo
 ## fatto di averlo scritto in `float64`: e' il motivo per cui qui non compare un
 ## numero esadecimale scritto a mano.
-## ## m14: la quinta voce e' **6,0**, e perche' questo criterio non e' indebolito
+## ## m14: la quinta voce c'era gia' come termine (oggi vale **3,0**)
 ##
-## La voce del mortar era `0.0` e adesso vale `MORTAR_WEIGHT`: le altre quattro
-## sono **bit-identiche** a com'erano, quindi la rampa del boss dalle onde 2 in
-## poi — cioe' la ragione per cui questo vettore e' scritto qui dentro — si
+## La voce del mortar era `0.0` e in m14 e' diventata `MORTAR_WEIGHT`: le altre
+## quattro sono **bit-identiche** a com'erano, quindi la rampa del boss dalle onde
+## 2 in poi — cioe' la ragione per cui questo vettore e' scritto qui dentro — si
 ## continua a guardare **termine per termine**, con lo stesso criterio e lo stesso
 ## `==` fra due `float32`. Non e' un criterio allentato: e' la stessa struttura con
 ## un termine in piu' che prima era costante a zero.
+##
+## ## m17: il termine del mortar e' stato **ritoccato** e il vettore sceso con lui
+##
+## `6,0 -> 3,0` e' una leva sulle onde >= 2, e questa sezione e' quella che deve
+## accorgersene. Per questo il numero qui dentro e' stato aggiornato a `3.0`
+## **insieme** alla fonte, e non insieme alla prossima leva: il criterio resta
+## «le quattro voci che non sono il mortar non si muovono», e il mortar si muove
+## per decisione della sezione 17 (la quota). Il commento sotto la dichiarazione
+## del peso in `src/sim/spawner.gd` dice perche' e' sceso.
 ##
 ## Non si scrive qui `MORTAR_WEIGHT`: il numero puo' muoversi dentro la banda della
 ## quota (vedi `_quota_mortar`) senza che questa riga vada rossa, e scriverlo qui
 ## significherebbe legare il test a una scelta che la sezione 17 guarda per quello
 ## che e' — quanto nasce, non quanto pesa.
-static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 6.0])
+static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 3.0])
 
 func _onde_2_e_avanti(h) -> void:
 	var due := SPAWNER.wave_weights(2)
@@ -5095,8 +5653,27 @@ func _totale(a: PackedInt32Array) -> int:
 ## Il criterio guarda **entrambi** i cammini e **non in media**: una quota media
 ## nasconderebbe un cammino spento dietro l'altro generoso, ed e' esattamente il
 ## difetto che questa sezione 17 chiude.
-const QUOTA_MORTAR_MIN := 0.04
-const QUOTA_MORTAR_MAX := 0.08
+## ## m17: la banda scende a **2,0% - 4,0%**, e perche' scende
+##
+## Il numero e' sceso perche' e' sceso il peso: `Spawner.MORTAR_WEIGHT` e' passato
+## da **6,0 a 3,0** e la quota misurata in onda 1 da **0,0575 a circa 0,0300**
+## (vedi la dichiarazione lunga in `src/sim/spawner.gd`). I due fatti che l'hanno
+## fatto scendere sono due, e nessuno dei due e' «il gioco e' piu' facile»:
+##
+##   1. il mortar non nasce piu' dall'onda 1 ma **dopo 180,0 s di partita**: non ha
+##      piu' bisogno di essere frequente per farsi conoscere;
+##   2. si ferma a **3 x blast** (15,63 m) invece che a 2 (10,42 m): ti raggiunge
+##      prima e da piu' lontano, e la **finestra di schivata non e' cambiata**.
+##
+## Quindi questa banda **non e' un allargamento di tolleranza per far passare**:
+## resta una banda di due punti attorno al numero nuovo, ed e' piu' stretta in
+## assoluto di quella di prima. Il numero che la faceva andare bene — **0,0575** —
+## e' **fuori** da 2,0%-4,0%, quindi questo criterio va rosso sul numero di ieri,
+## che e' esattamente quello che deve succedere quando un numero di produzione
+## cambia: se la banda fosse rimasta 4%-8% il criterio sarebbe verde perche' non
+## guardava niente.
+const QUOTA_MORTAR_MIN := 0.02
+const QUOTA_MORTAR_MAX := 0.04
 
 func _quota_mortar(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Array) -> void:
 	var coppie := [
@@ -5115,8 +5692,8 @@ func _quota_mortar(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Ar
 			"onda %d, %s: la quota di mortar deve stare fra %.1f%% e %.1f%%, ottenuta %.4f (%d su %d). "
 				% [w, nome, 100.0 * QUOTA_MORTAR_MIN, 100.0 * QUOTA_MORTAR_MAX, quota,
 					a[ENEMY.MORTAR], n]
-				+ "Sotto il 4% il nemico che il giocatore deve imparare a schivare non si impara, "
-				+ "sopra l'8% un'onda di mortar non e' piu' un'onda mista")
+				+ "Sotto il 2% il nemico che il giocatore deve imparare a schivare non si impara, "
+				+ "sopra il 4% un'onda di mortar non e' piu' un'onda mista")
 		# La stessa scelta scritta sulla tabella, cosi' il numero della banda non
 		# galleggia senza un riferimento: se la tabella esce dalla banda, il gioco
 		# non puo' starci dentro.
@@ -5203,6 +5780,11 @@ func _denti_quota_mortar(h, horde: HORDE) -> void:
 	# Il difetto spento: il peso torna al valore di produzione e l'orda lo rilegge.
 	SPAWNER.MORTAR_WEIGHT = peso
 	horde.restart_run()
+	# ## m17: `restart_run()` **azzera anche l'orologio** (e' la strada vera di una
+	# partita nuova), quindi qui la soglia va riaperta prima di rimisurare: senza
+	# questa riga il peso tornato a 3,0 non produrrebbe nessun mortar e il criterio
+	# sarebbe verde perche' misura zero, non perche' misura il peso.
+	_porta_oltre_il_mortar(h, horde, "_denti_quota_mortar (peso ripristinato)")
 	_porta_onda(h, horde, 1)
 	h.eq(SPAWNER.wave_weights(1)[ENEMY.MORTAR], peso,
 		"denti quota: il peso deve essere tornato a %.1f prima di uscire dalla sezione, ottenuto %.1f"

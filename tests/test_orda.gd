@@ -529,6 +529,11 @@ var _per_morso := {}
 ## ogni passo in cui un morso arriva, con `horde.touch_damage_last`: i due
 ## numeri vengono da due conti indipendenti e devono coincidere.
 var _ultimo_danno := 0.0
+## I numeri di danno arrivati allo spia **in questo passo**, in ordine. Serve a
+## `_due_fonti`: con due fonti (morso e colpo del mortar) l'ultimo numero non basta
+## piu' a dire se quello che e' arrivato e' quello che l'orda dichiara, e senza
+## questo campo un passo con due eventi sarebbe indistinguibile da uno con uno.
+var _danni_step: Array[float] = []
 
 ## Lo spia. E' **il giocatore**, non il nemico: il chiamante di `damage_player`
 ## e' `src/sim/horde.gd`, e questo file non chiama `damage_player` una volta
@@ -537,6 +542,7 @@ func _spia_damage_player(amount: float) -> bool:
 	_totale_danno += amount
 	_morsi += 1
 	_ultimo_danno = amount
+	_danni_step.append(amount)
 	_per_morso[amount] = int(_per_morso.get(amount, 0)) + 1
 	return true
 
@@ -1601,6 +1607,91 @@ func _damage_kills(h, horde: HORDE) -> void:
 			RUN.population_of(horde.wave), HORDE.MAX_ENEMIES,
 			float(passi_capienza) * DT, RUN.SPAWN_RATE])
 
+# --- 11c-bis. Le due fonti di danno al giocatore (m14) -------------------------
+#
+# ## Perche' il criterio di m7 e' diventato questo
+#
+# Fino a m13 il giocatore poteva prendere danno da **una** fonte sola, il morso,
+# e il criterio poteva scrivere una cosa sola: «il numero che lo spia riceve e' il
+# numero che l'orda dichiara in `touch_damage_last`». Con il peso del mortar a 6,0
+# (m14) la seconda fonte esiste ed e' dichiarata a sua volta: l'esplosione chiama
+# `Game.damage_player(MORTAR_BLAST_HP)` (`horde.gd::_mortar_impact`) e registra il
+# suo numero in `mortar_damage_last`.
+#
+# Quindi la domanda **non cambia**, cambia il numero delle tabelle che la
+# rispondono: ogni danno che il giocatore prende e' dichiarato da **una** tabella,
+# e sono due:
+#
+#   - il **morso**: arriva da `touch_damage_last` e vale `Enemy.touch_damage_of(specie)`;
+#   - il **colpo del mortar**: arriva al momento dell'impatto e vale `MORTAR_BLAST_HP`.
+#
+# Il criterio accetta un evento che combacia con **uno dei due** e **rifiuta** un
+# evento che non combacia con nessuno: accettare «qualsiasi numero» farebbe passare
+# sempre e non sarebbe un criterio.
+#
+# ## L'attribuzione e' ambigua **per valore**, e il criterio non la risolve: conta
+#
+# `MORTAR_BLAST_HP` e' il morso del boss: i due numeri sono lo stesso (13,7143), e
+# quando un morso di capo e un colpo cadono nello stesso passo lo spia riceve due
+# volte lo stesso valore senza poter dire quale sia stato. Non si dichiara aperto
+# perche' **l'ambiguita' e' nell'etichetta, non nel conteggio**: l'orda dichiara
+# anche *quanti* eventi ha consegnato (`touch_damage_last` al piu' uno, per il tetto
+# a intervallo, e `mortar_impacts_last` per i colpi caduti sul giocatore), quindi il
+# criterio confronta i **numeri** e ogni valore deve combaciare con uno dei due.
+# Se l'orda consegnasse un evento in piu' di quelli che dichiara, o un valore che
+# non e' di nessuna delle due tabelle, la riga va rossa.
+func _due_fonti(h, horde: HORDE, seme: int) -> void:
+	var attesi := horde.mortar_impacts_last
+	if horde.touch_damage_last > 0.0:
+		attesi += 1
+	h.eq(_danni_step.size(), attesi,
+		"seme %d: gli eventi di danno di un passo sono esattamente quelli che l'orda dichiara "
+			% seme
+			+ "(al massimo un morso, tetto a intervallo, piu' i colpi caduti sul giocatore), "
+			+ "attesi %d, ricevuti %d" % [attesi, _danni_step.size()])
+	var morsi := int(horde.touch_damage_last > 0.0)
+	var colpi := horde.mortar_impacts_last
+	for danno in _danni_step:
+		var da_morso := horde.touch_damage_last > 0.0 \
+				and is_equal_approx(danno, horde.touch_damage_last)
+		var da_colpo := is_equal_approx(danno, ENEMY.MORTAR_BLAST_HP)
+		if not da_morso and not da_colpo:
+			h.check(false,
+				"seme %d: il giocatore ha preso %.4f e quel numero non e' nessuno dei due "
+					% [seme, danno]
+					+ "dichiarati (morso %.4f, colpo del mortar %.4f): un danno senza tabella "
+						% [horde.touch_damage_last, ENEMY.MORTAR_BLAST_HP]
+					+ "non e' un danno che questo file sa spiegare")
+			continue
+		# I due numeri coincidono (13,7143), quindi il **valore** non attribuisce
+		# l'evento a una delle due fonti: lo attribuisce il **budget** che l'orda ha
+		# dichiarato in questo passo. Si consuma la fonte che ne ha ancora, e se non
+		# ne ha piu' l'evento e' in piu' di quelli dichiarati.
+		var fonte := -1
+		if da_morso and da_colpo:
+			if morsi > 0:
+				fonte = 0
+			elif colpi > 0:
+				fonte = 1
+		elif da_morso:
+			fonte = 0 if morsi > 0 else -1
+		else:
+			fonte = 1 if colpi > 0 else -1
+		if fonte == 0:
+			morsi -= 1
+		elif fonte == 1:
+			colpi -= 1
+		else:
+			h.check(false,
+				"seme %d: %.4f e' arrivato allo spia ma l'orda non lo dichiara in questo passo "
+					% [seme, danno]
+				+ "(morso dichiarato %d, colpi dichiarati %d)" % [morsi, colpi])
+	h.eq(morsi, 0,
+		"seme %d: tutti i morsi dichiarati nell'ultimo passo sono arrivati allo spia" % seme)
+	h.eq(colpi, 0,
+		"seme %d: tutti i colpi dichiarati come caduti sull'ultimo passo sono arrivati allo spia"
+			% seme)
+
 # --- 11c. L'economia del morso, misurata -------------------------------------
 
 ## Un caso di misura: dispone `pop` nemici intorno al giocatore finto, li lascia
@@ -1637,18 +1728,40 @@ func _misura_morso(h, horde: HORDE, seme: int, pop: int) -> Dictionary:
 	var morse_passo_max := 0
 	var gap_min := 1.0e9
 	var ultimo := -1
+	# ## m14: l'economia si conta **per fonte**, e i numeri vengono dalle
+	# dichiarazioni dell'orda, non dalla somma dello spia
+	#
+	# Questa sezione descrive il **morso** (cadenza, danno al secondo, sopravvivenza
+	# di chi sta fermo): con il mortar spendibile il giocatore prende anche
+	# danno dai colpi, e sommare le due fonti qui cambierebbe la domanda senza
+	# cambiare la risposta giusta. Ogni passo dichiara gia' quanto ne ha
+	# consegnato di ciascuna (`touch_damage_last`/`touch_bites_last` per il morso,
+	# `mortar_damage_last`/`mortar_impacts_last` per i colpi) e `_due_fonti` verifica
+	# che **quello che arriva al giocatore** corrisponda esattamente a quelle
+	# dichiarazioni: quindi la somma qui sotto non e' una ricostruzione del test,
+	# e' il conto di cio' che la sezione precedente ha gia' verificato passo per
+	# passo. La parte del mortar e' stampata accanto, non e' un criterio di questa
+	# sezione: il suo criterio e' in `_m13_*` (impatto, schivata, danno per colpo).
+	var morsi_morso := 0
+	var danno_morso := 0.0
+	var colpi_mortar := 0
+	var danno_mortar := 0.0
 	for s in TOUCH_STEPS:
 		var prima := _morsi
+		_danni_step.clear()
 		horde.step(DT)
 		var caduti := _morsi - prima
 		if caduti > 0:
-			h.eq(caduti, 1,
-				"seme %d: al massimo un morso che arriva per passo (tetto a intervallo)" % seme)
-			h.eq(_ultimo_danno, horde.touch_damage_last,
-				"seme %d: il danno che lo spia riceve e' quello che l'orda dichiara" % seme)
+			_due_fonti(h, horde, seme)
+		if horde.touch_damage_last > 0.0:
+			morsi_morso += horde.touch_bites_last
+			danno_morso += horde.touch_damage_last
 			if ultimo >= 0:
 				gap_min = minf(gap_min, float(s - ultimo) * DT)
 			ultimo = s
+		if horde.mortar_impacts_last > 0:
+			colpi_mortar += horde.mortar_impacts_last
+			danno_mortar += horde.mortar_damage_last * float(horde.mortar_impacts_last)
 		morse_passo_max = maxi(morse_passo_max, horde.touch_bites_last)
 		h.eq(horde.bites.size(), horde.count, "seme %d: bites allineato a count" % seme)
 		h.eq(horde.bite_timers.size(), horde.count, "seme %d: bite_timers allineato a count" % seme)
@@ -1664,15 +1777,26 @@ func _misura_morso(h, horde: HORDE, seme: int, pop: int) -> Dictionary:
 
 	var campi := {
 		"seme": seme, "pop": pop, "vivi": horde.count, "in_contatto": in_contatto,
-		"morsi": _morsi, "cadenza": float(_morsi) / delta,
-		"dps": _totale_danno / delta,
-		"per_morso": _totale_danno / maxf(1.0, float(_morsi)),
-		"sopravvivenza": PLAYER_HP_REFERENCE / maxf(0.001, _totale_danno / delta),
+		"morsi": morsi_morso, "cadenza": float(morsi_morso) / delta,
+		"dps": danno_morso / delta,
+		"per_morso": danno_morso / maxf(1.0, float(morsi_morso)),
+		"sopravvivenza": PLAYER_HP_REFERENCE / maxf(0.001, danno_morso / delta),
 		"gap_min": gap_min, "morse_passo_max": morse_passo_max,
+		# Le due fonti insieme, per la stampa: quello che il giocatore prende davvero.
+		"eventi": _morsi, "colpi_mortar": colpi_mortar,
+		"dps_mortar": danno_mortar / delta,
+		"sopravvivenza_tutte": PLAYER_HP_REFERENCE
+			/ maxf(0.001, (danno_morso + danno_mortar) / delta),
 	}
-	print("orda: morso seme %d, %d vivi: %d a portata, %.2f morsi/s, %.2f hp per morso, %.2f hp/s, %.1f s da fermo"
+	print("orda: morso seme %d, %d vivi: %d a portata, %.2f morsi/s, %.2f hp per morso, %.2f hp/s, %.1f s da fermo (solo morso)"
 		% [seme, horde.count, in_contatto, float(campi["cadenza"]),
 			float(campi["per_morso"]), float(campi["dps"]), float(campi["sopravvivenza"])])
+	# La seconda fonte, stampata e non asserita qui: `m14` ha fatto spendere il
+	# mortar, quindi chi legge i numeri del morso deve vedere anche quanti colpi ci
+	# sono stati sopra e quanto sono costati in danno.
+	print("orda: morso seme %d, anche i colpi del mortar: %d impatti, %.2f hp/s, %.1f s da fermo con tutte e due le fonti"
+		% [seme, int(campi["colpi_mortar"]), float(campi["dps_mortar"]),
+			float(campi["sopravvivenza_tutte"])])
 	print("orda: morso seme %d, morsi per specie:%s" % [seme, _riparto_morsi()])
 	return campi
 
@@ -3979,7 +4103,7 @@ const PASSI_FERMO_DENTRO := 2400
 func _mortar(h, horde: HORDE) -> void:
 	var t0 := Time.get_ticks_usec()
 	_m13_tabelle(h)
-	_m13_peso_zero(h, horde)
+	_m13_peso_fonte(h, horde)
 	var tele := ENEMY.telegraph_for(horde.body_scale)
 	var blast := ENEMY.blast_radius_for(horde.body_scale)
 	var fuga := (blast + ENEMY.TOUCH_REACH) / ENEMY.PLAYER_SPEED
@@ -4102,29 +4226,62 @@ func _quattro_specie_sicure() -> String:
 		% [QUATTRO_HP[0], QUATTRO_HP[1], QUATTRO_HP[2], QUATTRO_HP[3],
 			QUATTRO_MASS[0], QUATTRO_MASS[1], QUATTRO_MASS[2], QUATTRO_MASS[3]]
 
-func _m13_peso_zero(h, horde: HORDE) -> void:
-	h.eq(SPAWNER.MORTAR_WEIGHT, 0.0,
-		"m13: il peso del mortar e' dichiarato a 0.0 (un mortar senza cupola e' un danno "
-			+ "senza preavviso: il peso sale in un'onda separata, quando -arena ha la cupola)")
+## ## m14: il peso del mortar e' **spendibile**, e il criterio e' sulla **quota**
+##
+## Questa funzione non asserisce piu' `MORTAR_WEIGHT == 0.0`: quel numero era il
+## difetto che m14 chiude. E non asserisce `== 6.0` al suo posto, perche' un
+## criterio sul peso va rosso il giorno che il peso si ritocca **per farlo piu'
+## raro**, che e' una correzione e non un difetto. Il numero che vale e' la
+## **quota** — quanto della popolazione nasce mortar — e la banda e' dichiarata in
+## `_quota_mortar` (sezione 17), perche' li' si misura sul gioco e non sulla
+## tabella.
+##
+## Qui sotto restano le due cose che non cambiano con il numero: la voce dei pesi
+## **segue la fonte in ogni onda** (e non uno zero scritto qui dentro), e la voce
+## della tabella piatta non e' una copia rimasta indietro.
+func _m13_peso_fonte(h, horde: HORDE) -> void:
 	for w in [1, 2, 3, 4, 8, 12, 20]:
 		var pesi := SPAWNER.wave_weights(int(w))
-		h.eq(pesi.size(), 5, "m13: i pesi dell'onda %d hanno una voce per specie" % int(w))
-		h.eq(pesi[ENEMY.MORTAR], 0.0,
-			"m13: il peso del mortar sull'onda %d e' 0.0, non solo sull'onda 1" % int(w))
+		h.eq(pesi.size(), 5, "m14: i pesi dell'onda %d hanno una voce per specie" % int(w))
+		h.eq(pesi[ENEMY.MORTAR], SPAWNER.MORTAR_WEIGHT,
+			"m14: sul peso di produzione la voce del mortar sull'onda %d deve valere quello che "
+				% int(w)
+				+ "dice la fonte (%.1f), non uno zero scritto qui: ottenuto %.1f"
+					% [SPAWNER.MORTAR_WEIGHT, pesi[ENEMY.MORTAR]])
+	# La tabella piatta e' costruita **al caricamento della classe** (vedi la sua
+	# dichiarazione in `spawner.gd`), quindi non si ricostruisce da sola: senza questa
+	# riga, un peso di 6,0 qui e uno zero li' darebbero due cammini con pesi diversi e
+	# nessuno se ne accorgerebbe.
+	h.near(SPAWNER.KIND_WEIGHTS[ENEMY.MORTAR], SPAWNER.MORTAR_WEIGHT, 0.0001,
+		"m14: la voce del mortar nella tabella piatta segue la fonte (%.1f contro %.4f): una copia "
+			% [SPAWNER.MORTAR_WEIGHT, SPAWNER.KIND_WEIGHTS[ENEMY.MORTAR]]
+			+ "rimasta a zero farebbe divergere i due cammini dello spawn")
 	# ## I denti: la voce segue la **fonte**, quindi non e' uno zero scritto qui
 	var prima := SPAWNER.MORTAR_WEIGHT
 	SPAWNER.MORTAR_WEIGHT = 7.0
 	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], 7.0,
-		"denti: con il peso di fonte a 7.0 la voce dei pesi deve seguirlo, altrimenti lo zero "
+		"denti: con il peso di fonte a 7.0 la voce dei pesi deve seguirlo, altrimenti la voce "
 			+ "qui e' una copia scritta a mano")
 	SPAWNER.MORTAR_WEIGHT = prima
-	h.eq(SPAWNER.MORTAR_WEIGHT, 0.0, "denti: ripristino 1, la fonte torna a 0.0")
-	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], 0.0,
-		"denti: ripristino 2, e i pesi ricalcolati tornano a 0.0")
-	# E nel gioco vero non c'e' nessun mortar: e' l'unica cosa che garantisce che
-	# `-arena` continui a vedere le specie che ha da disegnare.
-	h.eq(horde.census()[ENEMY.MORTAR], 0,
-		"m13: nell'orda dell'onda 1 non c'e' nessun mortar, quindi il renderer non ne vede")
+	h.eq(SPAWNER.MORTAR_WEIGHT, prima,
+		"denti: ripristino 1, la fonte torna al valore di produzione (%.1f)" % prima)
+	h.eq(SPAWNER.wave_weights(3)[ENEMY.MORTAR], prima,
+		"denti: ripristino 2, e i pesi ricalcolati tornano al valore di produzione")
+	# E nel gioco vero adesso il mortar **nasce**: non dalla tabella, dal campo. Un
+	# solo riempimento non basterebbe a dichiararlo (con 25 vivi e quota 5,8% la
+	# probabilita' di zero mortar e' 0,23), quindi qui si contano i quattro semi
+	# dichiarati: 100 nascite, e la probabilita' che le quattro popolazioni non
+	# tirino nessun mortar e' **0,003**. La quota per esteso la guarda `_quota_mortar`.
+	var visti := 0
+	for s in SEMI_MISELA:
+		horde.reseed(int(s))
+		visti += horde.census()[ENEMY.MORTAR]
+	h.check(visti > 0,
+		"m14: nei quattro riempimenti dell'onda 1 (100 nascite) devono esserci dei mortar, "
+			+ "ottenuto %d: un peso spendibile che non produce niente e' un peso decorativo"
+				% visti)
+	h.check(SPAWNER.MORTAR_WEIGHT >= 0.0,
+		"m14: il peso dichiarato e' un peso (>= 0), letto %.4f" % SPAWNER.MORTAR_WEIGHT)
 
 ## ## I denti del margine, accesi e spenti nella stessa sezione
 ##
@@ -4572,12 +4729,17 @@ const DELTA_RIPRESO := 0.5
 ## campione (vedi `CAMPIONE_MISELA`), non il difetto che si vuole vedere.
 ##
 ## Il difetto che deve restare fuori e' lontanissimo: sull'onda 8 le frazioni
-## dichiarate sono `0.298 / 0.275 / 0.271 / 0.156` contro `0.50 / 0.30 / 0.17 /
-## 0.03`. Tre specie su quattro sono fuori banda da sole (runner 0.202, brute
-## 0.101, boss 0.126); **il grunt e' il caso debole** e va detto per iscritto: il
-## suo scarto e' 0.025, dentro la banda, e da solo non farebbe fallire niente.
-## Il criterio e' per specie e tutte e quattro devono stare dentro, quindi basta
-## una delle tre forti.
+## dichiarate sono `0.282 / 0.261 / 0.257 / 0.148 / 0.052` contro `0.472 / 0.283 /
+## 0.160 / 0.028 / 0.057`. Quattro specie su cinque sono fuori banda da sole
+## (runner 0.189, brute 0.097, boss 0.119); **il grunt e' il caso debole** e va
+## detto per iscritto: il suo scarto e' 0.022, dentro la banda, e da solo non
+## farebbe fallire niente. Anche il mortar ha uno scarto piccolo (0.005) e non
+## farebbe fallire niente da solo. Il criterio e' per specie e tutte e cinque
+## devono stare dentro, quindi basta una delle tre forti.
+##
+## I denominatori sono 115,1 e 106 perche' m14 ha cambiato il numero delle voci
+## non spendenti: le frazioni qui sono **ricalcolate** sulla tabella di oggi, non
+## ricordate da prima.
 const TOLERANZA_MISELA := 0.05
 
 func _miscela_respawn(h, horde: HORDE) -> void:
@@ -4592,10 +4754,11 @@ func _miscela_respawn(h, horde: HORDE) -> void:
 
 	# ## L'onda 1: cosa le e' stato cambiato, e cosa no
 	#
-	# Il peso del boss sull'onda 1 e' **0,0**; le altre tre specie valgono ancora
-	# `KIND_WEIGHTS` voce per voce. Il confronto e' voce per voce e non "la somma
-	# torna": una somma che torna con le specie sbagliate dentro e' un numero che
-	# sembra a posto e non lo e'.
+	# Il peso del boss sull'onda 1 e' **0,0**; le altre quattro specie valgono ancora
+	# `KIND_WEIGHTS` voce per voce (quindi anche il mortar, che in m13 valeva 0,0 e in
+	# m14 vale 6,0 su **entrambi** i lati). Il confronto e' voce per voce e non "la
+	# somma torna": una somma che torna con le specie sbagliate dentro e' un numero
+	# che sembra a posto e non lo e'.
 	_pesi_onda1(h)
 	# ## Le onde da 2 in poi non si toccano
 	_onde_2_e_avanti(h)
@@ -4603,6 +4766,8 @@ func _miscela_respawn(h, horde: HORDE) -> void:
 	var uno := _due_cammini(h, horde, 1)
 	_confronta_cammini(h, 1, uno[0], uno[1])
 	_zero_boss(h, 1, uno[0], uno[1])
+	# ## m14: la quota del mortar, l'unico criterio che guarda **quanto nasce**
+	_quota_mortar(h, 1, uno[0], uno[1])
 
 	# ## L'onda `ONDA_MISELA`: il criterio che ha i denti
 	_porta_onda(h, horde, ONDA_MISELA)
@@ -4612,6 +4777,10 @@ func _miscela_respawn(h, horde: HORDE) -> void:
 	# ## I denti del criterio di sopra: il difetto acceso e spento nella stessa
 	# sezione, cosi' il numero che va letto e' un numero che i denti hanno preso.
 	_denti_zero_boss(h, horde)
+	# ## m14: i denti della quota. Stessa sezione, stessa coppia di cammini: col
+	# peso tornato a 0,0 la quota deve essere 0,0000, e rimesso il peso deve
+	# risalire dentro la banda.
+	_denti_quota_mortar(h, horde)
 
 	# ## L'orda torna com'era
 	#
@@ -4726,7 +4895,7 @@ func _confronta_cammini(h, w: int, iniziale: PackedInt32Array, respawn: PackedIn
 		% [w, nr, _riga_specie(respawn), _pesi(SPAWNER.wave_weights(w)),
 			_pesi(SPAWNER.KIND_WEIGHTS)])
 
-## ## L'onda 1, voce per voce: il boss a zero e le altre tre come prima
+## ## L'onda 1, voce per voce: il boss a zero e le altre quattro come prima
 ##
 ## Il confronto e' voce per voce e non "la somma delle frazioni torna": una somma
 ## che torna con le specie sbagliate dentro e' un numero che sembra a posto e non
@@ -4757,16 +4926,20 @@ func _pesi_onda1(h) -> void:
 ## Scrivere `18.8` in un confronto `float` darebbe un numero diverso per il solo
 ## fatto di averlo scritto in `float64`: e' il motivo per cui qui non compare un
 ## numero esadecimale scritto a mano.
-## ## m13: la quinta voce e' **zero**, e perche' qui non si scrive un numero
+## ## m14: la quinta voce e' **6,0**, e perche' questo criterio non e' indebolito
 ##
-## Il peso del mortar e' `Spawner.MORTAR_WEIGHT`, che vale 0,0 in tutte le onde di
-## questo giro (vedi la sua dichiarazione in `spawner.gd`): la specie esiste ma
-## non nasce, finche' `-arena` non ha la cupola. Scrivere qui `0.0` sarebbe una
-## seconda copia del numero che mente alla prima riga cambiata di quella
-## dichiarazione, che e' la lezione di `offer_label` e delle sei copie di m9.
-## Quindi la voce e' zero **per costruzione della tabella**, e i numeri delle
-## altre quattro restano bit-identici a com'erano.
-static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 0.0])
+## La voce del mortar era `0.0` e adesso vale `MORTAR_WEIGHT`: le altre quattro
+## sono **bit-identiche** a com'erano, quindi la rampa del boss dalle onde 2 in
+## poi — cioe' la ragione per cui questo vettore e' scritto qui dentro — si
+## continua a guardare **termine per termine**, con lo stesso criterio e lo stesso
+## `==` fra due `float32`. Non e' un criterio allentato: e' la stessa struttura con
+## un termine in piu' che prima era costante a zero.
+##
+## Non si scrive qui `MORTAR_WEIGHT`: il numero puo' muoversi dentro la banda della
+## quota (vedi `_quota_mortar`) senza che questa riga vada rossa, e scriverlo qui
+## significherebbe legare il test a una scelta che la sezione 17 guarda per quello
+## che e' — quanto nasce, non quanto pesa.
+static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 6.0])
 
 func _onde_2_e_avanti(h) -> void:
 	var due := SPAWNER.wave_weights(2)
@@ -4830,6 +5003,157 @@ func _totale(a: PackedInt32Array) -> int:
 	for v in a:
 		n += v
 	return n
+
+## ## m14: la **quota** del mortar, e perche' un criterio e non un numero
+##
+## Il numero che si sceglie di guardare e' **quanto nasce mortar**, non quanto pesa:
+## il peso e' un mezzo, la quota e' il fine. E una quota e' l'unico numero che si
+## puo' muovere dentro una banda senza che il criterio dica il falso: il peso puo'
+## salire e la quota restare (se gli altri pesi salgono con lui), quindi il giorno
+## che il mortar verra' ritoccato per farlo piu' raro, questa riga resta verde se
+## la scelta e' ancora dentro la banda e va rossa se non lo e'.
+##
+## La banda e' 4,0% - 8,0% e viene dai fatti dichiarati in
+## `src/sim/spawner.gd:MORTAR_WEIGHT`: il vecchio boss a 3,0 dava ~3,0% ed era
+## troppo raro per un nemico che il giocatore deve imparare a schivare, il brute a
+## 17,0 dava ~18% ed e' troppo comune per una specie che va imparata presto. Il
+## numero di oggi, 6,0, sta dentro: 5,83% sul cammino della popolazione iniziale e
+## 5,66% su quello dei respawn (i due denominatori sono diversi perche' sull'onda 1
+## il boss vale 0,0 e nella tabella piatta vale 3,0: vedi la dichiarazione).
+##
+## Il criterio guarda **entrambi** i cammini e **non in media**: una quota media
+## nasconderebbe un cammino spento dietro l'altro generoso, ed e' esattamente il
+## difetto che questa sezione 17 chiude.
+const QUOTA_MORTAR_MIN := 0.04
+const QUOTA_MORTAR_MAX := 0.08
+
+func _quota_mortar(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Array) -> void:
+	var coppie := [
+		["popolazione iniziale", iniziale],
+		["respawn durante l'onda", respawn],
+	]
+	for coppia in coppie:
+		var nome: String = coppia[0]
+		var a: PackedInt32Array = coppia[1]
+		var n := _totale(a)
+		h.check(n >= CAMPIONE_MISELA,
+			"onda %d, %s: il campione deve valere almeno %d perche' la quota sia confrontabile, ottenuto %d"
+				% [w, nome, CAMPIONE_MISELA, n])
+		var quota := float(a[ENEMY.MORTAR]) / maxf(1.0, float(n))
+		h.check(quota >= QUOTA_MORTAR_MIN and quota <= QUOTA_MORTAR_MAX,
+			"onda %d, %s: la quota di mortar deve stare fra %.1f%% e %.1f%%, ottenuta %.4f (%d su %d). "
+				% [w, nome, 100.0 * QUOTA_MORTAR_MIN, 100.0 * QUOTA_MORTAR_MAX, quota,
+					a[ENEMY.MORTAR], n]
+				+ "Sotto il 4% il nemico che il giocatore deve imparare a schivare non si impara, "
+				+ "sopra l'8% un'onda di mortar non e' piu' un'onda mista")
+		# La stessa scelta scritta sulla tabella, cosi' il numero della banda non
+		# galleggia senza un riferimento: se la tabella esce dalla banda, il gioco
+		# non puo' starci dentro.
+		h.check(_quota_dichiarata(SPAWNER.wave_weights(w)) >= QUOTA_MORTAR_MIN
+				and _quota_dichiarata(SPAWNER.wave_weights(w)) <= QUOTA_MORTAR_MAX,
+			"onda %d: la quota dichiarata sui pesi di quell'onda e' %.4f e deve stare nella stessa banda %.1f%%-%.1f%%"
+				% [w, _quota_dichiarata(SPAWNER.wave_weights(w)),
+					100.0 * QUOTA_MORTAR_MIN, 100.0 * QUOTA_MORTAR_MAX])
+	var qp := _quota_dichiarata(SPAWNER.KIND_WEIGHTS)
+	h.check(qp >= QUOTA_MORTAR_MIN and qp <= QUOTA_MORTAR_MAX,
+		"tabella piatta: la quota dichiarata e' %.4f e deve stare nella stessa banda %.1f%%-%.1f%%"
+			% [qp, 100.0 * QUOTA_MORTAR_MIN, 100.0 * QUOTA_MORTAR_MAX])
+	print("orda: quota mortar onda %d -- iniziale %d/%d = %.4f | respawn %d/%d = %.4f "
+		% [w, iniziale[ENEMY.MORTAR], _totale(iniziale),
+			float(iniziale[ENEMY.MORTAR]) / maxf(1.0, float(_totale(iniziale))),
+			respawn[ENEMY.MORTAR], _totale(respawn),
+			float(respawn[ENEMY.MORTAR]) / maxf(1.0, float(_totale(respawn)))]
+		+ "| banda %.2f-%.2f, dichiarata iniziale %.4f e piatta %.4f"
+			% [QUOTA_MORTAR_MIN, QUOTA_MORTAR_MAX,
+				_quota_dichiarata(SPAWNER.wave_weights(w)), qp])
+
+## La quota dichiarata su una tabella di pesi: voce del mortar sopra la somma.
+func _quota_dichiarata(w: PackedFloat32Array) -> float:
+	var somma := 0.0
+	for v in w:
+		somma += v
+	return w[ENEMY.MORTAR] / maxf(0.000001, somma)
+
+## ## m14: con il peso a 0,0 la quota e' **zero**, e qui il numero e' il conteggio
+##
+## Come `_zero_boss` e per la stessa ragione: `0,0` e' l'unico numero che si puo'
+## pretendere esatto, perche' con una voce a zero `pick_kind_with` non puo' restituire
+## quella specie in nessun caso, e un criterio sulla frazione dentro banda sarebbe
+## verde con il difetto dentro.
+func _zero_quota_mortar(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Array) -> void:
+	for coppia in [["popolazione iniziale", iniziale], ["respawn durante l'onda", respawn]]:
+		var nome: String = coppia[0]
+		var a: PackedInt32Array = coppia[1]
+		var n := _totale(a)
+		h.check(n >= CAMPIONE_MISELA,
+			"onda %d, %s: il campione deve valere almeno %d perche' lo zero sia confrontabile, ottenuto %d"
+				% [w, nome, CAMPIONE_MISELA, n])
+		h.eq(a[ENEMY.MORTAR], 0,
+			"onda %d, %s: con il peso tornato a 0.0 la quota deve essere 0,0000, ottenuto %d su %d"
+				% [w, nome, a[ENEMY.MORTAR], n])
+
+## ## m14: i denti della quota, accesi e spenti nella stessa sezione
+##
+## Il difetto di m13 era il peso a `0,0`: qui il peso torna a `0,0`, si rimisurano
+## gli stessi due cammini con gli stessi semi e gli stessi 4800 campioni, e si
+## asserisce lo **zero esatto**; poi il peso torna al valore di produzione e la
+## quota deve risalire dentro la banda. I due numeri sono stampati **prima e
+## dopo**: chi legge non deve fidarsi della parola "zero" e puo' fare la differenza
+## da solo.
+##
+## Il peso si rimette **sulla fonte** (`Spawner.MORTAR_WEIGHT`) e non sulla tabella
+## piatta: `KIND_WEIGHTS` e' costruita al caricamento della classe e non segue la
+## fonte (vedi la sua dichiarazione in `spawner.gd`), quindi scrivere li' sarebbe
+## mettere mano a una copia. E il ripristino non e' una cortesia e' un criterio:
+## senza `restart_run()` l'orda continuerebbe a pesare con i pesi spenti e
+## qualunque sezione dopo misurerebbe una partita che nessuno sta giocando.
+func _denti_quota_mortar(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var respawn_precedente := horde.auto_respawn
+	horde.auto_respawn = true
+	horde.population = RUN.population_of(1)
+	var peso := SPAWNER.MORTAR_WEIGHT
+
+	# Il difetto acceso: il peso torna a 0,0, come in m13.
+	SPAWNER.MORTAR_WEIGHT = 0.0
+	horde.restart_run()
+	_porta_onda(h, horde, 1)
+	h.eq(SPAWNER.wave_weights(1)[ENEMY.MORTAR], 0.0,
+		"denti quota: il peso del mortar deve essere tornato a 0.0, altrimenti la misura qui "
+			+ "sotto non dimostra niente, ottenuto %.1f" % SPAWNER.wave_weights(1)[ENEMY.MORTAR])
+	var spento := _due_cammini(h, horde, 1)
+	_zero_quota_mortar(h, 1, spento[0], spento[1])
+	print("orda: denti quota, peso a 0.0 -- iniziale %d/%d = %.4f | respawn %d/%d = %.4f"
+		% [spento[0][ENEMY.MORTAR], _totale(spento[0]),
+			float(spento[0][ENEMY.MORTAR]) / maxf(1.0, float(_totale(spento[0]))),
+			spento[1][ENEMY.MORTAR], _totale(spento[1]),
+			float(spento[1][ENEMY.MORTAR]) / maxf(1.0, float(_totale(spento[1])))])
+
+	# Il difetto spento: il peso torna al valore di produzione e l'orda lo rilegge.
+	SPAWNER.MORTAR_WEIGHT = peso
+	horde.restart_run()
+	_porta_onda(h, horde, 1)
+	h.eq(SPAWNER.wave_weights(1)[ENEMY.MORTAR], peso,
+		"denti quota: il peso deve essere tornato a %.1f prima di uscire dalla sezione, ottenuto %.1f"
+			% [peso, SPAWNER.wave_weights(1)[ENEMY.MORTAR]])
+	var acceso := _due_cammini(h, horde, 1)
+	_quota_mortar(h, 1, acceso[0], acceso[1])
+	h.check(acceso[0][ENEMY.MORTAR] > 0 and acceso[1][ENEMY.MORTAR] > 0,
+		"denti quota: spento il difetto, i due cammini devono tirare fuori mortar, ottenuto "
+			+ "%d su %d e %d su %d: se restassero a zero il criterio qui sopra sarebbe verde "
+				% [acceso[0][ENEMY.MORTAR], _totale(acceso[0]),
+					acceso[1][ENEMY.MORTAR], _totale(acceso[1])]
+			+ "senza guardare niente")
+	h.eq(SPAWNER.MORTAR_WEIGHT, peso,
+		"denti quota: e la costante di sorgente deve essere tornata a %.1f, non solo i pesi ricalcolati" % peso)
+
+	# L'orda torna com'era, come fanno le due sezioni precedenti.
+	horde.auto_respawn = respawn_precedente
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	h.eq(horde.wave, 1, "m14: i denti della quota rimettono l'orda all'onda 1")
+	print("orda: denti quota, sezione in %d us, peso tornato a %.1f e orda rimessa all'onda 1"
+		% [Time.get_ticks_usec() - t0, peso])
 
 ## ## I denti: il difetto acceso nella stessa sezione e poi spento
 ##

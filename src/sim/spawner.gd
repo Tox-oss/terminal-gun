@@ -50,20 +50,53 @@ const PLACEMENT_TRIES := 8
 ## `static var` e non `const`: su Godot 4.7 un array compattato non e' un'espressione
 ## costante (vedi src/sim/enemy.gd, stessa cosa).
 ##
-## ## m13: la quinta voce, e perche' il suo peso e' **0,0** in ogni onda
+## ## m14: la quinta voce, e perche' il suo peso e' **6,0**
 ##
-## Il mortar esiste — la specie, le tabelle, il comportamento, il canale sul
-## contratto — ma **non nasce**, e il peso e' dichiarato a zero qui dentro per
-##che' non e' un ripiego:
+## In m13 il peso era dichiarato a **0,0** in ogni onda, e non era un ripiego:
+## e non e' un ripiego: **un mortar senza cupola e' un danno senza preavviso**.
+## `-orda` sa *quando* il colpo cade, ma chi lo disegna e' `-arena`, e finche' la
+## cupola non c'e' il giocatore vede un danno improvviso senza sapere da dove
+## arriva: peggio di non avere il nemico.
 ##
-## **Un mortar senza cupola e' un danno senza preavviso**, cioe' esattamente il
-## difetto che il gioco ha appena chiuso girato al contrario. `-orda` sa *quando*
-## il colpo cade, ma chi lo disegna e' `-arena`, e finche' la cupola non c'e' il
-## giocatore vede un danno improvviso senza sapere da dove arriva: peggio di non
-## avere il nemico. Quindi il peso sale **dopo**, in un'onda separata, quando la
-## cupola e' sul tavolo — e quel giorno e' una riga sola, questa.
-static var MORTAR_WEIGHT := 0.0
+## La ragione e' caduta perche' la cupola c'e' (m13-w3, `-arena`:
+## `mortar_renderer.gd`) e la simulazione e' chiusa (`00a3677`): la riga che era
+## in attesa sale. Il **perche'** di allora resta scritto qui, perche' un peso a
+## 6,0 senza il suo perche' sembrerebbe inventato fra sei mesi.
+##
+## ## Perche' 6,0 e non un altro numero: tre fatti gia' misurati
+##
+## | fatto misurato | valore |
+## |---|---|
+## | il boss a peso 3,0 dava in onda 1, su 4 semi | 2,58% - 2,83% - 3,42% - 3,25% -> **~3,0%** |
+## | il brute a peso 17,0 dava in onda 1 | **~18%** |
+## | il mortar: 65 HP contro i 900 del boss, telegrrafo 0,8293 s, margine di fuga 2,00 | debole e **schivabile** |
+##
+## Quindi **piu' comune del boss** (e' piu' debole, ed e' l'unico nemico che il
+## giocatore deve imparare a schivare, quindi va imparato dall'onda 1) e
+## **chiaramente piu' raro del brute**, perche' al pari farebbe di "peso basso" una
+## parola vuota. `6,0 / 103,0 = 5,83%` di onda 1: il denominatore e' 103 e non 106
+## perche' il boss vale 0,0 su quell'onda (`50 + 30 + 17 + 0 + 6`), quindi circa
+## il doppio della quota del vecchio boss e un terzo del brute. Sul cammino dei
+## respawn la tabella piatta somma 106 (`KIND_WEIGHTS` col boss al suo 3,0) e la
+## quota diventa **5,66%**: due cifre, la stessa scelta su due denominatori.
+##
+## ## Il criterio e' sulla **quota**, non su questo numero
+##
+## `tests/test_orda.gd` non asserisce `MORTAR_WEIGHT == 6.0`: il giorno che il
+## numero si ritocca per fare il mortar piu' raro, un criterio scritto sul peso va
+## rosso e non dice niente. Asserisce che la quota stia fra **4,0% e 8,0%** su
+## **entrambi** i cammini (popolazione iniziale e respawn) e su piu' semi: il peso
+## puo' muoversi dentro quella banda senza rompere niente, e se ne esce la porta lo
+## dice. I denti sono nella stessa sezione: con il peso tornato a 0,0 la quota
+## deve tornare a **0,0000** e poi risalire.
+static var MORTAR_WEIGHT := 6.0
 
+## La quinta voce e' **la stessa riga della fonte**, non una copia scritta qui: e'
+## `MORTAR_WEIGHT` letto al caricamento della classe (`PackedFloat32Array` non e' un
+## espressione costante, vedi `enemy.gd`, quindi questa tabella non si ricostruisce
+## da sola se un test muove la fonte). Per questo i denti del peso del mortar si
+## mettono **fuori** da questa tabella e il criterio che la guarda la legge al peso
+## di produzione.
 static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0, MORTAR_WEIGHT])
 
 ## ## Il boss esce dall'onda 1
@@ -306,13 +339,13 @@ static func wave_weights(wave: int) -> PackedFloat32Array:
 	# esattamente quello che vuol dire -- sull'onda 1 il boss e' a zero, da `w = 2`
 	# in poi la rampa e' quella di prima, termine per termine.
 	out[E.BOSS] = BOSS_WAVE1 if n <= 0.0 else KIND_WEIGHTS[E.BOSS] + minf(27.0, 2.0 * n)
-	# ## m13: il mortar a zero in **tutte** le onde, non solo sull'onda 1
+	# ## m14: il mortar segue `MORTAR_WEIGHT` in **ogni** onda, come prima seguiva lo zero
 	#
-	# `BOSS_WAVE1` e' una soglia per onda e il mortar no: lui e' a zero in ogni
-	# onda di questo giro, perche' la ragione non e' «non e' ancora l'onda sua» ma
-	# «manca la cupola che lo rende schivabile» (vedi `MORTAR_WEIGHT`). Per
-	# questo non e' dentro la rampa e non e' derivato da `n`: e' la costante
-	# dichiarata, e il criterio ne verifica tutte le onde campionate.
+	# `BOSS_WAVE1` e' una soglia per onda e il mortar no: lui e' la costante
+	# dichiarata e non e' derivato da `n`, quindi la stessa voce su tutte le onde.
+	# Era 0,0 in ogni onda perche' mancava la cupola che lo rende schivabile; la
+	# cupola c'e' e il numero e' 6,0, quindi **le onde >= 2 cambiano nella quinta
+	# voce** e il criterio di `tests/test_orda.gd` lo guarda voce per voce.
 	out[E.MORTAR] = MORTAR_WEIGHT
 	return out
 

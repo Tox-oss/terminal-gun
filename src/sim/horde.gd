@@ -324,6 +324,16 @@ var mortar_shot_count: int = 0
 ## `touch_damage_last`: serve a un test per guardare l'economia del colpo e non
 ## e' un secondo posto dove il danno e' scritto.
 var mortar_damage_last: float = 0.0
+## **Quanti** colpi sono caduti sul giocatore nell'ultimo passo, non solo quanto
+## danno. `mortar_damage_last` dice il valore: due colpi che cadono nello stesso
+## passo danno lo stesso numero e il campo non distingue l'uno dall'altro, quindi
+## un test che volesse contare gli eventi ricevuti dal giocatore avrebbe un numero
+## che non torna.
+##
+## Serve a `tests/test_orda.gd` per il criterio delle due fonti di danno (morso e
+## colpo): e' l'unico posto dove "quanti eventi sono arrivati" e' un numero
+## dichiarato e non una ricostruzione del test.
+var mortar_impacts_last: int = 0
 ## Secondi alla prossima ricarica per nemico. Parallelo come gli altri: entra
 ## negli stessi quattro punti (`_resize_arrays`, `_apply_spawn`, `_kill`,
 ## `restart_run`).
@@ -1043,6 +1053,7 @@ func _apply_bites(delta: float) -> void:
 ## Un passo del mortar: i colpi in volo scendono e le richieste diventano colpi.
 func _mortar_step(delta: float, focus: Vector3, ha_giocatore: bool) -> void:
 	mortar_damage_last = 0.0
+	mortar_impacts_last = 0
 	var i := 0
 	while i < mortar_shot_count:
 		var s := mortar_shots[i]
@@ -1100,6 +1111,7 @@ func _mortar_impact(i: int, focus: Vector3, ha_giocatore: bool) -> void:
 		if game != null:
 			game.damage_player(E.MORTAR_BLAST_HP)
 			mortar_damage_last = E.MORTAR_BLAST_HP
+			mortar_impacts_last += 1
 	# scambio con l'ultimo: niente cancellazione dal vettore, niente `resize`.
 	var last := mortar_shot_count - 1
 	if i != last:
@@ -1435,6 +1447,7 @@ func restart_run() -> void:
 	# capienza resta scaldato, quindi non si alloca niente.
 	mortar_shot_count = 0
 	mortar_damage_last = 0.0
+	mortar_impacts_last = 0
 	# **Prima** di `_populate`: il ripopolamento legge `_rng`, quindi il seme va
 	# rimescolato prima e non dopo (dopo sarebbe un no-op silenzioso, e un
 	# no-op silenzioso è un difetto che la porta non vede).

@@ -1275,7 +1275,7 @@ Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
 | **mortar: simulazione, contratto, criteri** | **chiuso** | `00a3677`, §1.14-diciassettesima |
 | **mortar: la cupola rossa** | **chiusa**, 8/8 | `-arena`, m13-w3 |
 | **bug dell'utente, metà proiettile** (`ENEMY_RADIUS` 0,55) | **chiusa**, 8/8, banda 0,0000 | `-gameplay`, m14-a |
-| peso del mortar `0 → basso` | **prossima onda** | `-orda` |
+| peso del mortar `0 → basso` | **chiuso**: `6,0`, quota **5,75%** misurata | `-orda`, m14-b |
 | danno per specie | **deciso: dopo il mortar** | utente, 2026-10-15 |
 | vista isometrica 2D | **mai fatta**, fuori strada critica | `-arena` |
 | vista nemici: modelli distinti per specie | **deliberazione dell'utente**, 5 GLB dall'artista | `-arena` quando arrivano |
@@ -1294,7 +1294,8 @@ criterio.
 | m13-w2 | `-orda` ∥ `-arena` | quinta specie e criterio a cinque specie | 8/8 | **verde** |
 | m13-w3 | `-arena` | **la cupola rossa del mortar** | 8/8 | **verde** |
 | m14-a | `-gameplay` | **l'involucro del proiettile**, l'altra metà del bug segnalato | 8/8 | **verde** |
-| m14-b | `-orda` ∥ `-arena` | peso del mortar `0 → basso` | — | **prossima onda** |
+| m14-b | `-orda` | peso del mortar `0 → 6,0`, quota 5,75% | 8/8 | **verde** |
+| m15 | `-orda` | **taratura del danno per specie**, sui numeri nuovi | — | **prossima onda** |
 
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
@@ -3126,6 +3127,68 @@ stessa direzione: `dist_min` al primo montaggio da **0,247000 a 0,109180 m**, e 
 > corpo.** `ENEMY_RADIUS` era la copia incrociata di `SIZE_FACTOR` di otto milestone prima, e nessuna
 > porta la guardava perché passava: un proiettile che centrava 0,55 m di un corpo da 4,76 m non
 > falliva nessuna asserzione, semplicemente nessuno chiedeva se quella era la distanza giusta.
+
+### 1.14-ventesima **m14-b: il mortar è in gioco. E ha cambiato chi ti uccide**
+
+`Spawner.MORTAR_WEIGHT` da `0,0` a **`6,0`**. La catena di §1.14-diciassettesima è chiusa: simulazione
+(`00a3677`), cupola (m13-w3), peso (qui). Un mortar spento era un difetto disicurezza; adesso è un
+nemico che il giocatore incontra dall'onda 1.
+
+**Il numero non è un gusto, viene da tre fatti già misurati:**
+
+| ancoraggio | misura |
+|---|---|
+| il boss a peso 3,0, in onda 1, su 4 semi | 2,58% · 2,83% · 3,42% · 3,25% → **~3,0%** |
+| il brute a peso 17,0 | ~18% |
+| il mortar: HP 65 contro 900, telegrafo 0,8293 s, margine di fuga 2,00 | debole e **schivabile** |
+
+Più comune del boss (è più debole ed è l'unico nemico che va imparato a schivare), nettamente più
+raro del brute. `6,0 / 103,0 = 5,8%` di onda 1.
+
+**Il criterio asserisce la QUOTA, non il peso**, che è la differenza che conta: banda
+`4,0% ≤ quota ≤ 8,0%`, entrambi i cammini, più semi. Misurata **0,0575 / 0,0575**. Denti: peso a
+`0,0` → **`0,0000 / 0,0000`**, poi ripristinato → 0,0575. Se il criterio asserisse `== 6.0`, il giorno
+che si ritocca il peso diventerebbe rosso senza dire niente; così il numero può muoversi dentro la
+banda e la banda resta la promessa.
+
+**La rampa del boss è ancora guardata termine per termine.** `wave_weights(2)` ora è
+`[47.5, 30.0, 18.8, 5.0, 6.0]` e resta asserito **bit per bit**: è la stessa struttura con un termine
+in più che prima era costante a zero. Il boss è ancora **0/4800** in onda 1, su entrambi i cammini.
+
+**Un criterio che ha visto cambiare una cosa che nessuno aveva scritta.** m7 asseriva «un danno = una
+tabella, e la stessa fonte». Con il mortar spendibile l'esplosione passa da `Game.damage_player`
+mentre `touch_damage_last` registra solo i morsi, e il criterio è andato rosso con
+`atteso 0.0, ottenuto 13.7142859`. Non si è abbassato: **è passato da una fonte a due fonti
+dichiarate** (morso via `touch_damage_last`, colpo via `MORTAR_BLAST_HP`) e **rifiuta ancora un
+danno che non combacia con nessuna delle due**, risolto sul **conteggio** degli eventi e non con una
+soglia, perché `MORTAR_BLAST_HP` e il morso del boss valgono entrambi 13,7143 ed è un'ambiguità
+reale. Serviva un canale che `-orda` non aveva: `horde.mortar_impacts_last`, quante esplosioni sono
+**cadute addosso**, dichiarato in `horde.gd` e resettato in `_mortar_step` e in `restart_run()`.
+
+## E IL NUMERO CHE CAMBIA IL GIOCO, non solo il codice
+
+```
+m8 scena vera: giocatore fermo al centro, 200 vivi: morto dopo 9.02 s   (era 28.28 s)
+```
+
+E le due fonti separate, a 200 nemici:
+
+| fonte | danno | da fermo |
+|---|---|---|
+| solo morso | 11,63 hp/s | 8,6 s |
+| solo colpi del mortar | **65,83 hp/s** (144 impatti) | **1,3 s** |
+| tutte e due | — | 1,3 s |
+
+**Il mortar fa 5,7 volte il danno al secondo del morso.** Non è un nemico che si aggiunge ai
+margini: è diventato la minaccia dominante, e il tempo di morte da fermo è passato da 28,28 s a
+**9,02 s** con due rimedi di fila (m14-a e questo). Questo è esattamente il motivo per cui il piano
+metteva la **taratura del danno per specie dopo** il mortar e non prima: *«il mortar cambia chi ti
+uccide»* era una previsione, e la misura le dà 5,7×.
+
+**Una riga che resta aperta e non è un fallimento:** al seme 4242 i colpi del mortar sono
+**0 impatti in 30 s**. Su quel seme il mortar non ha mai raggiunto il giocatore fermo al centro. Non
+è un criterio rotto — è il motivo per cui la misura va su più semi, e il perché di non fidarsi di un
+solo campione.
 
 ### Le onde della milestone 3
 

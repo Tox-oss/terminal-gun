@@ -680,6 +680,46 @@ func random_spawn_point() -> Vector3:
 	_missing("random_spawn_point", "terminal-gun-orda")
 	return Vector3.ZERO
 
+## -arena. **`true` se il giocatore PUO' vedere il punto a terra `punto`.**
+##
+## Questa e' la primitiva della regola di nascita di m12 (piano sez. 1.14-ventiquarta): i
+## nemici nascono **fuori dallo schermo**, e «fuori dallo schermo» **non e' un raggio**.
+## `probe_off_screen.gd` l'ha misurato sulla scena vera: la camera e' inclinata di
+## `BACK = 24,00 m`, quindi l'impronta a terra e' un **trapezio** e la distanza fuori
+## schermo va da **18,70 m** (lato corto, al muro) a **66,06 m** (lato lungo) nello
+## stesso punto. Con un raggio costante, lo stesso nemico arriverebbe in 1,37 s da una
+## parte e in 4,84 s dall'altra: **3,47 s di differenza decisa solo dalla direzione**.
+##
+## ## Perche' e' un canale e non un numero
+##
+## `-orda` non puo' sapere dove guarda la camera: la camera e' di `-arena`. Scrivere i
+## numeri della camera dentro `spawner.gd` creerebbe una **seconda fonte** dei numeri di
+## `-arena`, che e' esattamente il difetto che il piano vieta (sez. 5.3, canale
+## `enemy_body_scale`: «il contratto era stato portato a 99,0 apposta prima di montare, e
+## il default dichiarato dice 3,4»). Qui la domanda passa **da chi possiede la camera**,
+## come `damage_player` passa da chi possiede il giocatore.
+##
+## ## Il neutro e' `true`, e la scelta e' dichiarata perche' e' controintuitiva
+##
+## Non registrata, questa funzione dice che il punto e' **visibile**. Il chiamante e' una
+## regola di nascita, quindi `true` vuol dire «questo punto si vede, scartalo»: il
+## risultato e' **zero nemici**, che si vede subito. Il neutro opposto (`false`, «non si
+## vede») lascerebbe passare **tutti** i candidati e i nemici comparirebbero a schermo
+## **senza che nessuna porta se ne accorga**. Meglio il rumore che il silenzio.
+##
+## ## Il punto va passato a `y = 0`
+##
+## La funzione guarda **il terreno**, non un volume: il nemico e' un corpo e la sua base
+## e' a terra. Per questo accetta un `Vector3` e usa solo `x` e `z`, e un caller che
+## passa `y = 5` non ottiene un punto diverso: altrimenti la stessa posizione darebbe
+## due risposte diverse a seconda di chi l'ha scritta.
+func ground_visible(punto: Vector3) -> bool:
+	var c := _live("ground_visible")
+	if c.is_valid():
+		return c.call(Vector3(punto.x, 0.0, punto.z)) as bool
+	_missing("ground_visible", "terminal-gun-arena")
+	return true
+
 ## -orda/-gameplay. Posizione corrente del giocatore.
 func player_position() -> Vector3:
 	var c := _live("player_position")

@@ -3544,6 +3544,102 @@ nemici arrivano: tararli sulla regola vecchia significa tararli su numeri che no
 riferimento a 600 s (26,42 s) e' gia' vecchio di tre onde e diventa inutile quando la mappa raddoppia
 il raggio: **la curva si rimisura sulla mappa nuova, non su quella vecchia**.
 
+### 1.14-ventiquintesima **m13: il mortar diventa Adware, e il raggio si porta dietro la fermata**
+
+Tre decisioni dell'utente (2026-10-15) e **l'ordine di lavoro che ha imposto**: *prima la mappa,
+poi il mortar, poi il resto*.
+
+**1. Il mortar si chiama `Adware`.** Questo **chiude** una voce del bestiario invece di aprirla: la
+specie «Adware — sciami caotici che generano disturbo visivo» che l'utente aveva elencato **e' il
+mortar**. Quindi le **nuove** specie passano da cinque a **quattro**: `Trojan`, `Wurm`,
+`Ransomware`, `Rootkit`. Non e' un dettaglio di nome: cambia il conto di cosa manca.
+
+**2. Se vieni colpito si apre una finestra di dimensione casuale, chiusa con la `X`.** Il numero che
+rende il problema misurabile e' gia' noto: a 200 nemici il giocatore **accetta 2,67 colpi al secondo**
+(`m16 criterio 1`, misurato), cioe' **2,67 finestre al secondo** se non c'e' un tetto.
+
+**La terza domanda — «la finestra ruba l'input?» — e' risultata non posta.** Il gioco oggi **non usa
+il mouse**:
+
+```
+player.gd:4   ## WASD, camera-relativo, chiuso nell'arena, e l'arma che spara da sola.
+```
+
+movimento WASD e frecce, dash `SPACE`/`SHIFT`, **fuoco automatico**. Quindi la finestra **non puo'
+rubare niente**, perche' non c'e' niente da rubare: il movimento resta del giocatore e **si puo'
+continuare a sbattere contro i nemici per sbaglio**, che e' la condizione posta dall'utente. Il mouse
+entra nel gioco **per la prima volta** con questa finestra.
+
+**Deciso dall'utente:**
+
+| | |
+|---|---|
+| **ferma il gioco?** | **no**. E' un'ostruzione **parziale** della visuale, ed e' **parte della difficolta'** |
+| **quante aperte insieme?** | **massimo 3** |
+| **rubba l'input?** | **no**, e non puo': il gioco non ha input di mouse. Movimento e fuoco sono intatti |
+| **si chiude sola?** | **no**: si chiude solo con la `X`. Il tetto di 3 tienebounded il disordine, non il tempo |
+
+Con 2,67 colpi accettati al secondo e un tetto di 3, la regola che ne segue e' una sola e va
+dichiarata: **un colpo che arriva con 3 finestre gia' aperte non ne apre una quarta**. Senza questa
+riga il tetto non esiste, perche' il tetto si applica a uno stato che nessuno controlla.
+
+**La leva se sono poco divertenti e' gia' scritta:** `MORTAR_WEIGHT` in `spawner.gd`, oggi `3,0` con
+quota misurata **0,0302** e banda **0,02-0,04**. Ridurlo e' una decisione di play-test, non un
+anticipo: il numero non si tocca prima che l'utente abbia provato la finestra.
+
+**Il costo vero e' un altro**, e va detto prima che si scopra giocando: il giocatore dovrebbe
+**muovere il mouse e premere** durante un combattimento in cui il fuoco e' automatico e le mani sono
+sulla tastiera. Se il costo di attenzione supera il fastidio, la finestra non e' una difficolta' ma
+una seccatura, e allora si toglie.
+
+**3. Il raggio del colpo scende del 15% — e si porta dietro la fermata.** `mortar_blast_m` da
+**5,2100 m** a **4,4285 m**. Ma `engage_for` in `enemy.gd:437` e' **`3.0 x blast_radius_for()`**: la
+stessa identita' che il piano dichiara. Quindi la fermata scende da **15,6300 m** a **13,2855 m** —
+**e questo non e' stato chiesto**.
+
+| | prima | dopo il −15% |
+|---|---|---|
+| raggio del colpo | 5,2100 m | **4,4285 m** |
+| fermata `3 x blast` | 15,6300 m | **13,2855 m** |
+| fuga minima `blast + TOUCH_REACH` | 5,6600 m | **4,8785 m** |
+| margine di fuga contro `PLAYER_SPEED x telegraph = 11,32 m` | **2,00** | **2,32** |
+
+Il margine di fuga **migliora**, quindi il mortar resta schivabile e con piu' margine: il −15% e'
+accettato per quello che dice. Ma la **fermata si e' accorciata da sola**, e accorciare la fermata
+vuol dire che il mortar ti raggiunge **prima** — cioe' piu' pressione, che e' l'opposto di «lo
+rendo piu' facile da schivare».
+
+**Deciso dall'utente: staccare la fermata dal raggio.** `engage_for` smette di essere `3 x blast` e
+diventa **numero proprio: 15,6300 m**, cioe' il valore **misurato e giocato** di oggi. Non e' una
+derivazione e **non si spaccia per una**: la ragione per cui resta `15,63 m` e' che e' il numero su
+cui il gioco e' stato tarato fino a ieri, e la matematica della fuga **non lo determina** (lì compare
+`blast + TOUCH_REACH`, non la fermata). Un numero che si spaccia per dedotto quando non e' dedotto e'
+un numero che si difende da solo in un secondo; questo si difende da solo adesso.
+
+#### Il criterio che muore, e quello che lo sostituisce
+
+`enemy.gd` dichiara l'identita' **`engage - corpo_disegnato - blast == blast + TOUCH_REACH`**, e un
+criterio la asserisce. Quell'identita' e' vera **solo perche'** `engage = 3 x blast`, cioe' solo per
+la coincidenza `blast = corpo + TOUCH_REACH`. Il giorno che il raggio scende e la fermata no, e'
+**falsa**, e un criterio che asserisce un'identita' rotta mente con teeth.
+
+Il sostituto deve avere **denti diversi**, e li ha: adesso la fermata e' un numero **dichiarato**, e
+la cosa da asserire non e' piu' che i tre numeri combacino fra loro, ma che **raggio e fermata non
+siano piu' legati**:
+
+1. avvelenato `blast_radius_for()` a un valore assurdo, la **fermata non si muove**;
+2. cambiata la **fermata**, il raggio **non si muove**;
+3. entrambi i numeri sono **quelli dichiarati**, letti dalla fonte e non da una copia.
+
+Se non si fa cosi', il primo `-orda` che riapre `3 x blast` per pigrizia riaccoppia i due numeri e
+nessuna porta se ne accorge.
+
+#### L'ordine che l'utente ha imposto, e perche' e' quello giusto
+
+**Prima la mappa, poi il mortar.** Il mortar si tarava sulla mappa, e tararlo su una mappa che sta
+per cambiare vuol dire misurarlo due volte. Il −15% e' un **rapporto** e sopravvive al cambio di
+raggio; quello che va rimisurato dopo e' la **fermata** e il **margine di fuga** sulla mappa nuova.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

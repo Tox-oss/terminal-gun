@@ -908,10 +908,30 @@ func _top_up(delta: float) -> void:
 ## si puo' pilotare a mano anche su un'orda senza partita.
 const SPAWN_RATE_FALLBACK := 8.0
 
+## Un nemico che entra a meta' partita, e **la sua specie viene dalla stessa
+## tabella dei pesi dell'onda** con cui e' nato il primo nemico dell'onda: la
+## funzione e' `_pick_kind()`, cioe' il cammino di `_populate`.
+##
+## ## Il difetto che questa riga chiude, in numeri
+##
+## Qui sotto c'era `Spawner.pick_kind(_rng)`, cioe' `Spawner.KIND_WEIGHTS`
+## **piatto**: il respawn ignorava l'onda. Due cammini, due miscele per la stessa
+## onda, e quindi metà regola metà tabella in campo.
+##
+## I numeri, sull'onda 8 (`Spawner.wave_weights(8)` = `[32.5, 30, 29.6, 17]`,
+## runner che scende e boss che sale, contro `KIND_WEIGHTS` = `[50, 30, 17, 3]`):
+## il respawn tirava **3.0% di boss** dove l'onda ne chiede **15.6%**, e **50.0%
+## di runner** dove ne chiede **29.8%** — il campo si riempiva di corpi fragili
+## proprio sulle onde in cui la scala vuole corpi grossi.
+##
+## **Sull'onda 1 la riga non sposta niente**, e va detto perche': `wave_weights(1)`
+## e' `KIND_WEIGHTS` voce per voce, quindi li' i due cammini erano gia' lo stesso
+## numero e questa correzione e' invisibile. Anche l'impronta `m11-bis`, che e'
+## un numero di onda 1, non si muove. Il difetto era vivo dalle onde 2 in giu'.
 func _spawn_one() -> void:
 	if count >= MAX_ENEMIES:
 		return
-	var kind := Spawner.pick_kind(_rng)
+	var kind := _pick_kind()
 	var pos := Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP,
 		obstacles, _spawn_skin())
 	count += 1

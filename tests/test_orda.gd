@@ -122,6 +122,7 @@ const POOL = preload("res://src/sim/object_pool.gd")
 const ENEMY = preload("res://src/sim/enemy.gd")
 const FLOW = preload("res://src/sim/flow_field.gd")
 const OBST = preload("res://src/sim/obstacles.gd")
+const SPAWNER = preload("res://src/sim/spawner.gd")
 
 ## ## I NUMERI DI m10: la geometria e la risoluzione del campo
 ##
@@ -249,6 +250,10 @@ func _process(_delta: float) -> bool:
 	return true
 
 func _run() -> void:
+	# Il costo di tutto il file: `TEST_TIMEOUT_MS` e' 120 s e l'utente ha deciso
+	# che non si alza, quindi il numero che dice se c'e' margine va stampato a ogni
+	# lancio e non misurato a mano quando serve.
+	var t0 := Time.get_ticks_msec()
 	var h := H.new()
 	var horde: HORDE = _horde
 	if horde == null:
@@ -300,6 +305,12 @@ func _run() -> void:
 	# potuto assorbire una delle tre scale che questa sezione prova.
 	_scala_nei_file(h)
 	_scala_popolazione(h, horde)
+	# I due cammini della miscela. Sta **qui**, dopo `_scala_popolazione` (che
+	# rimette a posto `population` e `population_scale`) e prima di `_scena_vera`
+	# (che monta la scena vera e registra l'orda e il giocatori del gioco): la
+	# sezione deve parlare con l'orda isolata, e deve poter cambiare onda e
+	# riempire il campo senza che nessuno dopo trovi l'orda com'era.
+	_miscela_respawn(h, horde)
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
 	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
@@ -310,6 +321,8 @@ func _run() -> void:
 	# esiste solo dopo che la scena vera e' entrata nell'albero.
 	_ostacoli_contratto(h, horde)
 
+	print("orda: tutto il file in %d ms, ne restano %d dei 120000 del test" \
+		% [Time.get_ticks_msec() - t0, 120000 - (Time.get_ticks_msec() - t0)])
 	quit(h.finish("orda"))
 
 # --- 11. Il morso: il nemico chiama Game.damage_player (milestone 7) ----------
@@ -3340,6 +3353,63 @@ func _scala_corpo_dichiarata() -> float:
 			return float(t.split("=")[1].strip_edges())
 	return -1.0
 
+## Il fattore di calibrazione del corpo, avvelenato sul contratto e poi ripreso.
+##
+## Il numero dichiarato in `src/core/contracts.gd` e `SIZE_FACTOR` di `-arena` sono
+## **lo stesso valore**, quindi «il contratto dice 3,4» non distingue «-arena ha
+## scritto 3,4» da «3,4 e' il default e nessuno ha scritto niente»: era la frase
+## che questo file stampava fino al 2026-10-15, ed e' un numero che il prossimo
+## avrebbe letto come se fosse vivo. Il canale si dimostra **movendo il numero**:
+## prima si avvelena il contratto, poi si monta un'altra orda e si guarda che cosa
+## legge, e alla fine si rimette tutto indietro con due asserzioni.
+const SCALA_AVVELENATA := 99.0
+
+## Monta un'orda di prova, legge il fattore che ha preso, e la rimette giu'.
+func _sonda_corpo(h, nome: String) -> float:
+	var sonda := HORDE.new()
+	sonda.name = nome
+	# `seed = 0` fa `_reroll()`: la sonda non deve sporcare il flusso di numeri
+	# casuali di nessuno, quindi ha un seme suo e dichiarato.
+	sonda.seed = 4242
+	root.add_child(sonda)
+	var letta := sonda.body_scale
+	h.eq(sonda.body_scale_source, "contratto",
+		"%s dichiara body_scale_source 'contratto': un fallback qui sarebbe silenzioso" % nome)
+	root.remove_child(sonda)
+	sonda.queue_free()
+	return letta
+
+## Il fattore **arriva** dal contratto. Ritorna il numero che l'orda sonda ha
+## letto con `SCALA_AVVELENATA` in campo, cosi' la stampa sotto lo riporta invece
+## di dedurlo da una uguaglianza che non distingue niente.
+func _scala_corpo_avvelenata(h, horde: HORDE) -> float:
+	var game := _game()
+	if game == null:
+		h.fail("il contratto non c'e': la prova che il fattore arriva non puo' girare")
+		return -1.0
+	var prima := float(game.get("enemy_body_scale"))
+	game.set("enemy_body_scale", SCALA_AVVELENATA)
+	h.eq(float(game.get("enemy_body_scale")), SCALA_AVVELENATA,
+		"avvelenamento: sul contratto c'e' il numero di prova, %.1f" % SCALA_AVVELENATA)
+	var avvelenata := _sonda_corpo(h, "OrdaSonda")
+	h.eq(avvelenata, SCALA_AVVELENATA,
+		"una orda montata col contratto avvelenato legge %.1f: il fattore **arriva** "
+			% SCALA_AVVELENATA
+			+ "da SIZE_FACTOR e non e' una copia del %.4f dichiarato" % prima)
+	game.set("enemy_body_scale", prima)
+	# Ripristino, due asserzioni e sono due fatti: il numero e' tornato indietro, e
+	# il canale **rifunziona** dopo che e' stato avvelenato (una terza orda montata
+	# adesso deve rivedere il numero vero, altrimenti «ripristinato» e' una parola).
+	h.eq(float(game.get("enemy_body_scale")), prima,
+		"ripristino 1: il contratto torna al numero che aveva, %.4f" % prima)
+	var dopo := _sonda_corpo(h, "OrdaSondaDopo")
+	h.eq(dopo, prima,
+		"ripristino 2: un'altra orda montata dopo il ripristino rivede %.4f" % prima)
+	# La sonda ha registrato se' e tre API sul contratto: tornano all'orda del test,
+	# altrimenti le sezioni dopo leggerebbero la sonda e non l'orda.
+	_ripristina(h, horde)
+	return avvelenata
+
 func _banda_morso(h, horde: HORDE) -> void:
 	var t0 := Time.get_ticks_usec()
 	var scala := _scala_corpo()
@@ -3356,6 +3426,12 @@ func _banda_morso(h, horde: HORDE) -> void:
 		"l'orda prende il fattore del corpo dal contratto, non da una copia sua")
 	h.eq(horde.body_scale_source, "contratto",
 		"e lo dichiara: senza questa riga un fallback silenzioso passerebbe")
+	# ## E il numero arriva davvero, non per uguaglianza
+	#
+	# `scala` e `dichiarata` sono lo stesso valore, quindi le tre righe qui sopra
+	# passerebbero anche se il contratto non fosse mai stato scritto da `-arena`.
+	# L'avvelenamento e' la prova che distingue i due casi, e sta subito qui sotto.
+	var avvelenata := _scala_corpo_avvelenata(h, horde)
 	h.eq(horde.bite_range_of(ENEMY.BOSS), ENEMY.bite_range_of(ENEMY.BOSS, horde.body_scale),
 		"la portata che l'orda espone e' quella che calcola la simulazione")
 	# ## E il numero non e' scritto a mano da questa parte
@@ -3425,9 +3501,13 @@ func _banda_morso(h, horde: HORDE) -> void:
 			"criterio 1b: con RADIUS x 7 (%.2f m invece di %.2f) la banda e' ancora zero: il rimedio non e' stato 'ingrandire RADIUS'"
 				% [ragione7, ENEMY.RADIUS[k]])
 
-	print("orda: m11-quarta, fattore corpo %.4f (contratto, default dichiarato %.4f%s)"
-		% [scala, dichiarata, ("" if absf(scala - dichiarata) > 0.000001
-			else ", ANCORA IL DEFAULT: -arena non lo registra")])
+	print("orda: m11-quarta, fattore corpo %.4f (default dichiarato sul contratto %.4f, "
+			% [scala, dichiarata]
+		+ "e NON e' una copia: il test avvelena il contratto a %.1f e l'orda montata "
+			% SCALA_AVVELENATA
+		+ "in quel momento legge %.1f, poi il contratto torna a %.4f e un'altra orda "
+			% [avvelenata, scala]
+		+ "lo rivede: il canale da SIZE_FACTOR funziona nei due sensi)")
 	print("orda: m11-quarta, morsi entro / banda per specie (scala %.2f):%s"
 		% [scala, righe])
 	print("orda: m11-quarta: sezione intera in %d us, 8 passi di un passo, "
@@ -3514,3 +3594,248 @@ func _morde_a_distanza(h, horde: HORDE, kind: int, distanza: float) -> bool:
 	var morso := horde.touch_bites_last == 1
 	horde.auto_respawn = respawn
 	return morso
+
+# --- 17. I due cammini della miscela: popolazione iniziale e respawn -------------
+#
+# ## Il difetto, come stava, in due righe di `src/sim/horde.gd`
+#
+# | cammino | chi sceglie la specie | da dove prende i pesi |
+# |---|---|---|
+# | popolazione iniziale dell'onda | `_populate` -> `_pick_kind()` | `Spawner.wave_weights(run.wave)` |
+# | **respawn durante l'onda** | `_spawn_one` -> `Spawner.pick_kind(_rng)` | `Spawner.KIND_WEIGHTS` piatto |
+#
+# La miscela che entrava nel campo a meta' partita era quindi mezza regola: la
+# scala delle onde governava il primo nemico dell'onda e non gli altri.
+#
+# ## Perche' qui si misurano due onde, e non solo l'onda 1
+#
+# **Sull'onda 1 i due cammini erano gia' lo stesso numero.** `wave_weights(1)` e'
+# `KIND_WEIGHTS` voce per voce (`[50, 30, 17, 3]`), perche' l'unico termine che
+# dipende dall'onda e' `n = wave - 1` e a `wave = 1` vale zero: nessuna delle
+# due funzioni puo' tirare fuori un numero diverso dall'altra.
+#
+# Quindi un criterio scritto **solo sull'onda 1 non puo' andare rosso** con il
+# difetto ancora dentro: sarebbe verde per costruzione, cioe' nato verde, che e'
+# la classe di difetto che questa sezione esiste per chiudere. Per questo l'onda 1
+# si misura e si stampa (e' la misura richiesta, ed e' quella che dimostra che la
+# correzione **non sposta niente li'**), e il criterio con i denti sta sull'onda
+# `ONDA_MISELA = 8`, dove `wave_weights(8)` e' `[32.5, 30, 29.6, 17]` e la tabella
+# piatta e' `[50, 30, 17, 3]`: due numeri diversi, e la frazione dei respawn
+# descrive uno solo dei due.
+#
+# I denti sono provati, non dichiarati: con `_spawn_one` rimesso sulla chiamata
+# diretta a `Spawner.pick_kind(_rng)` questa sezione va **rossa** sull'onda 8
+# (le frazioni scendono a quelle piatte) e resta **verde** sull'onda 1, che e'
+# esattamente la coppia di comportamenti che la distingue dal difetto.
+
+## I semi della misura, dichiarati. Quattro, e nessuno e' "quello di prima".
+const SEMI_MISELA := [4242, 7311, 20260912, 13579]
+
+## Quanti campioni per cammino si chiedono, e **perche' questo numero e non un
+## altro**.
+##
+## Il confronto e' fra **due campioni**, quindi la differenza fra le due frazioni
+## ha deviazione `sqrt(p(1-p)/n + p(1-p)/n)`: con `n = 4800` e `p = 0.3` vale
+## **0.011**, e la banda di `TOLERANZA_MISELA` (0.05) sta a **4.5 deviazioni**,
+## dove il falso rosso e' ~1e-5 per specie. Con i 75 campioni di un giro solo la
+## banda sarebbe a 0.6 deviazioni, cioe' il criterio andrebbe rosso **a caso** due
+## volte su tre: e' la ragione per cui il campione e' dichiarato e non trovato.
+const CAMPIONE_MISELA := 4800
+
+## L'onda con i denti. Vedi la dichiarazione della sezione: alla 1 i due pesi sono
+## lo stesso identico numero, quindi la' il criterio sarebbe nato verde.
+const ONDA_MISELA := 8
+
+## Il passo del riempimento. `Run.SPAWN_RATE` e' 8/s e con `DT = 1/60` un
+## riempimento da 200 nemici ci mette **25 s**: qui si misura **quale specie
+## sceglie lo spawn**, non quanto camminano i nemici, quindi il passo e' piu'
+## grosso e la sezione costa secondi invece di minuti. Il codice di `_top_up` e' lo
+## stesso in ogni caso: e' lo stesso credito, lo stesso `int()` e lo stesso tetto.
+const DELTA_RIPRESO := 0.5
+
+## La banda della frazione, **0.05 assoluta**, e la ragione e' il rumore del
+## campione (vedi `CAMPIONE_MISELA`), non il difetto che si vuole vedere.
+##
+## Il difetto che deve restare fuori e' lontanissimo: sull'onda 8 le frazioni
+## dichiarate sono `0.298 / 0.275 / 0.271 / 0.156` contro `0.50 / 0.30 / 0.17 /
+## 0.03`. Tre specie su quattro sono fuori banda da sole (runner 0.202, brute
+## 0.101, boss 0.126); **il grunt e' il caso debole** e va detto per iscritto: il
+## suo scarto e' 0.025, dentro la banda, e da solo non farebbe fallire niente.
+## Il criterio e' per specie e tutte e quattro devono stare dentro, quindi basta
+## una delle tre forti.
+const TOLERANZA_MISELA := 0.05
+
+func _miscela_respawn(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var respawn_precedente := horde.auto_respawn
+	horde.auto_respawn = true
+	# L'onda 1 per la via dichiarata: dalla barra a zero di `run.gd`, non scritta a
+	# mano. `_popolazioni_scala` (sezione 15) chiude l'onda allo stesso modo.
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	_porta_onda(h, horde, 1)
+
+	# ## L'onda 1: la misura richiesta, e il fatto per cui resta verde comunque
+	var uno := _due_cammini(h, horde, 1)
+	var piatte := SPAWNER.KIND_WEIGHTS
+	var dell_onda := SPAWNER.wave_weights(1)
+	var stesse := true
+	for k in ENEMY.KIND_COUNT:
+		if absf(piatte[k] - dell_onda[k]) > 0.000001:
+			stesse = false
+	h.check(stesse,
+		"sull'onda 1 wave_weights(1) e' KIND_WEIGHTS voce per voce (%s): i due cammini "
+			% _pesi(dell_onda)
+			+ "sono lo stesso numero, quindi qui il criterio non puo' distinguere nulla "
+			+ "ed e' per questo che la misesta' e' sull'onda %d" % ONDA_MISELA)
+	_confronta_cammini(h, 1, uno[0], uno[1])
+
+	# ## L'onda `ONDA_MISELA`: il criterio che ha i denti
+	_porta_onda(h, horde, ONDA_MISELA)
+	var otto := _due_cammini(h, horde, ONDA_MISELA)
+	_confronta_cammini(h, ONDA_MISELA, otto[0], otto[1])
+
+	# ## L'orda torna com'era
+	#
+	# La sezione ha cambiato onda, riempimenti e semi: senza questa riga la
+	# `_scena_vera` monterebbe la scena vera sopra un'orda a meta' riempimento
+	# dell'onda 8, e un test che misura il mondo vero misurerebbe una distrazione
+	# creata da questo file.
+	horde.auto_respawn = respawn_precedente
+	horde.population = RUN.population_of(1)
+	horde.restart_run()
+	h.eq(horde.wave, 1, "m11-ter/quinta: la sezione rimette l'orda all'onda 1")
+	h.eq(horde.count, horde.population, "e alla popolazione della curva")
+	print("orda: miscela, sezione intera in %d us, %d semi x 2 cammini x 2 onde, "
+			% [Time.get_ticks_usec() - t0, SEMI_MISELA.size()]
+		+ "banda %.2f, campione %d per cammino" % [TOLERANZA_MISELA, CAMPIONE_MISELA])
+
+## Porta l'orda sull'onda `w` dalla strada vera del gioco: la barra a zero e
+## `wave_cleared()`. Scrivere `run.wave` a mano sarebbe un'altra misura: qui i
+## pesi li ricalcola `_wave_tick`, che e' il posto in cui il gioco li cambia.
+func _porta_onda(h, horde: HORDE, w: int) -> void:
+	var guardie := 0
+	while horde.run.wave < w and guardie < 40:
+		horde.run.wave_killed = horde.run.wave_total
+		horde.step(DT)
+		guardie += 1
+	h.eq(horde.run.wave, w,
+		"l'orda e' arrivata all'onda %d dalla strada del gioco (barra a zero)" % w)
+	h.eq(horde.wave, w, "onda %d: il campo pubblico `wave` e' allineato a `run.wave`" % w)
+	h.eq(horde.population, RUN.population_of(w),
+		"onda %d: la popolazione e' quella dichiarata dalla curva" % w)
+
+## I due cammini, con l'orda **gia'** sull'onda in cui si trova. Ritorna i due
+## conteggi per specie: `[popolazione iniziale, respawn]`.
+##
+## Il numero di riempimenti non e' dichiarato a caso: viene da `CAMPIONE_MISELA`
+## diviso per i semi e per la popolazione dell'onda, cosi' la banda di 0.05 resta
+## a 4.5 deviazioni anche sull'onda 1, dove la popolazione e' 25 e un giro solo non
+## direbbe niente.
+func _due_cammini(h, horde: HORDE, w: int) -> Array:
+	var iniziale := _zero_specie()
+	var respawn := _zero_specie()
+	var giri := maxi(1, int(ceil(float(CAMPIONE_MISELA)
+		/ (float(SEMI_MISELA.size()) * float(horde.population)))))
+	for s in SEMI_MISELA:
+		var per_seme_iniziale := _zero_specie()
+		var per_seme_respawn := _zero_specie()
+		for g in giri:
+			# ## Cammino A, la popolazione iniziale: `_populate` -> `_pick_kind()`
+			#
+			# `reseed` e' l'unica API pubblica che chiama `_populate` senza
+			# cambiare la partita, e il seme e' `s + g * 7919` perche' ripetere lo
+			# stesso seme darebbe lo stesso numero: un campione deve essere un
+			# campione, non la stessa riga quattro volte.
+			horde.reseed(int(s) + g * 7919)
+			var a := _conta_specie(horde)
+			for k in ENEMY.KIND_COUNT:
+				iniziale[k] += a[k]
+				per_seme_iniziale[k] += a[k]
+		for g in giri:
+			# ## Cammino B, i respawn: `_top_up` -> `_spawn_one`
+			while horde.count > 0:
+				horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+			# Uccidere tutta la popolazione porta la barra dell'onda a zero (ogni
+			# morte chiama `run.register_kill()`), e senza questa riga l'onda
+			# salirebbe **a meta' riempimento**: i due cammini misurerebbero due
+			# onde diverse e il confronto non significherebbe niente. E' la stessa
+			# mossa di `_misura_morso`, che blocca l'onda a 1 per lo stesso motivo.
+			horde.run.wave_killed = 0
+			var passi := 0
+			while horde.count < horde.population and passi < 400:
+				horde.step(DELTA_RIPRESO)
+				passi += 1
+			h.eq(horde.count, horde.population,
+				"onda %d seme %d giro %d: il campo si e' riempito fino a `population` (%d in %d passi)"
+					% [w, int(s), g, horde.count, passi])
+			h.eq(horde.run.wave, w,
+				"onda %d seme %d giro %d: l'onda non e' scivolata mentre si riempiva"
+					% [w, int(s), g])
+			var b := _conta_specie(horde)
+			for k in ENEMY.KIND_COUNT:
+				respawn[k] += b[k]
+				per_seme_respawn[k] += b[k]
+		print("orda: miscela onda %d seme %d (%d giri per cammino) -- iniziale:%s | respawn:%s"
+			% [w, int(s), giri, _riga_specie(per_seme_iniziale), _riga_specie(per_seme_respawn)])
+	return [iniziale, respawn]
+
+## Il criterio: la frazione di specie dei **respawn** deve coincidere con quella
+## della **popolazione iniziale della stessa onda**, entro `TOLERANZA_MISELA`.
+## Per specie, e non in media: in media un peso sbagliato su una specie si
+## nasconderebbe dietro le altre tre che tornano.
+func _confronta_cammini(h, w: int, iniziale: PackedInt32Array, respawn: PackedInt32Array) -> void:
+	var ni := 0
+	for v in iniziale:
+		ni += v
+	var nr := 0
+	for v in respawn:
+		nr += v
+	h.check(ni > 0 and nr > 0,
+		"onda %d: i due campioni non sono vuoti (%d dalla popolazione iniziale, %d dai respawn)"
+			% [w, ni, nr])
+	for k in ENEMY.KIND_COUNT:
+		var fi := float(iniziale[k]) / maxf(1.0, float(ni))
+		var fr := float(respawn[k]) / maxf(1.0, float(nr))
+		h.near(fr, fi, TOLERANZA_MISELA,
+			"onda %d, %s: la frazione dei respawn (%.3f su %d respawn) deve coincidere con "
+				% [w, ENEMY.KIND_NAMES[k], fr, nr]
+				+ "quella della popolazione iniziale della stessa onda (%.3f su %d) entro %.2f: "
+					% [fi, ni, TOLERANZA_MISELA]
+				+ "i due cammini dello spawn pesano le stesse cose")
+	print("orda: miscela onda %d, iniziale (n=%d):%s" % [w, ni, _riga_specie(iniziale)])
+	print("orda: miscela onda %d, respawn   (n=%d):%s | pesi dell'onda:%s | pesi piatti:%s"
+		% [w, nr, _riga_specie(respawn), _pesi(SPAWNER.wave_weights(w)),
+			_pesi(SPAWNER.KIND_WEIGHTS)])
+
+func _zero_specie() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(ENEMY.KIND_COUNT)
+	return out
+
+## Quante volte ogni specie nel campo **adesso**.
+func _conta_specie(horde: HORDE) -> PackedInt32Array:
+	var out := _zero_specie()
+	for i in horde.count:
+		if horde.kinds[i] >= 0 and horde.kinds[i] < ENEMY.KIND_COUNT:
+			out[horde.kinds[i]] += 1
+	return out
+
+## `nome 3/25=0.120` per ogni specie, con il totale come denominatore dichiarato:
+## una frazione senza il numero che le sta sotto non e' confrontabile con niente.
+func _riga_specie(a: PackedInt32Array) -> String:
+	var totale := 0
+	for v in a:
+		totale += v
+	var testo := ""
+	for k in ENEMY.KIND_COUNT:
+		testo += " %s %d/%d=%.3f" % [ENEMY.KIND_NAMES[k], a[k], totale,
+			float(a[k]) / maxf(1.0, float(totale))]
+	return testo
+
+## I pesi di una tabella, per la stampa: `runner 32.5 grunt 30.0 ...`.
+func _pesi(w: PackedFloat32Array) -> String:
+	var testo := ""
+	for k in w.size():
+		testo += " %s %.1f" % [ENEMY.KIND_NAMES[k], w[k]]
+	return testo

@@ -2740,6 +2740,44 @@ insieme non lascia sapere quale delle due ha fatto il lavoro.
 `.opencode/agents/**` è fuori dal mio scope di scrittura per costruzione. La riga che manca è un
 `allow` per `godot *` sul file di `-orda`, e senza quella `-orda` continua a poter solo leggere.
 
+### 1.14-sedesima **I due cammini sono uno: e «uno su sei» era falso**
+
+`_spawn_one()` passa ora da `_pick_kind()` come `_populate()` già faceva. La miscela dell'onda vale
+sui due cammini, e il criterio in `tests/test_orda.gd` lo guarda **dove guardava solo l'avvio**: la
+frazione per specie sui due cammini, quattro semi, `n = 4800` per cammino, banda **0,05**.
+
+| onda | pesi dell'onda | pesi piatti | i due cammini coincidono |
+|---|---|---|---|
+| **1** | runner 50,0 · grunt 30,0 · brute 17,0 · **boss 3,0** | 50,0 · 30,0 · 17,0 · **3,0** | **sì**: le due tabelle sono **identiche** |
+| **8** | runner 32,5 · grunt 30,0 · brute 29,6 · **boss 17,0** | 50,0 · 30,0 · 17,0 · **3,0** | **sì**, dopo la correzione |
+
+**La conseguenza più importante è che sull'onda 1 non è successo niente, ed è la cosa giusta.**
+Le due tabelle coincidevano, quindi unire i cammini **non cambia l'apertura**: l'impronta `m11-bis`
+resta `(0.988370, -0.074845, 0.132371) colpi=28 uccisi=9 xp=27.000 livello=3 vivi=24` in
+`test_arena.gd` e `test_gameplay.gd`, e quelle due foglie **non hanno dovuto toccare niente**. Avevo
+dichiarato in partenza che l'impronta si sarebbe mossa: era una previsione prudente, e la misura dice
+che era sbagliata, perché la previsione ignorava che sull'onda 1 i pesi non differiscono.
+
+Dove il lavoro **morde** è dall'onda 2 in poi, ed è misurato: l'onda 1 si chiude in **3594 passi
+(59,90 s)** e al confine si contano **249** uccisioni, contro **3587 passi (59,78 s)** e **250** prima.
+Piccolo, e proprio per questo va dichiarato invece di lasciato passare.
+
+### RITIRO: «il boss, pur essendo uno su sei» — era falso
+
+L'ho scritto io in §1.14-quattordicesima, e la misura lo smentisce. Il boss **non è uno su sei**: è
+il **3,0%** delle nascite dell'onda 1, `145/4800` sul cammino iniziale e `143/4800` sui respawn.
+
+**Perché allora dominate la presenza ai morsi.** Non perché siano tanti, ma perché **durano**: il boss
+insegue a **1,7 m/s**, il più lento dei quattro di gran lunga (6,6 / 4,0 / 2,3 / 1,7), con **6,91 m**
+di portata e **13,71 hp** a morso. Uno che nasce resta dentro la partita a lungo e quindi compare in
+molti dei campioni di presenza. **Quindi la leva non è «tanti boss», è «un boss che non va via»**, e
+questo è un altro numero, che nessuno ha ancora misurato e che non va dato per vero.
+
+**Che cosa resta vero di §1.14-quattordicesima.** Il boss uccide in **3 semi su 3** a 6 nemici, e resta
+il candidato numero uno della leva dell'apertura. Ma «togli il boss dall'onda 1» ora ha una forma
+precisa e una difficoltà precisa: **non basta azzerare il peso a 0**, perché al 3,0% si arriva togliendolo
+da una tabella che è anche la tabella piatta dei respawn su tutte le onde.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

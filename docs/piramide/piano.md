@@ -3479,11 +3479,33 @@ su quel layout fisso, quindi vanno **riderivati per seme**.
 
 #### Tre cose che la decisione 2 rende necessarie e che nessuno ha ancora misurato
 
-1. **«Fuori dallo schermo» e' una regione, non un numero.** Il `41,6 m` dichiarati sono il caso
-   peggiore del giocatore **al muro**: la camera vede molto da un lato e poco dall'altro, quindi un
-   raggio costante nasconderebbe i nemici su meta' dello schermo. La regola giusta e' **fuori
-   dall'impronta a terra del frustum**, e quel numero va **misurato**, non dichiarato — cambia con la
-   posizione del giocatore e con l'angolo della camera.
+1. **«Fuori dallo schermo» e' una regione, non un numero — MISURATO, `probe_off_screen.gd`.**
+   La camera e' **inclinata** di `BACK = 24,00 m` (misurato su `HEIGHT = 34,00`, i due combaciano con
+   `arena_camera.gd`), quindi l'impronta a terra e' un **trapezio** e la distanza fuori schermo varia
+   con la direzione:
+
+   | posizione | base fuori schermo | cima fuori schermo (corpo boss 6,46 m) | **differenza di TEMPO** |
+   |---|---|---|---|
+   | centro | 21,01 .. 60,84 m | 20,64 .. 47,82 m | **2,92 s** |
+   | muro in asse | 18,70 .. 66,06 m | 15,73 .. 57,94 m | **3,47 s** |
+   | muro in diagonale | 21,36 .. 65,57 m | 18,40 .. 52,73 m | **3,24 s** |
+   | meta' | 21,01 .. 60,84 m | 20,64 .. 47,82 m | **2,92 s** |
+
+   Il `41,6 m` dichiarati erano una **stima geometrica**: la cima reale minima e' **15,73 m**, cioe'
+   2,6 volte meno.
+
+   **Il punto, che non e' quello che sembrava:** un raggio costante **non** farebbe mai comparire un
+   nemico a schermo — basta `>= 15,73 m` e sta sempre oltre. Quello che romperebbe e' **il tempo**: lo
+   stesso nemico arriverebbe in **1,37 s** da una parte e in **4,84 s** dall'altra, cioe' **3,47 s di
+   differenza decisa solo dalla direzione**. La regola di nascita e' quindi **una regione** (la stessa
+   distanza di avvicinamento in ogni direzione), non un raggio. L'ho scritto al contrario nella prima
+   stesura della sonda e la misura me l'ha smentito.
+
+   Il controllo con risposta nota e' passato: **centro e meta' non clampati danno lo stesso identico
+   numero** (60,84 m), quindi la misura e' deterministica. Eccezione dichiarata: i 27 dischi sono alti
+   3,9 m e possono **nascondere** un punto a terra, quindi il raggio vero e' **minore** di quello
+   stampato. Il numero vale per il raggio dichiarato oggi e va **rimisurato** quando la camera cambia
+   con la mappa 4x.
 2. **Il flow field cambia mestiere.** Esiste per instradare 200 nemici **attraverso** l'arena verso un
    punto. Con la nascita radiale gli enemy sono **gia' vicini**: il campo serve ancora per aggirare gli
    ostacoli — che adesso sono **apribili** — o diventa lavoro sprecato. Si decide con una misura.

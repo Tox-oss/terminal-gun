@@ -1259,6 +1259,41 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
+**Stato al 2026-10-15, sommario.** `GATE: 8/8` e `PERM: 15/15` misurati dal vertice su `00a3677`.
+Milestone chiuse: **da m1 a m10**. **m11 aperta**, e dentro m11:
+
+| pezzo di m11 | stato | dove |
+|---|---|---|
+| determinismo della scena reale | **chiuso** | `bdc3e3b`, §1.14-bis/ter |
+| banda del morso a zero | **chiuso** | `c171c81`, §1.14-nona |
+| morso **sul contatto**, non da timer | **chiuso** | `90d9b9a`, §1.14-ottavadecima |
+| canale audio del giocatore e dell'arma | **chiuso** | `19e4d07`, `3e204e3` |
+| canale `enemy_body_scale` | **chiuso** | `d018bf9` |
+| miscela di specie unita sui due cammini | **chiuso** | `b49260a`, §1.14-sedesima |
+| boss fuori dall'onda 1 | **chiuso** | `8efa8c0` |
+| **600 s a 6 nemici** | **misurati** | `bf0e4fc`, §1.14-settadecima |
+| **mortar: simulazione, contratto, criteri** | **chiuso** | `00a3677`, §1.14-diciassettesima |
+| **mortar: la cupola rossa** | **PENDENTE, prossima onda** | `-arena` |
+| peso del mortar `0 → basso` | **dopo la cupola** | `-orda` |
+| danno per specie | **deciso: dopo il mortar** | utente, 2026-10-15 |
+| vista isometrica 2D | **mai fatta**, fuori strada critica | `-arena` |
+| vista nemici: modelli distinti per specie | **deliberazione dell'utente**, 5 GLB dall'artista | `-arena` quando arrivano |
+| **l'editor ha riscritto la scena e mangiato `seed = 4242`** | **chiuso**: ripristinato, causa diagnosticata, **regola scritta** | §1.14-diciottesima |
+
+**Onde della milestone 11, in ordine.** Nessuna salta la verifica finale, e **una porta rossa non si
+committa**: `7/8` ha bloccato un commit per un intero giorno finché `-ui` non ha corretto un suo
+criterio.
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| m11-bis | `-orda` | `sopra`, determinismo della scena reale | 8/8 | **verde** |
+| m11-ter | vertice | sonda a 600 s, attributo «chi uccide» | 8/8 | **verde** |
+| m11-quarta | `-orda` | morso sul contatto | 8/8 | **verde** |
+| m13-w1 | `-ui` | leak audio, poi pool su giocatore e arma | 8/8 | **verde** |
+| m13-w2 | `-orda` ∥ `-arena` | quinta specie e criterio a cinque specie | 8/8 | **verde** |
+| m13-w3 | `-arena` | **la cupola rossa del mortar** | — | **PENDENTE** |
+| m13-w4 | `-orda` | peso del mortar `0 → basso` | — | dopo w3 |
+
 | onda | agenti | esito | gate | stato |
 |---|---|---|---|---|
 | w0 | vertice | Godot 4.7.2 + Blender 5.2.2 installati, `tools/env.sh` scritto, `git init` + LFS su `*.glb`/`*.wav`/`*.ogg`, identità git impostata **localmente** (`bisco <bisco@localhost>`: non c'era nessuna, né locale né globale) | — | **verde** |
@@ -2882,6 +2917,125 @@ sezione lo riattiva. **Dichiarato aperto**, non dato per chiuso.
 
 **I 600 s.** Il numero di ieri **non regge più** e va rilanciato: era 600,02 s a sei nemici con un
 morso che non era quello disegnato.
+
+### 1.14-diciassettesima **Il mortar: quinta specie, e perché il suo peso è 0**
+
+Decisione dell'utente, 2026-10-15, testuale: *«in caso riusciamo a dare un attacco ranged ad uno dei
+mostri? entro un certo range si ferma, spara come un mortaio, viene segnalato con una cupola rossa dove
+atterra il colpo dando la possibilità di schivare al giocatore»*. E le due decisioni che vengono fuori:
+**dall'onda 1 con peso basso**, e **il danno per specie dopo il mortar**, non prima.
+
+**Il numero che decide se il mortar è giusto ha due lati, ed entrambi gli estremi sono sbagliati:**
+
+```
+13,65 m/s x mortar_telegraph_s >= mortar_blast_m + TOUCH_REACH (0,45)
+```
+
+sotto, il colpo **non è schivabile** ed è un delitto; sopra, **non costa niente** ed è un regalo.
+
+| | misurato |
+|---|---|
+| `mortar_telegraph_s` | **0,8293 s** (49,8 passi) |
+| `mortar_blast_m` | **5,2100 m** |
+| margine | **2,00** sulla fuga minima di 0,4147 s: `13,65 × 0,4147 = 5,66 ≥ 5,21 + 0,45` |
+| ricarica / fermata / danno | 2,1381 s / 10,4200 m / 13,71 hp |
+| tabella | HP 65,0 · velocità 2,9 · raggio 1,40 · massa 3,2 · knockback 0,70 · tinta ciano |
+
+**I due criteri, entrambi con denti, e il secondo è quello che rende la misura non comoda:**
+
+- **schivi**: fuori di 5,26 m dal punto di caduta, **0,0000 hp in 50 passi**
+- **non è gratis**: fermo dentro, **109,71 hp in 954 passi**, 8 colpi caduti, **0 violazioni su 954** —
+  il danno arriva **solo all'impatto**, non a ogni frame
+
+**Il canale è chiuso come si deve**, cioè avvelenato: contratto a `99,0 s` e `−7,0 m`, l'orda montata
+in quel momento scrive `0,8293 / 5,2100`, ripristino verificato quattro volte.
+
+**Perché il peso è `0.0` in ogni onda, e non è un ripiego.** Un mortar senza cupola è **un danno
+senza preavviso**: è il difetto di §1.14-ottavadecima girato al contrario, cioè quello che
+l'utente ha segnalato e che è stato chiuso. Il peso sale **dopo** che `-arena` avrà la cupola, e in
+un'onda separata.
+
+**L'ordine che la catena di Consegna impone, e che è stato rispettato:**
+
+| # | chi | cosa | stato |
+|---|---|---|---|
+| 1 | vertice | due campi di contratto congelati: `mortar_telegraph_s`, `mortar_blast_m` | fatto, `00a3677` |
+| 2 | vertice | interfaccia verso `-arena` congelata: `horde.mortar_shots` come `PackedVector3Array` di `(x, z, secondi)` e `horde.mortar_shot_count` | fatto, `00a3677` |
+| 3 | `-orda` | quinta voce in ogni tabella, comportamento, canale, criteri | fatto, `00a3677` |
+| 4 | `-arena` | criterio delle cinque specie, con il pilotaggio del peso **fatto dal test** | fatto, `00a3677` |
+| 5 | **`-arena`** | **la cupola rossa** | **PENDENTE** |
+| 6 | `-orda` | peso del mortar `0 → basso` | dopo il 5 |
+
+**Il peso non sale prima del 5 per una ragione che va detta come regola:** un nemico che ti
+danneggia senza avvisarti è peggio di un nemico che non ti tocca. Il verde del passo 3 è un verde
+**con il nemico spento**, e va detto così.
+
+### 1.14-diciottesima **L'editor Godot riscrive la scena e le mangia il seme. La causa è diagnosticata.**
+
+Trovato il 2026-10-15 lanciando `git status` **prima** di una foglia, che è l'unico posto in cui
+si guarda. `project.godot` e `scenes/arena_main.tscn` erano modificati e **nessuno dei due era un
+file che il vertice avesse toccato**.
+
+**Il danno, per file:**
+
+| file | cosa è successo |
+|---|---|
+| `scenes/arena_main.tscn` | **`seed = 4242` cancellato dal nodo `Horde`** — cioè il rimedio di m11-bis |
+| `scenes/arena_main.tscn` | `sun_angle_max = 30.0` rimosso dal `ProceduralSkyMaterial`, `ground_horizon_color` spostato sotto `ground_bottom_color` |
+| `scenes/arena_main.tscn` | ogni nodo marchiato `unique_id=`, ogni `ext_resource` con `uid=` |
+| `project.godot` | **tutti i commenti italiani cancellati**, il file è tornato al boilerplate di Godot |
+
+Nessuna perdita di funzionalità tranne il seme: il resto è riformattazione. Ma **il seme è tutto**.
+
+**La misura che la rende una sezione e non una nota.** Ho lanciato il gate **prima** di riparare,
+per vedere se i criteri avevano denti. Avevano:
+
+```
+GATE: 6/8
+FAIL test_arena    il seme che la scena consegna deve essere 4242: e' 0, atteso 4242, ottenuto 0
+FAIL test_gameplay m11-bis: disposizione dell'orda diversa fra montaggio 0 e 1
+```
+
+**Due file di due foglie diverse, stessa causa.** Se avessi riparato per primo e lanciato il gate
+dopo, avrei avuto `8/8` e non avrei saputo niente: avrei scoperto che quei criteri sono due
+tautologie solo il giorno in cui il seme sarebbe sparito per la seconda volta. Un criterio che non
+si è mai visto fallire **non è un criterio**, è una riga.
+
+**La causa è diagnosticata, non indovinata.** Il `--headless --script` non riscrive niente: l'ho
+verificato, ho lanciato il gate sopra l'albero già riparato e `git status` è rimasto pulito. La
+firma è un'altra, ed è nell'albero:
+
+- i file `.uid` accanto agli script (`src/sim/obstacles.gd.uid`, `src/render/arena_obstacles.gd.uid`,
+  `src/sim/flow_field.gd.uid`): **li crea l'editor, non il headless**;
+- `unique_id=` su ogni nodo e `uid=` su ogni `ext_resource`: **è la riformattazione dell'editor**.
+
+Quindi: **qualcuno ha aperto il progetto nell'editor Godot e l'ha salvato.** Le foglie non lo
+aprono; il vertice non lo apre; i path di `tools/env.sh` sono solo headless. Resta `kiro-cli`, che
+ha già rotto file una volta (`docs/piramide/KIRO.md`).
+
+**LA REGOLA, e vale per tutte le foglie e per il vertice:**
+
+> **Nessuno apre l'editor Godot su questo progetto.** Solo `godot --headless`. L'editor riscrive
+> `project.godot` e `scenes/arena_main.tscn` cancellando commenti, `seed` e proprietà, e lo fa in
+> silenzio: `git status` è l'unico modo di accorgersene, e il gate lo dice solo come sintomo.
+
+**Il rimedio quando succede, in tre mosse, e la prima è quella che conta:**
+
+```
+git status --short                          ← prima di qualsiasi altra cosa
+git checkout -- project.godot scenes/arena_main.tscn
+godot --headless --path . --script tools/gate.gd
+```
+
+Il `checkout` è sicuro perché **`scenes/arena_main.tscn` è già committata con `seed = 4242`** e
+perché `-arena` non ha cambiato la scena in questa sessione. Se la scena fosse sporca di lavoro
+legittimo, il checkout perderebbe quel lavoro: per questo la prima riga è `git status`, e per questo
+**nessuna foglia viene lanciata su un albero che non ho guardato**.
+
+**Un debetto che questa sezione rende visibile e non risolve:** `export_presets.cfg` ha
+`export_filter="all_resources"`, quindi i 8 test, `tools/gate.gdc`, le 5 sonde e i due file di
+debris entrano nell'eseguibile. I due script `_probe_obstacles.gd` e `_tmp_rng_probe.gd` sono
+**non tracciati e nessuno li può cancellare**: sono nel suo scope, non nel mio. Restano aperti.
 
 ### Le onde della milestone 3
 

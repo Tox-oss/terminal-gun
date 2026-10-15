@@ -73,9 +73,13 @@ const SFX_POOL := 1
 ##
 ## Sono due i modi in cui due suoni dello stesso tipo si sovrappongono:
 ##
-##   - **`hurt`**: `take_damage()` mette `INVULN_AFTER_HIT = 0.7 s` a ogni colpo
-##     preso, e `hurt.wav` dura ~0.25 s. Quindi due `hurt` non possono
-##     sovrapporsi: il secondo arriva quando il primo e' gia' finito da 0.45 s.
+##   - **`hurt`**: `take_damage()` mette `INVULN_AFTER_HIT = 0.25 s` a ogni colpo
+##     preso, e `hurt.wav` dura **esattamente 0,25 s** (11025 campioni a
+##     44100 Hz, misurati sull'asset). Quindi due `hurt` non possono
+##     sovrapporsi, ma **adesso con margine zero**: il secondo arriva nel
+##     passo in cui la finestra si chiude, cioe' quando il primo sta per
+##     finire. Con la finestra di 0,7 s di prima il margine era 0,45 s; e'
+##     stato m16 a toglierlo, e il numero che lo dichiara e' qui.
 ##   - **`levelup`**: la soglia di `progression.gd` parte da `XP_BASE = 8.0` e
 ##     cresce di livello in livello, quindi due salite di livello sono separate
 ##     da almeno otto uccisioni. `levelup.wav` dura 0.500 s: non c'e' una
@@ -100,7 +104,38 @@ const FRICTION := 40.0
 const MAX_HP := 100.0
 ## Secondi di immunità dopo un colpo. Non è un animazione: è la finestra in
 ## cui l'orda non ti può prendere mentre ti rialzi.
-const INVULN_AFTER_HIT := 0.7
+##
+## ## m16: 0,7 s -> 0,25 s, e i due numeri che lo dicono
+##
+## Non è una scelta di equilibrio: è la **misura** che l'utente ha chiesto
+## dopo aver giocato («quando sono coperto di nemici non mi uccidono
+## rapidamente, essere sopraffatti non deve lasciare troppe occasioni»).
+## I due fatti, presi sulla scena vera con 200 nemici:
+##
+##   - **200 nemici, 30 s: 144 morsi offerti e 39 accettati.** 39 è il **91%
+##     del massimo che 0,7 s permetteva** (`1/0,7 = 1,43` colpi/s -> 42,9 in
+##     30 s): il giocatore era al tetto dell'**invulnerabilità**, non al tetto
+##     dell'orda.
+##   - il tetto di cadenza del morso, misurato in m11-quarta, è
+##     `TOUCH_INTERVAL = 0,150 s`: **0,7 s è 4,7 volte quella**, quindi dei
+##     144 morsi offerti circa 105 venivano scartati da un timer e non dal
+##     numero di nemici che il giocatore aveva addosso.
+##
+## Il difetto è che **essere accerchiato è esattamente tanto pericoloso quanto
+## essere da solo**: la vita non scala con quanti nemici hai addosso, e
+## l'utente l'ha visto giocando. `0,25 s` è circa la cadenza minima di morso
+## più un passo — quando sei coperto i morsi **entrano quasi tutti** — e resta
+## abbastanza corto da non essere una seconda vita.
+##
+## Le misure sono in `tests/test_gameplay.gd::_m16_tetto`, e i **denti** sono
+## stati eseguiti, non supposti. Con `INVULN_AFTER_HIT` a `0,25`:
+## **149 morsi offerti, 88 accettati** (59% dell'offerta, 2,93 colpi/s) e
+## **morte al passo 223 (3,72 s)** da fermo al centro con 200 nemici addosso.
+## Con questa costante rimessa a `0,7`, sullo stesso codice e nella stessa
+## scena: **149 offerti, 39 accettati** (26% dell'offerta, 1,30 colpi/s) e
+## **morte al passo 776 (12,93 s)** — fattore **3,5**. Il numero del vertice
+## (39 su 144 offerti, 27%) e' stato riprodotto.
+const INVULN_AFTER_HIT := 0.25
 ## Secondi di scatto.
 const DASH_TIME := 0.16
 ## Velocita' dello scatto, in m/s.

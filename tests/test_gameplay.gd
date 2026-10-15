@@ -100,6 +100,19 @@ extends SceneTree
 ##      **entrambi** gli involucri, poi la sonda tolta e il canale rifunziona).
 ##      I dieci tiri di quella sezione non leggono una formula: fanno sparare.
 ##
+## 19. **m16**, l'altra meta' della stessa segnalazione dell'utente («quando sono
+##      coperto di nemici non mi uccidono rapidamente»): la finestra
+##      `INVULN_AFTER_HIT` era un **tetto di cadenza**, non un ripiego. Tre
+##      sezioni, e tre numeri stampati: `_m16_una_finestra` (criterio 3, una
+##      sola finestra e non due), `_m16_tetto` (criterio 1, quanti morsi
+##      **offerti** su quanti **accettati** con 200 nemici in 30 s, e il
+##      confronto con la frazione di `0,7 s`) e dentro la stessa sezione il
+##      criterio 2 (quanto si resta in piedi coperti con `0,25 s` contro
+##      `0,7 s`). I due numeri che decidono sono scritti in questo file e hanno
+##      entrambi i denti: `M16_TETTO_VECCHIO = 43` (i morsi accettati devono
+##      superarlo; col valore di prima erano 39) e `M16_CONVERSIONE = 0,5`
+##      (meta' dell'offerta deve diventare danno; col valore di prima era 27%).
+##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
 ## Il criterio n. 2 (l'XP) e' in `tests/test_progression.gd` e il criterio n. 3
@@ -285,6 +298,9 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## ## 20 -> 21: l'incremento e' ancora di `-arena` (m11, 2026-10-15) e si dichiara qui.
 ## Il nodo e' `MortarDome`, una `MultiMeshInstance3D` unica per tutte le cupole del mortar, mai uno per colpo: `node_count` va da 45 a 46 e quel nodo costa uguale con zero cupole e con tutte disegnate — cosi' `-arena` l'ha misurato, invece di aggirarlo con `top_level`.
 ##
+## ## 21 -> 24: l'incremento e' ancora di `-arena` (m15, 2026-10-15) e si dichiara qui.
+## Sono **tre nodi**, e sono tutti e tre della stessa forma: `EnemiesBig` ed `EnemyBoss` — i modelli distinti per specie (`enemy_big.glb` ed `enemy_boss.glb`) che gia' esistevano nell'eseguibile e non erano caricati — e `MortarShot`, il colpo del mortar che cade. `node_count` va da 46 a 49; la HUD resta a 25, quindi i nodi non-HUD vanno da 21 a 24 e il tetto di 24 sotto e' quello giusto. Sono tre `MultiMeshInstance3D` e non tre nodi per colpo: e' lo stesso criterio con cui `MortarDome` e i 27 ostacoli sono entrati, e per questo l'incremento si dichiara invece di aggirare la ripartizione.
+##
 ## ## Perche' questo numero resta, e non diventa un assoluto
 ##
 ## Non e' un assoluto: e' una **ripartizione** fra le foglie, e una ripartizione
@@ -294,7 +310,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 21
+const NODI_SCENA_VERA := 24
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #
@@ -349,6 +365,130 @@ const NODO_HORDE := "Horde"
 ## mapa di costanti, cosi' il numero che questo test confronta e' quello che
 ## l'orda usa davvero e non una copia che invecchierebbe qui dentro.
 const ENEMY_SCRIPT := "res://src/sim/enemy.gd"
+
+# --- m16: la finestra di invulnerabilita' era un tetto di cadenza ---------------
+#
+# ## Cosa e' successo, in due numeri, e perche' questo file le ricorda
+#
+# L'utente ha giocato e ha scritto: «quando sono coperto di nemici non mi
+# uccidono rapidamente, essere sopraffatti non deve lasciare troppe occasioni,
+# morire e' parte del processo in questo tipo di giochi». Il numero che
+# spiegava il difetto era `INVULN_AFTER_HIT = 0.7 s` in `src/player/player.gd`:
+#
+#   - scena vera, **200 nemici, 30 s**: **144 morsi offerti, 39 accettati**.
+#     39 e' il **91% del massimo che 0,7 s permetteva** (`1/0,7 = 1,43`
+#     colpi/s -> 42,9 in 30 s), cioe' il giocatore era al tetto
+#     dell'**invulnerabilita'**, non al tetto dell'orda;
+#   - il tetto di cadenza del morso, misurato in m11-quarta, e'
+#     `TOUCH_INTERVAL = 0,150 s`: **0,7 s e' 4,7 volte quella**, quindi dei
+#     144 morsi circa 105 venivano scartati da un timer e non dal numero di
+#     nemici che il giocatore aveva addosso.
+#
+# Il difetto e' che **essere accerchiato era tanto pericoloso quanto essere da
+# solo**. Il vertice ha portato la costante a `0,25 s` (casi sorgente:
+# `1/0,25 = 4,00` colpi/s -> 120 in 30 s) e questo file misura se l'offerta
+# dell'orda **adesso viene convertita in danno**.
+#
+# ## Perche' i numeri qui sotto sono scritti e non letti
+#
+# `M16_VECCHIA` e' il valore **passato**: non lo usa nessun codice, serve solo
+# alla frazione di confronto, e scriverlo qui impedisce che la frazione
+# segua il valore di gioco e smetta di essere un confronto. `M16_NEMICI` e' una
+# **copia dichiarata** di `src/sim/horde.gd:MAX_ENEMIES` (200, riga 128), per la
+# stessa ragione di `RAGGIO_ARENA` sopra: il perno e' scritto, e la domanda
+# opposta — «le copie del numero divergono?» — e' di `-orda`. Il resto sono
+# **tetti di misura** (quanti passi, quanta vita) e **soglie** con la formula
+# dichiarata accanto: nessuna e' una copia di un numero di `-orda` o di
+# `-arena`.
+
+## Il valore **di prima** della finestra, in secondi. Non lo usa il gioco: e' la
+## frazione con cui il numero di adesso viene confrontato, ed e' scritto per
+##che' se leggesse `INVULN_AFTER_HIT` non potrebbe piu' fallire.
+const M16_VECCHIA := 0.7
+## Nemici vivi nella scena vera: copia dichiarata di `src/sim/horde.gd:MAX_ENEMIES`
+## (200). Lo scenario e' «coperto», ed e' quello che l'utente ha giocato.
+const M16_NEMICI := 200
+## Tetto di passi per arrivare a `M16_NEMICI` vivi. Il riempimento va al ritmo di
+## `run.spawn_rate()` (8/s), quindi 200 nemici sono ~25 s: 6000 passi sono 100 s,
+## quattro volte quello, e il tetto serve a far fallire la sezione invece di
+## girare per sempre.
+const M16_PASSI_PIENI := 6000
+## Passi di riscaldamento **prima** della finestra: l'orda deve arrivare addosso,
+## altrimenti la finestra misurerebbe un campo vuoto. 900 passi sono 15 s.
+const M16_SCALDATURA := 900
+## La finestra di misura, in passi: 1800 sono **30 s**, la stessa durata con cui
+## l'utente ha contato 144 morsi offerti e 39 accettati.
+const M16_FINESTRA := 1800
+## Vita data al giocatore **durante** la finestra. Senza questo la partita
+## finirebbe a `game_over` durante la misura (100 hp / 6,4 hp al secondo =
+## 15,6 s) e i numeri dopo il primo morso non sarebbero piu' numeri di niente.
+## `tests/test_orda.gd` chiama questa leva `VERA_HP_ALTO`.
+const M16_HP_ALTO := 1000000.0
+## Il cooldown con cui l'arma viene **muta** durante la misura. Non e' una
+## scorciatoia: l'arma spara da sola e ucciderebbe proprio gli anelli di nemici
+## che questa sezione sta contando (e' la classe di difetto di piano §1.5b:
+## un ambiente che azzera la grandezza sotto esame). E' un campo pubblico
+## dell'arma e l'unico numero che questa sezione le scrive.
+const M16_ARMA_MUTA := 1.0e9
+## ## I due perni che decidono il criterio 1, e la loro formula
+##
+##   perno **43** = `1/0,7 x 30 s` = 42,9: il tetto che la finestra di prima
+##     permetteva. Con la costante di prima i morsi accettati erano 39,
+##     **sotto** questo numero, e questa sezione deve dire `FAIL`;
+##   perno **0,5** = meta' dell'offerta: `M16_CONVERSIONE` sotto.
+##
+## ## Perche' `1/0,25 x 30 s` = **120 non e' un perno**
+##
+## Perche' **120 non e' raggiungibile**, misurato: la finestra non e' l'unico
+## limite. `TOUCH_INTERVAL = 0,150 s` mette il tetto alle richieste, e l'offerta
+## reale sulla scena vera e' **4,97 morsi/s** (149 offerti in 30 s con 26 nemici
+## a portata), non i 6,67/s del tetto; e un'offerta che arriva 0,05 s dopo la
+## chiusura della finestra **non aspetta**: la finestra si riapre col morso
+## successivo e il colpo resta scartato. Con la finestra di 0,25 s si misurano
+## **88 accettati**, cioe' il 73% di 120. Un tetto che non si puo' raggiungere
+## non e' un tetto, e' un numero decorativo: e' la stessa regola dei due perni
+## sopra, e il primo tentativo di questo file (soglia 96 = 80% di 120) e' stato
+## **tutto** perche' misurava un numero che il gioco non produce.
+##
+## Quindi i due perni sono l'uno contro l'altro e dicono la cosa giusta: i
+## morsi accettati sono **sopra** il tetto della finestra lunga e sono **meta'
+## dell'offerta**.
+##
+## ## Il dente, eseguito il 2026-10-15, con i numeri di oggi
+##
+## Costante rimessa a `0,7` e questa sezione eseguita cosi' com'e':
+##
+##   offerti 149, **accettati 39**, conversione **26%** -> i due perni vanno
+##     entrambi rossi (`39 <= 43` e `26% < 50%`) e il `FAIL` li nombra uno per
+##     uno. Con `0,25`: 149 offerti, **88 accettati**, conversione **59%**.
+##
+## Il numero del vertice (39 su 144 offerti, 27%) e' stato **riprodotto**: la
+## differenza fra 144 e 149 e' la disposizione dell'orda, che non ha seme
+## (`src/sim/horde.gd::_build()` fa `randomize()` quando `seed == 0`, il difetto
+## aperto di m11-bis, che resta di `-orda`).
+const M16_TETTO_VECCHIO := 43
+## Quanta parte dell'offerta deve diventare danno: **meta'**. Prima della m16 il
+## rapporto era 39/144 = **27%** (misurato 26% nel dente); con la finestra corta
+## deve salire, e questa soglia e' quella che distingue «l'offerta entra» da
+## «l'offerta viene scartata da un timer».
+const M16_CONVERSIONE := 0.5
+## Tetto di passi per la misura del tempo di morte: 3600 sono 60 s, e i due
+## tempi misurati sono **223 passi (3,72 s)** con la finestra di 0,25 s e **776
+## passi (12,93 s)** con quella di 0,7 s: il tetto e' cinque volte il primo e
+## due volte e mezzo il secondo, quindi non e' un tetto che decide nessuna
+## asserzione. Se il numero di sotto non scende, il difetto **non** e' la
+## finestra: la sezione lo dice e il numero di `src/player/player.gd` non si
+## tocca per farlo scendere.
+const M16_PASSI_MORTE := 3600
+## Passi del criterio 3 (una sola finestra): 600 sono 10 s, cioe' quaranta finestre
+## da 0,25 s e quattordici da 0,7 s: abbastanza per vedere **entrambi** i rami,
+## cioe' un colpo che entra e un colpo che viene rifiutato.
+const M16_PASSI_UNA := 600
+## Il danno del colpo di prova del criterio 3, in hp. Piccolo **per scelta**: in
+## 10 s la finestra di 0,25 s lascia entrare circa 40 colpi, e 40 x 1,0 = 40 hp
+## stanno bene dentro i 100 del giocatore; un danno piu' grosso lo ucciderebbe
+## a meta' finestra e il resto della sezione misurerebbe un giocatore morto.
+const M16_DANNO_PROVA := 1.0
 
 ## L'orda finta. Doppio di -orda: `count` + `transforms` come dati, e i due
 ## metodi registrati sul contratto.
@@ -603,6 +743,12 @@ func _process(_delta: float) -> bool:
 		_overlapping_enemies(h)
 		_knockback_impulse(h)
 		_damage_and_iframes(h)
+		# m16, criterio 3: una sola finestra e non due. Va **qui**, subito dopo
+		# la sezione 4b, perche' e' l'unica sezione di m16 che parla col
+		# **giocatore di questo file**: il contratto deve ancora puntare a lui, e
+		# dopo `_restart_run` punta a un giocatore della scena vera. Se girasse
+		# piu' in la', misurerebbe la finestra di un altro nodo.
+		_m16_una_finestra(h)
 		_xp_and_upgrades(h)
 		_no_allocation(h)
 		# m10, criterio n. 6. Vanno qui, **prima** delle sezioni che istanziano
@@ -640,6 +786,14 @@ func _process(_delta: float) -> bool:
 		# monta `scenes/arena_main.tscn` come fanno le tre precedenti e non
 		# restituisce il contratto a nessuno.
 		_m11bis_determinismo(h)
+		# m16, criteri 1 e 2: la finestra come **tetto di cadenza**, misurata
+		# sulla scena vera con 200 nemici. Va dopo m11-bis e prima dell'audio
+		# perche' monta `scenes/arena_main.tscn` come m11-bis e perche' **resta
+		# in albero** fino alla fine del frame (`queue_free` dentro un `--script`
+		# non libera niente, vedi `_libera`): quindi e' l'ultima sezione che
+		# lascia una scena appesa, e l'audio deve contare i nodi su un albero di
+		# cui conosce i numeri.
+		_m16_tetto(h)
 		# L'audio di -gameplay. Va per **ultima** perche' usa il giocatore di
 		# questo file e non tocca la scena vera, ma i montaggi m11-bis non
 		# devono vedere niente di cio' che succede qui: quindi nessuna sezione
@@ -1146,6 +1300,133 @@ func _damage_and_iframes(h) -> void:
 	h.check(not player.is_invulnerable(), "dopo un secondo non e' piu' invulnerabile")
 	h.check(player.take_damage(30.0), "e il colpo successivo entra")
 	h.near(player.hp, player.max_hp - 60.0, 0.0001, "HP dopo due colpi")
+
+# --- 4c. m16 criterio 3: UNA finestra, non due ----------------------------------
+#
+# ## La domanda
+#
+# La sezione `_m16_tetto` misura **quanto** la finestra lascia entrare. Questa
+# misura **da dove arriva il rifiuto**: `take_damage()` deve rifiutare un colpo
+# se e solo se `is_invulnerable()` era vera quando il colpo e' arrivato. Se ci
+# fosse un **secondo** controllo — un altro timer, un'altra condizione, una copia
+# della finestra scritta due volte — questa sezione lo vede, perche' il caso che
+# lo smaschera e' uno solo: **un rifiuto con `is_invulnerable()` falsa**, cioe'
+# una seconda finestra che scarta un colpo che il giocatore, secondo la prima,
+# poteva prendere.
+#
+# ## Perche' la finestra si chiama cosi' e non "cooldown"
+#
+# `is_invulnerable()` non guarda solo `invuln`: guarda anche `dash_timer`, cioe'
+# lo scatto mette al riparo per `DASH_TIME = 0,16 s`. Sono **due finestre di
+# gioco** dentro una sola funzione, ed e' la ragione per cui il confronto e'
+# fatto su `is_invulnerable()` e non su `invuln`: un test che guardasse solo il
+# campo `invuln` chiamerebbe "secondo controllo duplicato" lo scatto.
+#
+# ## Le due direzioni, e perche' servono entrambe
+#
+#   - **troppo corta** (una copia con un numero piu' piccolo): il rifiuto arriva
+#     quando `is_invulnerable()` e' falsa, e la cadenza dei colpi entrati supera
+#     `1/finestra`;
+#   - **troppo lunga** (una copia con un numero piu' grande, o un secondo timer
+#     che non finisce mai): il rifiuto arriva quando `is_invulnerable()` e'
+#     vera ma non per la finestra, e il **gap minimo** fra due colpo entrati e'
+#     piu' grande della finestra.
+#
+# Le due righe sotto guardano quindi una cosa e l'altra, e i numeri sono
+# stampati anche quando passano.
+
+func _m16_una_finestra(h) -> void:
+	_reset(Vector3.ZERO)
+	# Il contratto deve puntare a **questo** giocatore: la sezione chiama
+	# `Game.damage_player`, che e' la strada vera (`player.gd::_ready` registra
+	# `take_damage` sotto il nome dell'API, vedi la nota lunga li' sopra), e se il
+	# contratto puntasse a un altro nodo la sezione misurerebbe un giocatore che
+	# non e' quello del file.
+	if not h.check(game.player == player,
+		"m16 criterio 3: il contratto deve puntare al giocatore di questa sezione"):
+		return
+	horde.add(Vector3(0.0, 0.9, -6.0), TOUGH)
+	player.hp = player.max_hp
+	var w := float(_script_const(player, "INVULN_AFTER_HIT"))
+	if not h.check(w > 0.0, "m16 criterio 3: INVULN_AFTER_HIT si legge dallo script vivo (%.3f s)" % w):
+		return
+
+	var accettati := 0
+	var rifiutati := 0
+	## Rifiuti **fuori** dalla finestra: il difetto che la sezione cerca.
+	var fuori := 0
+	## Colpi entrati **con** la finestra aperta: il difetto simmetrico.
+	var dentro := 0
+	var ultimo := -1
+	var gap_min := 1.0e9
+	var hp_iniziale := float(player.hp)
+	for i in M16_PASSI_UNA:
+		# Il giocatore scala la sua finestra **prima** che il colpo arrivi: e'
+		# l'ordine dell'albero, e senza questo la sezione misurerebbe una
+		# finestra che non esiste in gioco.
+		player.step(DT, Vector3.ZERO)
+		horde.step(DT)
+		var inv := bool(player.is_invulnerable())
+		var prima := float(player.hp)
+		if float(player.hp) <= 0.0:
+			# Difensivo, e non previsto: `M16_DANNO_PROVA` e' scelto perche' i
+			# colpo entrati stiano dentro la vita. Se un domani la finestra
+			# scendesse sotto 0,05 s questo e' il ramo che lo dice invece di
+			# lasciare che `hp <= 0` renda ogni colpo successivo «non entrato».
+			break
+		var entra := bool(game.damage_player(M16_DANNO_PROVA))
+		if entra:
+			accettati += 1
+			if inv:
+				dentro += 1
+			if ultimo >= 0:
+				gap_min = minf(gap_min, float(i - ultimo) * DT)
+			ultimo = i
+		else:
+			rifiutati += 1
+			if not inv:
+				fuori += 1
+
+	# ## I numeri che decidono, e i due perni
+	# Ogni punto di vita perso deve essere stato annunciato da un colpo accettato:
+	# e' la stessa invariante della sezione m7, ma qui senza nemici e senza arma,
+	# quindi il conto e' chiuso.
+	h.near(hp_iniziale - float(player.hp), float(accettati) * M16_DANNO_PROVA, 0.0001,
+		"m16 criterio 3: %.1f hp persi = %d colpi entrati da %.1f hp l'uno: nessuna strada diversa dal rifiuto"
+			% [hp_iniziale - float(player.hp), accettati, M16_DANNO_PROVA])
+	h.check(accettati > 0, "m16 criterio 3: almeno un colpo deve entrare (%d in %d passi)"
+		% [accettati, M16_PASSI_UNA])
+	h.check(rifiutati > 0, "m16 criterio 3: almeno un colpo deve essere rifiutato (%d in %d passi): "
+		% [rifiutati, M16_PASSI_UNA]
+		+ "senza rifiuti il numero «nessun rifiuto fuori dalla finestra» sarebbe 0 per il motivo sbagliato")
+	h.eq(fuori, 0,
+		"m16 criterio 3: nessun colpo rifiutato con is_invulnerable() falsa -- il rifiuto arriva dalla finestra e non da un secondo controllo duplicato (%d rifiuti, di cui %d fuori)"
+			% [rifiutati, fuori])
+	h.eq(dentro, 0,
+		"m16 criterio 3: nessun colpo accettato con is_invulnerable() vera (%d accettati, di cui %d dentro la finestra)"
+			% [accettati, dentro])
+	# La cadenza: una finestra sola da `w` secondi non puo' far entrare piu' di
+	# `1/w` colpi al secondo. Il `+ 1.0` e' il colpo che entra al passo 0.
+	var secondi := float(M16_PASSI_UNA) * DT
+	h.check(float(accettati) <= secondi / w + 1.0,
+		"m16 criterio 3: i colpo entrati non possono superare la cadenza di una finestra sola da %.2f s (massimo %.1f in %.1f s, entrati %d)"
+			% [w, secondi / w, secondi, accettati])
+	# La durata: il gap minimo fra due colpi entrati e' almeno la finestra (meno
+	# il `DT` che lo stesso passo scala sotto). Una copia **piu' lunga** della
+	# finestra farebbe salire questo numero, e qui cadrebbe.
+	h.check(gap_min >= w - 1.5 * DT,
+		"m16 criterio 3: la finestra dura davvero %.3f s: il colpo successivo entra almeno %.4f s dopo il precedente"
+			% [w, gap_min])
+	h.check(player.hp > 0.0,
+		"m16 criterio 3: il giocatore e' ancora in piedi dopo la finestra di prova (%.1f di %.1f hp)"
+			% [float(player.hp), float(player.max_hp)])
+	print("m16 criterio 3, una sola finestra: %.3f s di finestra, %d colpi entrati e %d rifiutati in %d passi (%.1f s); "
+		% [w, accettati, rifiutati, M16_PASSI_UNA, secondi]
+		+ "rifiuti fuori finestra %d, entrati dentro finestra %d, gap minimo fra due colpo entrati %.4f s (finestra %.3f s, 1/w = %.2f/s)"
+		% [fuori, dentro, gap_min, w, 1.0 / w])
+	print("m16 criterio 3, vite: %.1f -> %.1f di %.1f hp, cioe' %.1f hp persi da %d colpi di %.1f"
+		% [hp_iniziale, float(player.hp), float(player.max_hp),
+			hp_iniziale - float(player.hp), accettati, M16_DANNO_PROVA])
 
 # --- 5. XP, livello, tre potenziamenti applicabili ------------------------------
 
@@ -3311,13 +3592,263 @@ func _libera(scena: Node) -> void:
 	scena.queue_free()
 
 # ================================================================================
+# m16, criteri 1 e 2: l'offerta dell'orda viene convertita in danno?
+# ================================================================================
+#
+# ## Il difetto, in una frase
+#
+# `INVULN_AFTER_HIT` era **0,7 s**, cioe' un tetto di **1,43 colpi/s** su un
+# morso che l'orda puo' offrire a **6,67/s** (`TOUCH_INTERVAL = 0,150 s` di
+# -orda). Con 200 nemici addosso la porta contò **144 morsi offerti e 39
+# accettati** in 30 s: 39 sono il **91% del massimo che 0,7 s permetteva**
+# (42,9), quindi il giocatore era al tetto **dell'invulnerabilita'** e non al
+# tetto dell'orda. Il difetto e' che **essere accerchiato era tanto pericoloso
+# quanto essere da solo**.
+#
+# ## Cosa misura questa sezione, e cosa non misura
+#
+# Misura i due numeri che l'utente ha citato, sulla **scena vera** e con
+# l'orda **vera** di `-orda`: `Horde.touch_bites_last` e' la **consegna** del
+# morso (`_apply_bites` chiama `Game.damage_player(danno)` e lo azzera subito,
+# rispettando il tetto a intervallo), e `hp` che scende e' l'**accettazione**.
+# Il conto e' identico a quello di `tests/test_orda.gd` (`m8 scena vera`), con
+# due differenze dichiarate:
+#
+#   - il **giocatore** e' quello vero e viene guidato con `p.step(DT, ZERO)`:
+#     la sua finestra e' scalata dal codice di gioco, non a mano;
+#   - l'**arma e' muta** (`M16_ARMA_MUTA` sul cooldown). Non e' una scorciatoia:
+#     l'arma spara da sola e ucciderebbe proprio gli anelli di nemici che qui si
+#     stanno contando — e' la classe di difetto di piano §1.5b, un ambiente che
+#     azzera la grandezza sotto esame. E' l'unico numero che la sezione scrive
+#     sull'arma.
+#
+# Il criterio 2 (tempo di morte con la finestra corta contro la finestra lunga)
+# e' nella stessa sezione e sullo **stesso montaggio**: la folla e' gia' tiepida
+# e il secondo scenario comincia subito. La finestra dei due scenari e' pilotata
+# scrivendo `invuln`, che e' un campo di -gameplay (quindi mio) e che il codice
+# di gioco scrive gia' a ogni colpo accettato.
+#
+# ## Il dente, e i suoi due numeri
+#
+# Costante rimessa a `0,7` in `src/player/player.gd` e questa sezione eseguita
+# cosi' com'e' (2026-10-15): **149 morsi offerti, 39 accettati, conversione
+# 26%**, e i due perni del criterio 1 sono andati **entrambi rossi** (`39 <= 43`
+# e `26% < 50%`). Il criterio 2 non puo' accorgersene con la costante a 0,7 —
+# perche' i suoi due scenari diventerebbero lo stesso numero — e la ragione e'
+# dichiarata li': il suo numero lo decide il confronto fra i due scenari, che
+# esiste solo quando la finestra viva e' diversa da quella storica. Ripristinata
+# a `0,25`: 149 offerti, 88 accettati, 59%, e **223 passi (3,72 s)** di tempo
+# di morte contro **776 (12,93 s)**.
+
+func _m16_tetto(h) -> void:
+	var t0 := Time.get_ticks_msec()
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "m16: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+	scena.process_mode = Node.PROCESS_MODE_DISABLED
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	var p = scena.get_node_or_null("Player")
+	var arma = scena.get_node_or_null("Player/Weapon")
+	if not h.check(hd != null and p != null and arma != null,
+		"m16: la scena vera deve avere i nodi \"%s\", \"Player\" e \"Player/Weapon\"" % NODO_HORDE):
+		return
+	# Due orologi non si misurano: il passo e' nostro, a `DT`.
+	p.call("drive_manually")
+	hd.set_physics_process(false)
+	arma.set("cooldown", M16_ARMA_MUTA)
+	p.set("hp", M16_HP_ALTO)
+	# `population` e' il campo pubblico che -orda dichiara e che `_top_up()` legge:
+	# pilotarlo a mano da 200 e' il modo dichiarato di ottenere l'orda piena senza
+	# dipendere dalla curva delle onde (`src/sim/horde.gd`, `_sync_population`).
+	hd.set("population", M16_NEMICI)
+
+	# La finestra **viva**, letta dallo script del giocatore: e' il numero con cui
+	# il gioco sta giocando, e non una copia qui dentro.
+	var w := float(_script_const(p, "INVULN_AFTER_HIT"))
+	if not h.check(w > 0.0, "m16: INVULN_AFTER_HIT si legge dallo script vivo (%.3f s)" % w):
+		return
+
+	var passi_pieno := 0
+	while int(hd.get("count")) < M16_NEMICI and passi_pieno < M16_PASSI_PIENI:
+		hd.call("step", DT)
+		passi_pieno += 1
+	var vivi := int(hd.get("count"))
+	h.eq(vivi, M16_NEMICI,
+		"m16: l'orda e' arrivata a %d nemici vivi in %d passi (%.1f s)" % [M16_NEMICI, passi_pieno, float(passi_pieno) * DT])
+	if vivi < M16_NEMICI:
+		return
+
+	# Il riscaldamento: l'orda deve **arrivare addosso**, altrimenti la finestra
+	# misurerebbe un campo vuoto e i numeri non sarebbero numeri di nessuno.
+	var offerti_scaldata := 0
+	var dist_min := 1.0e9
+	for i in M16_SCALDATURA:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+		offerti_scaldata += int(hd.get("touch_bites_last"))
+		dist_min = minf(dist_min, _piu_vicino(hd, p.get("global_position")))
+	h.check(offerti_scaldata > 0,
+		"m16: nel riscaldamento l'orda deve gia' mordere (%d morsi offerti in %d passi, distanza minima %.3f m)"
+			% [offerti_scaldata, M16_SCALDATURA, dist_min])
+	if offerti_scaldata <= 0:
+		return
+
+	# =====================================================================
+	# CRITERIO 1 -- offerti su accettati, e il confronto con 1/0,7 e 1/0,25
+	# =====================================================================
+	var offerti := 0
+	var accettati := 0
+	var danno_tot := 0.0
+	for i in M16_FINESTRA:
+		var prima := float(p.get("hp"))
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+		offerti += int(hd.get("touch_bites_last"))
+		var ora := float(p.get("hp"))
+		if ora < prima:
+			accettati += 1
+			danno_tot += prima - ora
+	var secondi := float(M16_FINESTRA) * DT
+	var in_portata := _m16_in_portata(hd, p.get("global_position"))
+	var conversione := float(accettati) / maxf(1.0, float(offerti))
+	print("m16 criterio 1: %d nemici vivi, %d a portata di morso (scala %.2f); in %.0f s (%.1f s a %.2f m dal giocatore) l'orda ha OFFERTO %d morsi"
+		% [vivi, in_portata, float(hd.get("body_scale")), M16_FINESTRA, secondi, dist_min, offerti])
+	print("m16 criterio 1: ACCETTATI %d, cioe' il %.0f%% dell'offerta; %.2f hp per morso accettato, %.2f hp/s, %.2f colpi/s"
+		% [accettati, conversione * 100.0, danno_tot / maxf(1.0, float(accettati)),
+			danno_tot / secondi, float(accettati) / secondi])
+	print("m16 criterio 1: finestra viva %.2f s -> tetto %.1f colpi (1/%.2f x %.0f s), che NON e' un perno perche' l'offerta non lo raggiunge; finestra di %.2f s -> tetto %.1f colpi; perno scritto vecchio %d, perno scritto conversione %.2f"
+		% [w, secondi / w, w, secondi, M16_VECCHIA, secondi / M16_VECCHIA, M16_TETTO_VECCHIO, M16_CONVERSIONE])
+
+	h.check(offerti > 0, "m16 criterio 1: l'orda deve offrire morsi nella finestra (%d)" % offerti)
+	h.check(accettati > 0, "m16 criterio 1: il giocatore deve accettare morsi nella finestra (%d)" % accettati)
+	# ## Il primo perno: il tetto si e' spostato
+	h.check(accettati > M16_TETTO_VECCHIO,
+		"m16 criterio 1: i morsi accettati sono %d e il tetto che %.2f s permetteva era %d: la finestra non e' piu' quello che scarta l'offerta"
+			% [accettati, M16_VECCHIA, M16_TETTO_VECCHIO])
+	# ## Il secondo perno: l'offerta **entra**, e il confronto con la frazione
+	#     di 0,7 s e' stampato nella riga qui sopra: col valore di prima questo
+	#     rapporto era 39/144 = 27%.
+	h.check(conversione >= M16_CONVERSIONE,
+		"m16 criterio 1: almeno il %.0f%% dell'offerta deve diventare danno (misurato %.0f%%: %d accettati su %d offerti)"
+			% [M16_CONVERSIONE * 100.0, conversione * 100.0, accettati, offerti])
+
+	# =====================================================================
+	# CRITERIO 2 -- accorciare la finestra fa morire **prima** quando sei coperto
+	# =====================================================================
+	# I due scenari sono sullo **stesso montaggio** e lo stesso giocatore: la
+	# folla e' gia' calda e il secondo comincia subito. Il numero che decide e'
+	# uno solo, `passi`, e il confronto e' fra i due: se accorciando la finestra
+	# il tempo di morte **non** scende, il difetto non e' la finestra e va detto
+	# cosi' — il numero di `src/player/player.gd` non si tocca per farlo scendere.
+	var corto := _m16_morte(hd, p, w)
+	var lungo := _m16_morte(hd, p, M16_VECCHIA)
+	var sec_corto := float(corto["passi"]) * DT
+	var sec_lungo := float(lungo["passi"]) * DT
+	print("m16 criterio 2, giocatore fermo al centro con %d nemici addosso e %.1f hp: finestra %.2f s -> morto al passo %d (%.2f s), %d morsi accettati, %.2f hp/s"
+		% [vivi, float(p.get("max_hp")), w, int(corto["passi"]), sec_corto, int(corto["accettati"]),
+			float(corto["danni"]) / maxf(0.0001, sec_corto)])
+	print("m16 criterio 2: finestra %.2f s -> morto al passo %d (%.2f s), %d morsi accettati, %.2f hp/s"
+		% [M16_VECCHIA, int(lungo["passi"]), sec_lungo, int(lungo["accettati"]),
+			float(lungo["danni"]) / maxf(0.0001, sec_lungo)])
+	h.check(bool(corto["morto"]),
+		"m16 criterio 2: il giocatore coperto deve morire entro %d passi (%.0f s) anche con la finestra corta: e' morto al passo %d"
+			% [M16_PASSI_MORTE, float(M16_PASSI_MORTE) * DT, int(corto["passi"])])
+	h.check(bool(lungo["morto"]),
+		"m16 criterio 2: e deve morire anche con la finestra lunga di %.2f s (morto al passo %d di %d)"
+			% [M16_VECCHIA, int(lungo["passi"]), M16_PASSI_MORTE])
+	h.check(bool(corto["morto"]) and bool(lungo["morto"]) and int(corto["passi"]) < int(lungo["passi"]),
+		"m16 criterio 2: accorciare la finestra fa morire prima quando sei coperto: %.2f s con %.2f s di finestra contro %.2f s con %.2f s (fattore %.2f)"
+			% [sec_corto, w, sec_lungo, M16_VECCHIA, sec_lungo / maxf(0.0001, sec_corto)])
+	print("m16: sezione intera in %d ms (1 montaggio, %d passi d'orda a %d nemici)"
+		% [Time.get_ticks_msec() - t0, passi_pieno + M16_SCALDATURA + M16_FINESTRA
+			+ int(corto["passi"]) + int(lungo["passi"]), M16_NEMICI])
+	_libera(scena)
+
+## Quanti passi ci vuole a uccidere il giocatore fermo al centro con la folla
+## calda, con la finestra portata a `w`.
+##
+## ## Perche' la finestra si scrive a mano qui e non si cambia a runtime
+##
+## `INVULN_AFTER_HIT` e' una **`const`**: nessun test puo' cambiarla, e la
+## sezione m16 criterio 1 gira con il valore **vero** del gioco. Qui invece la
+## finestra e' un **scenario**, e la si pilota sul campo `invuln` che il codice
+## di gioco scrive gia' a ogni colpo accettato (`take_damage`: `invuln =
+## INVULN_AFTER_HIT`). Il `- DT` e' dichiarato perche' e' la legge: il colpo
+## entra dentro `Horde.step()` e il giocatore scala la finestra nella stessa
+## simulazione, quindi il valore che il passo successivo vede e' `w - DT`.
+##
+## ## Perche' la partita non entra in `game_over` fra uno scenario e l'altro
+##
+## `_poll_run()` guarda le vite **all'inizio** di `Horde.step()`. Il giocatore
+## muore dentro lo step, e `hp` viene rimesso a pieno **prima** dello step
+## successivo: `run.enter_game_over()` non viene mai chiamato e la folla non si
+## congela. E' il motivo per cui i due scenari possono stare sullo stesso
+## montaggio invece di due scene da 25 s di riempimento ciascuna.
+func _m16_morte(hd, p, w: float) -> Dictionary:
+	var fuori := {"passi": M16_PASSI_MORTE, "morto": false, "accettati": 0, "danni": 0.0}
+	p.set("hp", p.get("max_hp"))
+	p.set("invuln", 0.0)
+	p.set("dash_timer", 0.0)
+	for i in M16_PASSI_MORTE:
+		var prima := float(p.get("hp"))
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+		if float(p.get("hp")) < prima:
+			fuori["accettati"] = int(fuori["accettati"]) + 1
+			fuori["danni"] = float(fuori["danni"]) + (prima - float(p.get("hp")))
+			# La finestra di questo scenario, e **solo** quando un colpo e'
+			# entrato: il codice di gioco ha appena messo la sua in `invuln` e
+			# `p.step()` l'ha gia' scalata di `DT`, quindi qui si porta a quella
+			# che lo scenario chiede, meno il `DT` che lo stesso passo scala sotto.
+			#
+			## Il `- DT` e' la legge e non un arrotondamento: il colpo entra dentro
+			## `Horde.step()` e il giocatore scala la finestra nella stessa
+			## simulazione, quindi il valore che il passo **successivo** vede e'
+			## `w - DT`.
+			##
+			## E la condizione conta: riscrivere `invuln` a ogni passo in cui e'
+			## positivo **riaprirebbe la finestra ogni frame** e renderebbe il
+			## giocatore permanentemente invulnerabile dal primo colpo in poi
+			## (misurato: con quella forma la sezione accettava **1** colpo in
+			## 60 s ed era il numero che ha fatto trovare il difetto).
+			p.set("invuln", maxf(w - DT, 0.0))
+		if bool(p.call("is_dead")):
+			fuori["passi"] = i + 1
+			fuori["morto"] = true
+			break
+	return fuori
+
+## Quanti nemici sono **a portata di morso** del giocatore, con la portata che
+## chiede l'orda vera (`Horde.bite_range_of(kind)`, cioe' la stessa formula del
+## morso di -orda con il fattore corpo che arriva dal contratto).
+##
+## Non e' un contatore per passo: si legge una volta sola, a fine finestra,
+## perche' 200 nemici per 1800 passi sarebbero 360.000 confronti dentro una
+## misura che non li usa. Il numero serve a **leggere** il risultato: se la folla
+## non e' addosso, i morsi offerti sono bassi per un motivo che non e' la
+## finestra, e il numero lo dice.
+func _m16_in_portata(hd, punto: Vector3) -> int:
+	var t: PackedVector3Array = hd.get("transforms")
+	var k: PackedInt32Array = hd.get("kinds")
+	var dentro := 0
+	for i in mini(t.size(), k.size()):
+		var d := Vector2(t[i].x - punto.x, t[i].z - punto.z).length()
+		if d <= float(hd.call("bite_range_of", int(k[i]))):
+			dentro += 1
+	return dentro
+
+# ================================================================================
 # Il gemello: `bonk.wav`, il suono dell'impatto, e la capienza del suo pool
 # ================================================================================
 #
 # ## La domanda che decide il lavoro, e che non si puo' supporre
 #
 # Sul giocatore `SFX_POOL = 1` e' motivato da due numeri del gioco: `hurt` non
-# si sovrappone (`INVULN_AFTER_HIT = 0.7 s` contro 0.25 s di suono) e `levelup`
+# si sovrappone (`INVULN_AFTER_HIT = 0.25 s` dalla m16, **uguale** alla durata di
+# `hurt`, quindi con margine zero — vedi il ragionamento aggiornato in
+# `src/player/player.gd` accanto a `SFX_POOL`) e `levelup`
 # non si sovrappone (otto uccisioni fra una soglia e l'altra contro 0.50 s di
 # suono). Qui **non si puo' copiare quel ragionamento**: `bonk.wav` dura
 # **0.18 s** e parte a **ogni impatto**, e l'arma spara da sola.

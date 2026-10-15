@@ -261,6 +261,11 @@ func _run() -> void:
 		quit(h.finish("orda"))
 		return
 
+	# Senza questo marcatore tutto il blocco da qui a `_touch` cade in nessun
+	# secchio: `_sez` accoda il tempo **al nome precedente**, e il primo nome che
+	# esiste e' quello di `touch`. Il blocco e' la meta' del file, e un numero che
+	# non e' da nessuna parte non si puo' accorciare.
+	_sez("avvio")
 	_population(h, horde)
 	_no_node_per_enemy(h, horde)
 	_registration(h, horde)
@@ -285,7 +290,9 @@ func _run() -> void:
 	# non ripopola da zero e troverebbe l'orda nel raggio lasciato dalla sezione
 	# precedente invece che in quello dichiarato.
 	_raggio_60(h, horde)
+	_sez("touch")
 	_touch(h, horde)
+	_sez("attraversamento")
 	# m12: il tempo di contatto per specie. Sta **subito dopo** `_touch` perche'
 	# il morso si accende solo con un giocatore registrato, e lo spia di `_touch`
 	# e' l'unico che questo file abbia. Sta **prima** di `_banda_morso` perche'
@@ -293,6 +300,7 @@ func _run() -> void:
 	# di contatto e' la cosa che decide con quale tetto quel comportamento e'
 	# confrontabile.
 	_attraversamento(h, horde)
+	_sez("banda_morso")
 	# m11-quarta: il morso e la taglia disegnata. Sta **dopo** `_touch` perche'
 	# la condizione del morso si accende solo con un giocatore registrato, e lo
 	# spia di `_touch` e' l'unico che questo file abbia: prima di lui nessun
@@ -300,6 +308,7 @@ func _run() -> void:
 	# `_reroll` perche' quella chiama `restart_run()` e rimetterebbe a posto
 	# l'orda che qui e' stata ridotta a un nemico per specie.
 	_banda_morso(h, horde)
+	_sez("mortar")
 	# m13: il mortar. Sta **subito dopo** `_banda_morso` e **prima** di `_reroll`
 	# per due motivi, e sono due motivi di ordine e non di comodo'ita'. Primo: la
 	# sezione ha bisogno di un **giocatore registrato** perche' il colpo cade
@@ -308,6 +317,7 @@ func _run() -> void:
 	# `_reroll` chiama `restart_run()`, che azzera i colpi in volo, e la sezione
 	# vuole poter guardare un colpo che arriva davvero a cadere.
 	_mortar(h, horde)
+	_sez("reroll+scale")
 	# m11-bis-b: il reroll della sezione 14. Sta qui, dopo `_touch` e **prima**
 	# di `_scena_vera`, e il posto e' dichiarato nella sezione: sulla scena vera un
 	# restart rimescolerebbe proprio il numero che il criterio n. 1 di 1.14-ter
@@ -320,25 +330,78 @@ func _run() -> void:
 	# potuto assorbire una delle tre scale che questa sezione prova.
 	_scala_nei_file(h)
 	_scala_popolazione(h, horde)
+	_sez("miscela")
 	# I due cammini della miscela. Sta **qui**, dopo `_scala_popolazione` (che
 	# rimette a posto `population` e `population_scale`) e prima di `_scena_vera`
 	# (che monta la scena vera e registra l'orda e il giocatori del gioco): la
 	# sezione deve parlare con l'orda isolata, e deve poter cambiare onda e
 	# riempire il campo senza che nessuno dopo trovi l'orda com'era.
 	_miscela_respawn(h, horde)
+	_sez("scena_vera")
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
 	# significherebbe che le sezioni precedenti parlassero con l'altra orda senza
 	# accorgersene, quindi va in fondo e poi rimette a posto il contratto.
 	_scena_vera(h, horde)
+	_sez("ostacoli_contratto")
 	# E l'ultima di tutte, perche' e' l'unica che guarda **il contratto**:
 	# `Game.obstacles` lo scrive `-arena` in `_enter_tree()`, quindi il dato
 	# esiste solo dopo che la scena vera e' entrata nell'albero.
 	_ostacoli_contratto(h, horde)
+	_sez("fine")
+	_stampa_sezioni()
 
 	print("orda: tutto il file in %d ms, ne restano %d dei 120000 del test" \
 		% [Time.get_ticks_msec() - t0, 120000 - (Time.get_ticks_msec() - t0)])
 	quit(h.finish("orda"))
+
+# --- PROVVISORIO m15-b: cronometro per sezione + leva `norender` ---------------
+# Togliere dopo la misura.
+
+var _t_sez: Dictionary = {}
+var _t_ultimo := 0
+var _nome_ultimo := ""
+
+func _sez(nome: String) -> void:
+	var now := Time.get_ticks_usec()
+	if _nome_ultimo != "":
+		_t_sez[_nome_ultimo] = int(_t_sez.get(_nome_ultimo, 0)) + (now - _t_ultimo)
+	_t_ultimo = now
+	_nome_ultimo = nome
+
+func _stampa_sezioni() -> void:
+	var tot := 0
+	for k in _t_sez:
+		tot += int(_t_sez[k])
+	var righe := ""
+	for k in _t_sez:
+		righe += "\n  %-22s %8.3f s" % [k, float(_t_sez[k]) / 1.0e6]
+	print("orda: SEZIONI (provvisorio) totale %.3f s%s" % [float(tot) / 1.0e6, righe])
+
+var _staccati: Array = []
+
+func _norender_chiedi() -> bool:
+	return OS.get_cmdline_user_args().has("norender")
+
+func _stacca_render(arena: Node) -> int:
+	if not _norender_chiedi():
+		return 0
+	var n := 0
+	for c in arena.get_children():
+		var s: Script = c.get_script()
+		if s != null and str(s.resource_path).begins_with("res://src/render/"):
+			var padre := c.get_parent()
+			padre.remove_child(c)
+			_staccati.append([c, padre])
+			n += 1
+	if n > 0:
+		print("orda: PROVA, staccati %d nodi di src/render/ dalla scena vera" % n)
+	return n
+
+func _rimetti_render() -> void:
+	for e in _staccati:
+		(e[1] as Node).add_child(e[0])
+	_staccati.clear()
 
 # --- 11. Il morso: il nemico chiama Game.damage_player (milestone 7) ----------
 #
@@ -2132,6 +2195,7 @@ func _scena_vera(h, isolate: HORDE) -> void:
 	_vera_flow_active = horda.flow_active()
 	_vera_flow_rebuilds = horda.flow_rebuilds
 
+	_rimetti_render()
 	_chiudi(arena)
 	_ripristina(h, isolate)
 
@@ -2239,6 +2303,13 @@ func _apri_arena(h):
 		if arena != null:
 			arena.free()
 		return null
+	# I renderer si staccano **qui**, prima di `add_child`: staccarli dopo
+	# non leverebbe niente, perche' `add_child` e' quello che fa entrare i nodi
+	# nell'albero e quindi scatta `_ready()`, e `_ready()` di
+	# `horde_renderer.gd` chiama `_build()`, che carica i tre GLB e alloca tre
+	# `MultiMesh`. Un nodo staccato prima dell'albero non ha mai `_ready()`, e
+	# il suo costo e' zero davvero invece di zero solo per i frame.
+	_stacca_render(arena)
 	root.add_child(arena)
 	return arena as Node3D
 

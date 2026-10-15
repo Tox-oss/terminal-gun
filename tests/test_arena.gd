@@ -262,6 +262,12 @@ func _run() -> void:
 	# popolazione e giocatore. Se sta prima, `_milestone_8` misurerebbe il suo
 	# campione con il peso che questa sezione sta pilotando.
 	_m13_cupola(h, arena, game)
+	# m15: **per ultima anche rispetto a `_m13_cupola`**, e per lo stesso motivo:
+	# anche questa pilota `Spawner.MORTAR_WEIGHT`, riavvia la partita e rimette a posto
+	# peso, popolazione e giocatore. `_m15_forme` invece guarda solo la tabella dei
+	# modelli e non tocca l'orda, quindi puo' stare dove sta.
+	_m15_forme(h, arena, arena.get_node_or_null("Horde"))
+	_m15_colpo(h, arena, game)
 
 	_cleanup(arena)
 	print("test_arena: tutto il file in %d ms; la porta dà 120 s a questo test e ne resta %d, e m11-bis e m11 hanno costato le cifre stampate nelle loro righe" % [Time.get_ticks_msec() - _t0, 120000 - (Time.get_ticks_msec() - _t0)])
@@ -536,9 +542,31 @@ func _restore_body_scale(h, game: Node, dichiarato: float) -> void:
 ## nella prima stesura non si poteva fare: fino a ieri la scena non esisteva.
 func _wiring(h, arena: Node3D, game: Node) -> void:
 	for node_name in ["WorldEnvironment", "Sun", "Ground", "Horde", "Enemies",
-			"Obstacles", "MortarDome", "Player", "Camera", "Hud"]:
+			"EnemiesBig", "EnemiesBoss", "Obstacles", "MortarDome", "MortarShot",
+			"Player", "Camera", "Hud"]:
 		h.check(arena.get_node_or_null(node_name) != null,
 			"arena_main.tscn deve avere il nodo \"%s\"" % node_name)
+
+	# ## I TRE RENDERER DELL'ORDA: uno per modello, e ognuno col **suo** slot
+	#
+	# `mesh_slot` e' la proprieta' che la scena mette su ciascun nodo, e la tabella
+	# che la legge e' `KIND_SLOT` in `src/render/horde_renderer.gd`. Se i tre nodi
+	# portassero tutti lo stesso slot, i tre modelli dichiarati non sarebbero in
+	# scena e il criterio 4 di m15 sarebbe verde perche' guarderebbe la tabella e non
+	# il gioco: quindi qui si confronta **il numero sulla scena** con quello che il
+	# renderer dichiara, e la sezione `_m15_forme` guarda il percorso che ogni nodo
+	# sta davvero disegnando.
+	var slot_attesi := _slot_attesi()
+	if h.check(slot_attesi.size() == _renderers_ordine(arena).size(),
+			"il numero di renderer dell'orda deve essere il numero di modelli dichiarati in src/render/horde_renderer.gd (%d contro %d): una `MultiMesh` ha una sola mesh"
+			% [slot_attesi.size(), _renderers_ordine(arena).size()]):
+		for i in slot_attesi.size():
+			var nodo = _renderers_ordine(arena)[i]
+			h.eq(_script_path(nodo), RENDERER_SCRIPT,
+				"il nodo \"%s\" deve avere incollato src/render/horde_renderer.gd: e' lo stesso file che disegna i nemici, uno per modello" % nodo.name)
+			h.eq(int(nodo.get("mesh_slot")), int(slot_attesi[i]),
+				"il nodo \"%s\" deve avere mesh_slot = %d come lo dichiara KIND_SLOT in src/render/horde_renderer.gd: e' %d"
+					% [nodo.name, int(slot_attesi[i]), int(nodo.get("mesh_slot"))])
 
 	var obstacles = arena.get_node_or_null("Obstacles")
 	if obstacles != null:
@@ -549,6 +577,13 @@ func _wiring(h, arena: Node3D, game: Node) -> void:
 	if cupola != null:
 		h.eq(_script_path(cupola), MORTAR_SCRIPT,
 			"il nodo MortarDome deve avere incollato src/render/mortar_renderer.gd: e' il file che costruisce le cupole rosse dai colpi in volo di horde.mortar_shots")
+
+	var colpo = arena.get_node_or_null("MortarShot")
+	if colpo != null:
+		h.eq(_script_path(colpo), SHOT_SCRIPT,
+			"il nodo MortarShot deve avere incollato src/render/mortar_shot_renderer.gd: e' il file che costruisce il colpo **in volo** dagli stessi colpi di horde.mortar_shots")
+		h.check(colpo.is_built(),
+			"m15: il nodo MortarShot deve aver costruito la sua MultiMesh: un nodo che non costruisce niente non puo' essere un difetto di sincronizzazione, e' un difetto di esistenza")
 
 	var horde = arena.get_node_or_null("Horde")
 	var player = arena.get_node_or_null("Player")
@@ -706,12 +741,14 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	# Variabili senza tipo: `horde` e' un `Node` e i suoi tre campi non sono
 	# campi di `Node`, quindi l'accesso deve restare dinamico.
 	var horde = arena.get_node("Horde")
-	var enemies = arena.get_node("Enemies")
-
-	# Orologio congelato: con il tempo che scorre il renderer aggiunge il bob e
-	# la rotazione, e la geometria scritta nel buffer smette di essere prevedibile.
-	enemies.set_time(0.0)
-	enemies.set_horde(horde)
+	# Dal 2026-10-15 l'orda e' disegnata da **tre** renderer, uno per modello: i
+	# criteri che contano i nemici valgono sulla **somma**, e i tre si pilotano
+	# insieme (orologio congelato e canale) perche' altrimenti uno dei tre
+	# misurerebbe un mondo diverso dagli altri due.
+	var renderers := _renderers_ordine(arena)
+	for r in renderers:
+		r.set_time(0.0)
+		r.set_horde(horde)
 
 	# ## Il PRIMA, misurato e non asserito
 	#
@@ -727,12 +764,14 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	# vuota e con l'orda piena il numero deve essere lo stesso, altrimenti si
 	# puo' passare il tetto con un totale piccolo che pero' cresce.
 	_kill_all(h, horde)
-	enemies.refresh()
+	for r in renderers:
+		r.refresh()
 	var bare_nodes := _count_nodes(arena)
 
 	# E il pieno, **raggiunto durante la partita**.
 	var drive := _drive_to_full_arena(h, horde)
-	enemies.refresh()
+	for r in renderers:
+		r.refresh()
 	var live: int = horde.count
 	if live == ENEMY_TARGET:
 		print("test_arena: i 200 nemici vivi sono arrivati all'onda %d, dopo %d passi di simulazione (%.2f s di partita) e %d uccisioni: curva %s"
@@ -761,67 +800,103 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 	h.eq(loaded_nodes, bare_nodes, "200 nemici non devono aggiungere ne' un nodo")
 	h.check(loaded_nodes < NODE_BUDGET,
 		"node_count deve essere < 120 con 200 nemici vivi: e' %d" % loaded_nodes)
-	h.check(enemies.get_child_count() == 0,
-		"il renderer dei nemici non deve avere figli: un nodo per nemico e' esattamente il difetto che il criterio vieta")
+	for r in renderers:
+		h.check(r.get_child_count() == 0,
+			"il renderer dei nemici \"%s\" non deve avere figli: un nodo per nemico e' esattamente il difetto che il criterio vieta" % r.name)
 
-	var mm = enemies.multimesh
-	h.eq(enemies.drawn_count(), ENEMY_TARGET,
-		"il renderer deve aver disegnato tutti i 200 nemici")
-	h.check(mm != null, "il renderer deve aver costruito la MultiMesh")
-	if mm != null:
-		h.check(mm.use_colors, "la MultiMesh deve avere i colori per istanza: e' cosi' che la tinta per specie arriva all'arena")
-		h.eq(mm.visible_instance_count, ENEMY_TARGET,
-			"la MultiMesh deve mostrare 200 istanze, non 200 nodi")
+	# ## LA SOMMA DEI TRE, e perche' nessuno dei tre basta da solo
+	#
+	# Un renderer che disegna 200 e due che non disegnano niente passerebbero anche
+	# con la tabella `KIND_SLOT` sbagliata: quindi il numero che si confronta e' la
+	# **somma**, e il numero che si stampa e' la ripartizione. E' la stessa domanda di
+	# prima («il motore regge 200 nemici senza un nodo per nemico») con la forma che
+	# la scena ha dal 2026-10-15.
+	var disegnati := _disegnati(renderers)
+	h.eq(disegnati, ENEMY_TARGET,
+		"i renderer dell'orda devono aver disegnato tutti i 200 nemici, in tre: %s" % _ripartizione(renderers))
+	print("test_arena: criterio n. 3 ripartito sui tre modelli: %s" % _ripartizione(renderers))
+	for r in renderers:
+		var mm = r.multimesh
+		h.check(mm != null, "il renderer \"%s\" deve aver costruito la sua MultiMesh" % r.name)
+		if mm == null:
+			continue
+		h.check(mm.use_colors,
+			"la MultiMesh di \"%s\" deve avere i colori per istanza: e' cosi' che la tinta per specie arriva all'arena" % r.name)
+		h.eq(mm.visible_instance_count, r.drawn_count(),
+			"ogni renderer deve mostrare tutti i nemici del **proprio** modello: \"%s\" ne ha disegnati %d e ne mostra %d"
+				% [r.name, r.drawn_count(), mm.visible_instance_count])
 		h.check(mm.instance_count <= ENEMY_CAPACITY,
-			"la capienza deve restare fissa, non crescere con l'orda")
+			"la capienza di \"%s\" deve restare fissa, non crescere con l'orda: e' %d" % [r.name, mm.instance_count])
 
-		# La geometria deve arrivare dall'orda. Il controllo e' su
-		# `instance_transform()`, la funzione che il ciclo di gioco chiama per
-		# ogni nemico: il buffer della MultiMesh non si rilegge in headless (e'
-		# uno storage buffer del RenderingDevice, che nel backend "dummy" non
-		# esiste) e `get_instance_transform()` restituisce silenziosamente una
-		# trasformazione vuota. Leggere indietro il buffer qui avrebbe fatto
-		# passare il test su un renderer che non scrive niente.
-		#
-		# Il raggio che si passa e' `radii[last]`: da m8 la scala dell'istanza
-		# **non** e' piu' una costante del renderer ma il raggio del corpo
-		# moltiplicato per il fattore di calibrazione (sezione 9).
-		var last := ENEMY_TARGET - 1
-		var placed: Transform3D = enemies.instance_transform(horde.transforms[last], horde.radii[last], last)
+	# La geometria deve arrivare dall'orda. Il controllo e' su `instance_transform()`,
+	# la funzione che il ciclo di gioco chiama per ogni nemico: il buffer della
+	# MultiMesh non si rilegge in headless (e' uno storage buffer del
+	# RenderingDevice, che nel backend "dummy" non esiste) e `get_instance_transform()`
+	# restituisce silenziosamente una trasformazione vuota. Leggere indietro il buffer
+	# qui avrebbe fatto passare il test su un renderer che non scrive niente.
+	#
+	# Il raggio che si passa e' `radii[last]`: da m8 la scala dell'istanza **non** e'
+	# piu' una costante del renderer ma il raggio del corpo moltiplicato per il
+	# fattore di calibrazione (sezione 9) e per la normalizzazione della mesh di
+	# questo nodo (m15). Il confronto e' sul nodo che **disegna** quel nemico, quindi
+	# si prova sul nemico 200 col renderer del suo modello e non su uno qualsiasi.
+	var last := ENEMY_TARGET - 1
+	var ultimo = _renderer_di(renderers, horde.kinds[last])
+	if h.check(ultimo != null,
+			"nessun renderer disegna la specie %d del nemico %d: la tabella KIND_SLOT non copre tutte e cinque le specie" % [horde.kinds[last], last]):
+		var placed: Transform3D = ultimo.instance_transform(horde.transforms[last], horde.radii[last], last)
 		var expected: Vector3 = horde.transforms[last]
 		h.near(placed.origin.x, expected.x, 0.001,
 			"la posizione x del nemico deve arrivare dall'orda")
 		h.near(placed.origin.z, expected.z, 0.001,
 			"la posizione z del nemico deve arrivare dall'orda")
-		h.near(placed.origin.y, expected.y + _lift_of(enemies, expected, horde.radii[last]), BOB_TOLERANCE,
+		h.near(placed.origin.y, expected.y + _lift_of(ultimo, expected, horde.radii[last]), BOB_TOLERANCE,
 			"la posizione y del nemico deve arrivare dall'orda piu' la sollevata")
 
 	# ## Oltre la capienza fissa: si ferma, non cresce e non legge fuori dal
 	# vettore. Lo si prova con un'orda **finta** e non scrivendo dentro
-	# `transforms`/`colors`/`radii` dell'orda vera: dal m8 quegli array sono
-	# quattro e allineati, e|londerli a mano per far salire `count` romperebbe
+	# `transforms`/`colors`/`radii`/`kinds` dell'orda vera: dal m8 quegli array sono
+	# cinque e allineati, e|londerli a mano per far salire `count` romperebbe
 	# proprio l'invariante (`radii.size() == count`) che questa sezione vuole
-	# vedere rispettato. La finte ha la **stessa forma** dei quattro campi di
-	# massa ed e' iniettata con `set_horde()`, che e' esattamente la via che il
-	# renderer mette a disposizione per questo.
+	# vedere rispettato. La finte ha la **stessa forma** dei cinque campi di massa
+	# ed e' iniettata con `set_horde()`, che e' esattamente la via che il renderer
+	# mette a disposizione per questo.
+	#
+	# `fill()` distribuisce i nemici su tre specie e quindi su tre modelli: la prova
+	# della capienza vale **su tutti e tre i renderer insieme**, e l'invariante e' la
+	# somma `disegnati + accorciati == chiesti`: nessun nemico sparisce e nessun
+	# nodo compare, in nessuno dei tre.
 	var fake := FakeHorde.new()
 	fake.name = "FakeHorde1024"
 	fake.fill(ENEMY_CAPACITY * 4)
-	enemies.set_horde(fake)
-	enemies.refresh()
-	h.eq(enemies.drawn_count(), ENEMY_CAPACITY,
-		"oltre la capienza fissa il renderer deve fermarsi alla capienza, non crescere")
-	h.eq(fake.drawn_asked(), ENEMY_CAPACITY * 4,
-		"l'orda finta deve aver chiesto 1024 nemici: altrimenti la prova sarebbe passata sul vuoto")
+	var chiesti_finta: int = ENEMY_CAPACITY * 4
+	for r in renderers:
+		r.set_horde(fake)
+	for r in renderers:
+		r.refresh()
+	var finta_disegnati := 0
+	var finta_accorciati := 0
+	for r in renderers:
+		finta_disegnati += int(r.drawn_count())
+		finta_accorciati += int(r.clamped_count())
+		h.check(r.drawn_count() <= ENEMY_CAPACITY,
+			"oltre la capienza fissa il renderer \"%s\" deve fermarsi alla capienza, non crescere: ne ha disegnati %d" % [r.name, r.drawn_count()])
+	h.eq(fake.drawn_asked(), chiesti_finta,
+		"l'orda finta deve aver chiesti %d nemici: altrimenti la prova sarebbe passata sul vuoto" % chiesti_finta)
+	h.eq(finta_disegnati + finta_accorciati, chiesti_finta,
+		"fra i tre renderer ogni nemico finisce o disegnato o accorciato, mai perso: %d + %d contro %d richiesti (%s)"
+			% [finta_disegnati, finta_accorciati, chiesti_finta, _ripartizione(renderers)])
 	h.eq(_count_nodes(arena), bare_nodes, "un'orda da 1024 non deve aggiungere nodi")
-	enemies.set_horde(horde)
+	for r in renderers:
+		r.set_horde(horde)
 	fake.free()
-	enemies.refresh()
+	for r in renderers:
+		r.refresh()
 
-## Un'orda finta con la **stessa forma** dei quattro campi di massa che il
-## renderer legge (`count`, `transforms`, `colors`, `radii`). Non registra niente
-## sul contratto e non e' nell'albero: vive solo per la durata della prova, e il
-## numero di nodi che questa sezione confronta non cambia nemmeno di uno.
+## Un'orda finta con la **stessa forma** dei cinque campi di massa che il
+## renderer legge (`count`, `transforms`, `colors`, `radii`, `kinds`). Non registra
+## niente sul contratto e non e' nell'albero: vive solo per la durata della prova, e
+## il numero di nodi che questa sezione confronta non cambia nemmeno di uno.
 ##
 ## `fill()` e' l'unica cosa che scrive i campi, e lo fa una volta sola.
 class FakeHorde extends Node:
@@ -829,6 +904,11 @@ class FakeHorde extends Node:
 	var transforms: PackedVector3Array = PackedVector3Array()
 	var colors: PackedColorArray = PackedColorArray()
 	var radii: PackedFloat32Array = PackedFloat32Array()
+	## L'indice di specie, che dal 2026-10-15 e' il quinto array parallelo: e' da lui
+	## che il renderer sceglie **il modello** del nemico. Un doppio senza questo
+	## array misurerebbe un canale che il gioco non usa e passerebbe perche' non
+	## chiede niente.
+	var kinds: PackedInt32Array = PackedInt32Array()
 	## Quanti nemici il renderer ha **chiesto** all'ultimo `refresh()`, cioe' il
 	## `count` che aveva davanti. Serve perche' `drawn_count()` racconta di quanto
 	## il renderer ne ha disegnati, e senza questo la prova passerebbe anche con
@@ -841,6 +921,7 @@ class FakeHorde extends Node:
 		transforms.resize(n)
 		colors.resize(n)
 		radii.resize(n)
+		kinds.resize(n)
 		for i in n:
 			transforms[i] = Vector3(float(i) * 0.25, 0.0, 0.0)
 			colors[i] = Color.WHITE
@@ -848,6 +929,11 @@ class FakeHorde extends Node:
 			# questa finte da sola lo renderebbe visibile, perche' qui i raggi
 			# non sono tutti uguali.
 			radii[i] = 0.4 + 0.01 * float(i % 8)
+			# Tre specie su tre modelli diversi (0 = icosfera, 2 = cubo, 3 = boss:
+			# gli indici che `KIND_SLOT` mappa su tre slot diversi), ed e' la minima
+			# distribuzione che fa lavorare tutti e tre i renderer invece di
+			# lasciarne due a guardare il vuoto.
+			kinds[i] = [0, 2, 3][i % 3]
 
 	func drawn_asked() -> int:
 		return asked
@@ -3019,10 +3105,11 @@ func _spawner(horde):
 
 func _milestone_8(h, arena: Node3D) -> void:
 	var horde = arena.get_node_or_null("Horde")
-	var enemies = arena.get_node_or_null("Enemies")
+	var renderers := _renderers_ordine(arena)
 	if not h.check(horde != null, "m8: la scena vera non ha il nodo Horde"):
 		return
-	if not h.check(enemies != null, "m8: la scena vera non ha il nodo Enemies"):
+	if not h.check(renderers.size() > 0 and renderers[0] != null,
+			"m8: la scena vera non ha i nodi Enemies / EnemiesBig / EnemiesBoss"):
 		return
 
 	# ## Superficie congelata: il campo deve esistere ed essere della forma giusta
@@ -3037,18 +3124,30 @@ func _milestone_8(h, arena: Node3D) -> void:
 				% type_string(typeof(radii))):
 		return
 
-	var mm = enemies.multimesh
-	if not h.check(mm != null and mm.mesh != null, "m8: il renderer non ha costruito la MultiMesh con la sua mesh"):
-		return
-	var mesh_size: Vector3 = mm.mesh.get_aabb().size
-	var legacy_extent: float = LEGACY_BASE_SCALE * _max3(mesh_size.x, mesh_size.y, mesh_size.z)
+	# ## Le tre mesh, ognuna **misurata sul suo nodo**
+	#
+	# Dal 2026-10-15 l'orda non ha una mesh sola: ne ha tre, e `instance_transform()`
+	# scala ognuna per `1 / lato maggiore della propria mesh`. Quindi **ogni misura
+	# sotto deve sapere quale modello sta disegnando il nemico che guarda**, e il
+	# numero non si porta piu' in giro: si chiede al nodo con `mesh_size()`.
+	for r in renderers:
+		var mm = r.multimesh
+		if not h.check(mm != null and mm.mesh != null,
+				"m8: il renderer \"%s\" non ha costruito la MultiMesh con la sua mesh" % r.name):
+			return
+	# L'estensione "di prima di m8" e' ancora calcolabile perche' il modello di
+	# allora (`enemy_small.glb`) e' **anche** lo slot 0 di oggi: e' la stessa base di
+	# confronto, non una copia di una mesh sparita.
+	var legacy_extent: float = LEGACY_BASE_SCALE * _max3(renderers[0].mesh_size().x,
+		renderers[0].mesh_size().y, renderers[0].mesh_size().z)
 
 	# L'orologio congelato: con il tempo che scorre cambiano il bob e la rotazione,
 	# e la geometria scritta nel buffer non e' piu' prevedibile. `_geometry_*`
 	# misura sempre con indice 0, dove il bob e' esattamente 0 (e' `sin(0)`), cosi'
 	# la misura della taglia non ha dentro il movimento.
-	enemies.set_time(0.0)
-	enemies.set_horde(horde)
+	for r in renderers:
+		r.set_time(0.0)
+		r.set_horde(horde)
 
 	var cap := _max_enemies(horde)
 	if not h.check(cap > 0,
@@ -3059,7 +3158,7 @@ func _milestone_8(h, arena: Node3D) -> void:
 	print("test_arena: m8 campione misurato con population=%d (massimo dichiarato di -orda), ripristinata a %d"
 		% [cap, saved_pop])
 
-	_proporzionalita(h, horde, enemies, mesh_size)
+	_proporzionalita(h, horde, renderers)
 	var kind_names := _kind_names(horde)
 	if not h.check(kind_names.size() > 0,
 			"m8: dalla tabella delle specie di -orda non si legge KIND_NAMES: senza i nomi il criterio n. 3 non puo' essere asserito per nome"):
@@ -3101,14 +3200,14 @@ func _milestone_8(h, arena: Node3D) -> void:
 	for i in SWEEP_COUNT:
 		var s: int = SWEEP_FIRST + i * SWEEP_STEP
 		horde.reseed(s)
-		_accumula(horde, enemies, mesh_size, by_kind)
+		_accumula(horde, renderers, by_kind)
 		seeds_used.append(s)
 		if by_kind.size() >= spendable.size():
 			break
 
 	print("test_arena: m8 campione: %d semi (%s) x %d nemici vivi, %d specie distinte su %d spendibili"
 		% [seeds_used.size(), str(seeds_used), horde.count, by_kind.size(), spendable.size()])
-	_specie_campionate(h, by_kind, mesh_size, legacy_extent, kind_names, spendable)
+	_specie_campionate(h, by_kind, renderers, legacy_extent, kind_names, spendable)
 
 	# Ripristino **sempre**: `check()` non interrompe, e una sezione che lascia
 	# l'orda con una popolazione diversa da quella trovata sporca quello che viene
@@ -3293,7 +3392,19 @@ func _nomi_di(presenti: Dictionary, kind_names: Array) -> Array[String]:
 ## rapporti. Il confronto e' fra **tutti** i nemici campionati, non fra due: una
 ## prova su due coppie passerebbe anche con un renderer che distingue solo due
 ## specie.
-func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
+##
+## ## m15: LA MISURA E' `scala x lato maggiore della mesh`, e non piu' la scala
+##
+## Dal 2026-10-15 ci sono tre modelli e l'instanza e' scalata di
+## `SIZE_FACTOR x RADIUS[k] / mesh_span`: quindi la scala **sola** non e' piu' la
+## taglia disegnata (il boss ha `mesh_span = 2,000000 m` e una scala meta' di quella
+## di un runner a parita' di raggio), ma `scala x mesh_span` sì. Se qui si misurasse
+## `scala / radii` l'invariante sarebbe falsamente rosso sui tre modelli diversi, e se
+## si dividesse tutto per uno solo dei tre mesh si misurerebbero solo le specie di quel
+## modello. Quindi il confronto e' su `_drawn_extent()`, che moltiplica per la mesh
+## **del renderer che disegna quel nemico**: e' la stessa funzione che m8 usava, con
+## l'unica differenza che la mesh gliela chiede il nodo invece di trovarla fissa.
+func _proporzionalita(h, horde, renderers: Array) -> void:
 	var radii: PackedFloat32Array = horde.radii
 	# L'allineamento degli array paralleli e' il punto 2 del contratto di m8, e lo
 	# si controlla **prima** di leggere `radii[i]`: leggere fuori dal vettore e'
@@ -3316,9 +3427,14 @@ func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
 		var r: float = float(radii[i])
 		if r <= 0.0:
 			continue
-		var t: Transform3D = enemies.instance_transform(horde.transforms[i], r, i)
-		# Il rapporto e' l'invariante, non il confronto a occhio fra due numeri.
-		var ratio: float = _scale_of(t.basis) / r
+		var chi = _renderer_di(renderers, horde.kinds[i])
+		if chi == null:
+			continue
+		var t: Transform3D = chi.instance_transform(horde.transforms[i], r, i)
+		# Il rapporto e' l'invariante, non il confronto a occhio fra due numeri: qui
+		# `disegnato` e' il lato maggiore **in metri**, cioe' la scala moltiplicata
+		# per il lato maggiore della mesh che lo disegna.
+		var ratio: float = _drawn_extent(t.basis, chi.mesh_size()) / r
 		lo = minf(lo, ratio)
 		hi = maxf(hi, ratio)
 		sample += 1
@@ -3337,8 +3453,16 @@ func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
 	var factor: float = (lo + hi) * 0.5
 	print("test_arena: m8 fattore di calibrazione MISURATO: disegnato/raggio = %.4f (min %.6f, max %.6f su %d nemici, escursione %.9f)"
 		% [factor, lo, hi, sample, hi - lo])
-	print("test_arena: m8 mesh %s, AABB %.6f x %.6f x %.6f m"
-		% [_mesh_name(enemies), mesh_size.x, mesh_size.y, mesh_size.z])
+	# Le tre mesh, una per renderer, con l'AABB **misurata** su ciascun nodo: dal
+	# 2026-10-15 il fattore di m15 (la normalizzazione per mesh) e' quello che tiene
+	# il rapporto uguale su tre modelli diversi, quindi il numero che lo produce va
+	# stampato accanto a quello che e' misurato. Il fattore e' **letto dalla fonte**
+	# (`_const_of`), non ricopiato qui.
+	var fattore_dichiarato := _const_of(RENDERER_SCRIPT, "SIZE_FACTOR")
+	for r in renderers:
+		var sz: Vector3 = r.mesh_size()
+		print("test_arena: m8 mesh %s su %s, AABB %.6f x %.6f x %.6f m, lato maggiore %.6f m, scala = SIZE_FACTOR / lato maggiore = %.6f"
+			% [_mesh_name(r), r.name, sz.x, sz.y, sz.z, _max3(sz.x, sz.y, sz.z), fattore_dichiarato / maxf(_max3(sz.x, sz.y, sz.z), 0.000001)])
 
 ## Raccoglie, **senza asserire**, quello che ogni specie osservata mostra nel
 ## campione. Le asserzioni sono tutte in `_quattro_specie`: qui si sommano i numeri
@@ -3355,13 +3479,20 @@ func _proporzionalita(h, horde, enemies, mesh_size: Vector3) -> void:
 ## nome di un'altra specie accanto al suo raggio — un errore che si vede solo
 ## confrontando la tabella con `src/sim/enemy.gd`. Il nome arriva da
 ## `_kind_names()`, cioe' dalla tabella di -orda.
-func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
+func _accumula(horde, renderers: Array, by_kind: Dictionary) -> void:
 	var radii: PackedFloat32Array = horde.radii
 	var tinte: PackedColorArray = horde.colors
 	for i in horde.count:
 		var kind: int = horde.kinds[i]
 		var r: float = float(radii[i])
-		var t: Transform3D = enemies.instance_transform(horde.transforms[i], r, i)
+		# Il nemico e' disegnato dal renderer **del suo modello**, quindi e' da li'
+		# che la geometria e la mesh arrivano: dal 2026-10-15 non esiste piu' una
+		# mesh sola da misurare una volta e riusare per tutte e cinque le specie.
+		var chi = _renderer_di(renderers, kind)
+		if chi == null:
+			continue
+		var mesh_size: Vector3 = chi.mesh_size()
+		var t: Transform3D = chi.instance_transform(horde.transforms[i], r, i)
 		if not by_kind.has(kind):
 			by_kind[kind] = {
 				"seen": 0,
@@ -3371,7 +3502,8 @@ func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 				"tint_unica": true,
 				"drawn": _drawn_extent(t.basis, mesh_size),
 				"height": _scale_of(t.basis) * mesh_size.y,
-				"lift": _lift_of(enemies, horde.transforms[i], r),
+				"lift": _lift_of(chi, horde.transforms[i], r),
+				"path": chi.mesh_path(),
 			}
 		var row: Dictionary = by_kind[kind]
 		row["seen"] = int(row["seen"]) + 1
@@ -3400,7 +3532,7 @@ func _accumula(horde, enemies, mesh_size: Vector3, by_kind: Dictionary) -> void:
 ##     dell'altezza effettiva del corpo. Questo controllo e' **indipendente** dalla
 ##     proporzionalita' — un renderer che scala i nemici e li lascia affondare
 ##     rispetta la proporzione e non si vede — ed e' la via corta per i denti.
-func _specie_campionate(h, by_kind: Dictionary, mesh_size: Vector3, legacy_extent: float, kind_names: Array, spendable: Array) -> void:
+func _specie_campionate(h, by_kind: Dictionary, renderers: Array, legacy_extent: float, kind_names: Array, spendable: Array) -> void:
 	h.eq(by_kind.size(), kind_names.size(),
 		"m8: il campione deve contenere tutte le specie dichiarate da -orda (%d), e ne contiene %d"
 		% [kind_names.size(), by_kind.size()])
@@ -3432,13 +3564,17 @@ func _specie_campionate(h, by_kind: Dictionary, mesh_size: Vector3, legacy_exten
 			"m8: il %s non puo' diventare piu' piccolo di prima: disegna %.3f m di lato maggiore, e prima di m8 ogni nemico ne disegnava %.3f m"
 				% [nm, float(row["drawn"]), legacy_extent])
 		# I piedi sul pavimento. L'altezza disegnata e' la scala dell'istanza per
-		# l'altezza della mesh: entrambe misurate, nessuna copiata.
+		# l'altezza della mesh **di quel modello**: entrambe misurate, nessuna
+		# copiata, ed e' la ragione per cui dal 2026-10-15 la mesh non si porta piu'
+		# in giro come un argomento solo.
+		var chi = _renderer_di(renderers, k)
+		var mesh_y: float = chi.mesh_size().y if chi != null else 0.0
 		var half: float = float(row["height"]) * 0.5
 		h.near(float(row["lift"]), half, LIFT_TOLERANCE,
 			"m8: il %s deve stare appoggiato sul pavimento, non affondato: centro a %.3f m sopra il terreno contro meta' altezza %.3f m. Con la taglia unica di prima la sollevata era fissa e questo corpo ne avrebbe avuti %.2f m sotto il terreno"
-				% [nm, float(row["lift"]), half, maxf(float(row["drawn"]) - LEGACY_BASE_SCALE * mesh_size.y, 0.0)])
-		rows.append("%s r=%.3f m -> %.3f m (%d visti)" % [nm, float(row["r_lo"]),
-			float(row["drawn"]), int(row["seen"])])
+				% [nm, float(row["lift"]), half, maxf(float(row["drawn"]) - LEGACY_BASE_SCALE * mesh_y, 0.0)])
+		rows.append("%s r=%.3f m -> %.3f m (%d visti, %s)" % [nm, float(row["r_lo"]),
+			float(row["drawn"]), int(row["seen"]), str(row["path"]).get_file()])
 
 	# Quattro taglie diverse. Due specie che si distinguono di un millimetro non
 	# sono distinguibili, quindi la soglia e' un centimetro e non un epsilon.
@@ -3518,6 +3654,24 @@ func _mesh_name(enemies) -> String:
 ## non in `const`, per la trappola dei `const preload` dichiarata in testa al file.
 const MORTAR_SCRIPT := "res://src/render/mortar_renderer.gd"
 
+## -arena, m15: il file che costruisce il colpo **in volo**. Caricato a runtime con
+## `load()` e non in `const`, per la trappola dei `const preload` dichiarata in testa
+## al file.
+const SHOT_SCRIPT := "res://src/render/mortar_shot_renderer.gd"
+
+## Il numero di nodi che `scenes/arena_main.tscn` deve avere, misurato e **scomposto**,
+## perche' un numero assoluto senza le sue voci non dice nulla quando si sposta:
+##
+##     46  la scena di prima di m15 (misurato da questo test il 2026-10-15)
+##  + 1  `MortarShot`: il colpo che cade (uno, qualunque sia il numero di colpi)
+##  + 2  `EnemiesBig` e `EnemiesBoss`: i due modelli in piu' dell'orda
+##  = 49
+##
+## Il tetto e' 120 e la regola che conta non e' il totale: e' che **un colpo in volo
+## e' un nodo** e che **un nemico non e' un nodo**. Le due cose sono asserite
+## separate, sotto, e il totale e' il numero che le somma.
+const NODI_ATTESI := 49
+
 ## Tolleranza del confronto fra la posizione **disegnata** e quella **del canale**.
 ## `mortar_shot_at(i)` mette `x` e `y` del mondo dentro una `Transform3D` a 32
 ## bit senza scalarla: l'errore e' dell'ordine di 1e-7 m. 1e-4 m e' un decimo di
@@ -3555,6 +3709,226 @@ const CUPOLA_SEED_TRIES := 96
 ## secondo e un quarto sopra il tempo di caduta, e serve a coprire il fatto che il
 ## canale scende di `DT` a ogni passo.
 const CUPOLA_FALL_STEPS_MAX := 75
+
+# --- 12. m15: il colpo che cade --------------------------------------------------
+#
+# ## LA RICHIESTA DELL'UTENTE, 2026-10-15
+#
+# «non si vede nessun proiettile — la cupola c'e' ma non cade nulla dal cielo».
+# `mortar_renderer.gd` disegna la cupola a terra e nient'altro: si vede **dove** cade
+# il colpo e non **da dove arriva**, e un avvertimento senza causa e' un avvertimento
+# che il giocatore impara a ignorare. Qui si disegna il corpo che cade.
+#
+# ## I QUATTRO CRITERI, e il difetto che ognuno cerca
+#
+#   1. **il colpo arriva quando i secondi residui arrivano a zero**: l'errore fra il
+#      tempo di caduta **disegnato** e `Game.mortar_telegraph_s` sotto il passo di
+#      simulazione. Difetto cercato: un colpo che tocca terra (o sparisce) un passo
+#      prima o dopo della cupola, che all'occhio e' un colpo che cade da solo.
+#   2. **sincronizzazione vera**: `instance_count == mortar_shot_count`, posizioni
+#      combacianti col canale, e **zero** a canale vuoto. Difetto cercato: il colpo
+#      fantasma, quello che continua a cadere dopo l'impatto.
+#   3. **un nodo, non uno per colpo**: `node_count` identico a vuoto e con N colpi.
+#   4. **il tempo viene riletto**: il contratto viene avvelenato e il colpo deve
+#      rivedere il veleno, cioe' la caduta segue `mortar_telegraph_s` e non una
+#      copia messa in un campo al primo frame.
+
+## Il veleno di `_m15_colpo_tempo`: il valore a cui `Game.mortar_telegraph_s` viene
+## portato di proposito, per distinguere «il colpo legge il contratto» da «il colpo ha
+## letto un numero e lo ha tenuto». Lontanissimo dai 0,8293 s di produzione.
+const TELEGRAPH_POISON := 7.5
+
+func _m15_colpo(h, arena: Node3D, game: Node) -> void:
+	var t0 := Time.get_ticks_msec()
+	var horde = arena.get_node_or_null("Horde")
+	var player = arena.get_node_or_null("Player")
+	var colpo = arena.get_node_or_null("MortarShot")
+	if not h.check(horde != null and player != null and colpo != null,
+			"m15: la scena vera deve avere i nodi Horde, Player e MortarShot"):
+		return
+	h.check(colpo.is_built(),
+		"m15: il nodo MortarShot deve aver costruito la sua MultiMesh: un nodo che non costruisce niente non puo' essere un difetto di sincronizzazione, e' un difetto di esistenza")
+
+	var spawner = _spawner(horde)
+	if not h.check(spawner != null,
+			"m15: dalla scena di -orda non si legge piu' Spawner: senza il produttore dei pesi il pilotaggio non puo' arrivare allo spawn"):
+		return
+	var peso_dichiarato: float = float(spawner.MORTAR_WEIGHT)
+	var pop_dichiarata: int = horde.population
+	var pos_dichiarata: Vector3 = player.global_position
+	var vita_dichiarata: float = player.hp
+
+	# ## LA PREMESSA MISURATA: il canale e' lo stesso della cupola, quindi a vuoto
+	# ## anche il colpo e' a vuoto
+	colpo.refresh()
+	h.eq(colpo.drawn_count(), 0,
+		"m15: nessun colpo in volo, nessun corpo disegnato")
+	var nodi_vuoto := _count_nodes(arena)
+	h.eq(nodi_vuoto, NODI_ATTESI,
+		"m15: la scena deve avere %d nodi a vuoto (46 di prima di m15, piu' 1 per il colpo e 2 per i due modelli in piu' dell'orda): sono %d"
+			% [NODI_ATTESI, nodi_vuoto])
+
+	# ## LA VOLA: lo stesso pilotaggio di m13, sullo stesso canale
+	var accesa := _accendi_il_mortar_per_la_cupola(h, horde, player, spawner, "m15 colpo")
+	if not h.check(accesa.get("ok", false), "m15: %s" % str(accesa.get("motivo", ""))):
+		_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+		return
+
+	horde.step(DT)
+	if not h.check(horde.mortar_shot_count > 0,
+			"m15: il mortar fermo a %.3f m dal giocatore deve aver sparito entro il primo passo"
+				% float(accesa["distanza"])):
+		_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+		return
+
+	# ## CRITERIO 2, la sincronizzazione: stessa domanda della cupola, stesso canale
+	colpo.refresh()
+	var in_volo: int = horde.mortar_shot_count
+	h.eq(colpo.drawn_count(), in_volo,
+		"m15: criterio 2, il colpo deve disegnare tutti i colpi in volo")
+	h.eq(colpo.requested_count(), in_volo,
+		"m15: criterio 2, precondizione: il canale deve aver chiesto %d corpi, altrimenti la prova passerebbe sul vuoto" % in_volo)
+	var mm = colpo.multimesh
+	if h.check(mm != null, "m15: criterio 2, il renderer del colpo non ha costruito la MultiMesh"):
+		h.eq(mm.instance_count, in_volo,
+			"m15: criterio 2, instance_count deve essere il numero di colpi in volo")
+		h.eq(mm.visible_instance_count, in_volo,
+			"m15: criterio 2, tutti i corpi devono essere visibili: quelli nascosti sono colpi senza avviso")
+	for i in mini(colpo.drawn_count(), in_volo):
+		var punto: Vector3 = horde.mortar_shot_at(i)
+		var t: Transform3D = colpo.written_transform(i)
+		h.near(t.origin.x, punto.x, DOME_TOLERANCE,
+			"m15: criterio 2, colpo %d: la x disegnata deve combaciare con la x del canale" % i)
+		h.near(t.origin.z, punto.z, DOME_TOLERANCE,
+			"m15: criterio 2, colpo %d: la z disegnata deve combaciare con la z del canale" % i)
+
+	# ## CRITERIO 1: LA CADUTA. Il tempo di caduta **disegnato** contro quello che
+	# ## il contratto dichiara
+	#
+	# La misura non rilegge la formula: prende **due fotogrammi consecutivi** del
+	# colpo cosi' come e' stato scritto nel buffer e ricava da quelli la velocita'
+	# (`(h0 - h1) / DT`), poi il tempo che ci vuole a coprire l'altezza di partenza
+	# (`h0 / v`). Quel numero e' quello che **l'occhio** legge dalla caduta, e viene
+	# confrontato con `Game.mortar_telegraph_s`: sotto il passo di simulazione e'
+	# invisibile, sopra no.
+	var telegrrafo := _contract_float(game, "mortar_telegraph_s")
+	var h0: float = colpo.tip_height(0)
+	var left0 := float(horde.mortar_shot_left(0))
+	h.near(left0, telegrrafo, DOME_TOLERANCE,
+		"m15: il colpo appena sparito deve avere tutto il tempo del telegrrafo: %.6f s contro %.6f s" % [left0, telegrrafo])
+	h.near(h0, colpo.start_height(), DOME_TOLERANCE,
+		"m15: la quota di partenza del colpo deve essere quella dichiarata in src/render/mortar_shot_renderer.gd (%.4f m), non %.4f m"
+			% [colpo.start_height(), h0])
+	h.near(colpo.telegraph_used(), telegrrafo, DOME_TOLERANCE,
+		"m15: il colpo deve aver letto Game.mortar_telegraph_s all'ultimo refresh")
+
+	horde.step(DT)
+	colpo.refresh()
+	var h1: float = colpo.tip_height(0)
+	var v: float = (h0 - h1) / DT
+	var caduta_disegnata: float = h0 / maxf(v, 0.000001)
+	var errore := absf(caduta_disegnata - telegrrafo)
+	h.check(errore < DT,
+		"m15: criterio 1, l'errore fra la caduta **disegnata** (%.6f s) e Game.mortar_telegraph_s (%.6f s) deve essere sotto il passo di simulazione %.6f s: e' %.6f s, cioe' %.2f passi. Sopra il passo l'occhio vede il colpo atterrare e la cupola sparire un attimo dopo"
+			% [caduta_disegnata, telegrrafo, DT, errore, errore / DT])
+
+	# ## CRITERIO 3: un nodo, non uno per colpo, e la caduta fino all'impatto
+	var nodi_pieno := _count_nodes(arena)
+	h.eq(nodi_pieno, nodi_vuoto,
+		"m15: %d colpi in volo non devono aggiungere ne' un nodo: %d a vuoto contro %d a pieno" % [in_volo, nodi_vuoto, nodi_pieno])
+	h.eq(colpo.get_child_count(), 0,
+		"m15: il renderer dei colpi non deve avere figli: un nodo per colpo e' la stessa classe di difetto del nodo per nemico")
+	h.check(nodi_pieno < NODE_BUDGET,
+		"m15: node_count deve restare sotto %d con i colpi in volo: e' %d" % [NODE_BUDGET, nodi_pieno])
+
+	var caduti := 0
+	while horde.mortar_shot_count > 0 and caduti < CUPOLA_FALL_STEPS_MAX:
+		horde.step(DT)
+		caduti += 1
+	h.eq(horde.mortar_shot_count, 0,
+		"m15: il colpo deve essere caduto entro %d passi: ne restano %d" % [CUPOLA_FALL_STEPS_MAX, horde.mortar_shot_count])
+
+	# ## IL COLPO FANTASMA: la riga che non si perdona
+	colpo.refresh()
+	h.eq(colpo.drawn_count(), 0,
+		"m15: nessun colpo fantasma: il colpo e' caduto e il corpo sparisce")
+	if h.check(mm != null, "m15: il renderer del colpo deve avere la sua MultiMesh"):
+		h.eq(mm.instance_count, 0,
+			"m15: instance_count deve tornare a 0 quando il canale e' vuoto: e' %d" % mm.instance_count)
+		h.eq(mm.visible_instance_count, 0,
+			"m15: nessuna istanza visibile dopo l'impatto: e' %d" % mm.visible_instance_count)
+		h.check(mm.mesh != null, "m15: il colpo deve avere una mesh: un corpo che non si vede non e' un avvertimento")
+
+	_m15_colpo_tempo(h, game, colpo, horde)
+
+	print("test_arena: m15 colpo: %d in volo -> %d istanze, caduta disegnata %.6f s contro mortar_telegraph_s %.6f s, scarto %.6f s = %.3f x DT (DT %.6f s), velocità %.3f m/s, caduti in %d passi"
+		% [in_volo, in_volo, caduta_disegnata, telegrrafo, errore, errore / DT, DT, v, caduti])
+	print("test_arena: m15 colpo, nodi: %d a vuoto contro %d con %d colpi in volo, tetto %d: il colpo costa UN nodo qualunque sia il numero di colpi (la scena e' a 46 nodi di prima di m15, piu' 1 per il colpo e 2 per i due modelli dell'orda)"
+		% [nodi_vuoto, nodi_pieno, in_volo, NODE_BUDGET])
+	_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
+	print("test_arena: m15 colpo, sezione in %d ms" % (Time.get_ticks_msec() - t0))
+
+## ## CRITERIO 4: il tempo viene riletto, col veleno
+##
+## Come `_m13_cupola_canale` per il raggio: qui si avvelena `mortar_telegraph_s` e si
+## verifica che il colpo lo **riveda**. Una copia — un campo scritto al primo refresh
+## e non più riletto — prenderebbe il valore giusto una volta e poi mentirebbe in
+## silenzio per tutta la partita, e la differenza si vedrebbe solo al primo colpo di
+## una partita con un contratto diverso.
+func _m15_colpo_tempo(h, game: Node, colpo, horde) -> void:
+	if not h.check(game != null, "m15: il contratto non c'e': la prova del canale non puo' girare"):
+		return
+	var vero := _contract_float(game, "mortar_telegraph_s")
+	if not h.check(vero > 0.0, "m15: Game.mortar_telegraph_s deve essere positivo: letto %.4f" % vero):
+		return
+	var finta := FakeShots.new()
+	finta.name = "FakeShotsTempo"
+	finta.fill(1)
+	colpo.set_horde(finta)
+
+	# 1. IL VERO, per primo: senza questo «ha riletto il veleno» potrebbe voler dire
+	# soltanto «ha cambiato numero per caso».
+	colpo.refresh()
+	h.eq(colpo.drawn_count(), 1,
+		"m15: precondizione, col canale finto da un colpo il renderer ne deve disegnare uno")
+	h.near(colpo.telegraph_used(), vero, DOME_RADIUS_TOLERANCE,
+		"m15: prima dell'avvelenamento il colpo deve leggere il tempo vero %.6f s: %.6f" % [vero, colpo.telegraph_used()])
+
+	# 2. IL VELENO, e la precondizione che lo mette al suo posto.
+	game.set("mortar_telegraph_s", TELEGRAPH_POISON)
+	h.near(_contract_float(game, "mortar_telegraph_s"), TELEGRAPH_POISON, DOME_RADIUS_TOLERANCE,
+		"m15: il veleno deve essere %.1f s sul contratto, altrimenti il criterio non distingue «il colpo legge il contratto» da «il colpo ha letto un numero e lo ha tenuto»"
+			% TELEGRAPH_POISON)
+
+	# 3. E LA CUPOLA CHE GIA' AVEVA LETTO IL VERO: questa e' la riga che ha denti.
+	colpo.refresh()
+	h.near(colpo.telegraph_used(), TELEGRAPH_POISON, DOME_RADIUS_TOLERANCE,
+		"m15: il colpo aveva gia' letto %.6f s e deve rivedere il veleno %.1f s: se dice ancora %.6f s sta usando una copia"
+			% [vero, TELEGRAPH_POISON, colpo.telegraph_used()])
+	# E la geometria cambia davvero: con un tempo piu' corto la quota del colpo nella
+	# stessa posizione della caduta e' piu' alta, quindi la copia non e' solo un numero
+	# stampato diverso.
+	var t_veleno: Transform3D = colpo.written_transform(0)
+	h.near(colpo.tip_height(0), colpo.start_height() * (float(finta.mortar_shots[0].z) / TELEGRAPH_POISON), 0.0001,
+		"m15: con il veleno a terra la caduta deve essere quella del contratto avvelenato: la punta e' a %.4f m" % colpo.tip_height(0))
+
+	# 4. IL RIPRISTINO, e un'altra istanza che rivede il valore vero.
+	game.set("mortar_telegraph_s", vero)
+	h.near(_contract_float(game, "mortar_telegraph_s"), vero, DOME_RADIUS_TOLERANCE,
+		"m15: ripristino, il contratto deve tornare a %.6f s: e' %.6f" % [vero, _contract_float(game, "mortar_telegraph_s")])
+	h.check(not is_equal_approx(_contract_float(game, "mortar_telegraph_s"), TELEGRAPH_POISON),
+		"m15: il ripristino non ha spostato niente: il contratto e' ancora al veleno %.1f s e le sezioni che vengono dopo misurerebbero un numero che nessuno ha scritto" % TELEGRAPH_POISON)
+	colpo.refresh()
+	h.near(colpo.telegraph_used(), vero, DOME_RADIUS_TOLERANCE,
+		"m15: ripristino, il colpo gia' montato deve tornare al valore vero %.6f s: %.6f" % [vero, colpo.telegraph_used()])
+	colpo.set_horde(horde)
+	colpo.refresh()
+	finta.free()
+
+	print("test_arena: m15 colpo, canale: il tempo in campo era %.6f s, contratto avvelenato a %.1f s -> riletto %.1f s; ripristinato a %.6f s -> la stessa istanza rivede %.6f s"
+		% [vero, TELEGRAPH_POISON, TELEGRAPH_POISON, vero, vero])
+
+# --- Interno -------------------------------------------------------------------
 
 ## Quanti colpi finti chiede la prova della capienza: quattro volte `CAPACITY` del
 ## renderer, che e' un multiplo di `MAX_ENEMIES`.
@@ -3801,7 +4175,12 @@ func _scarto_cupola(cupola, grezzi: PackedVector3Array) -> float:
 ## `engage_for()` e' la distanza a cui il mortar **si ferma**, ed e' di `-orda`: si
 ## chiama sul suo script (`E`), non si scrive. Il giocatore viene messo mezzo metro
 ## oltre, cosi' il nemico e' gia' `fermo` al primo passo e spara.
-func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner) -> Dictionary:
+##
+## L'etichetta serve solo alla stampa: dal 2026-10-15 questa stessa procedura mette
+## in scena il contesto sia per la cupola (`mortar_renderer.gd`) sia per il colpo in
+## volo (`mortar_shot_renderer.gd`), che leggono lo stesso canale, e una riga che
+## dicesse «m13 cupola» dentro la sezione del colpo sarebbe una riga che mente.
+func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner, etichetta := "m13 cupola") -> Dictionary:
 	var vuoto := {"ok": false, "motivo": "", "seed": -1, "nemico": -1, "distanza": -1.0}
 	var e = _enemy_script(horde)
 	if not h.check(e != null,
@@ -3898,8 +4277,8 @@ func _accendi_il_mortar_per_la_cupola(h, horde, player, spawner) -> Dictionary:
 	vuoto["ok"] = true
 	vuoto["nemico"] = 0
 	vuoto["distanza"] = misurata
-	print("test_arena: m13 cupola, il contesto: MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test**, ripresa all'onda %d, un nemico solo di specie mortar trovato al seme %d dopo %d semi; fermata a %.3f m (E.engage_for = 2 x blast), giocatore a %.3f m"
-		% [dichiarato, MORTAR_STEER, horde.wave, int(vuoto["seed"]), semi, fermata, misurata])
+	print("test_arena: %s, il contesto: MORTAR_WEIGHT di produzione %.4f portato a %.4f **dal test**, ripresa all'onda %d, un nemico solo di specie mortar trovato al seme %d dopo %d semi; fermata a %.3f m (E.engage_for = 2 x blast), giocatore a %.3f m"
+		% [etichetta, dichiarato, MORTAR_STEER, horde.wave, int(vuoto["seed"]), semi, fermata, misurata])
 	return vuoto
 
 ## ## CRITERIO 5: il canale chiuso col veleno
@@ -4207,7 +4586,286 @@ class FakeShots extends Node:
 			return -1.0
 		return mortar_shots[i].z
 
-# --- Interno -------------------------------------------------------------------
+# --- 11. m15: la forma che distingue le specie, e il colpo che cade -----------
+#
+# ## LE DUE COSE CHE L'UTENTE HA DETTO, 2026-10-15
+#
+# «non si vede nessun proiettile — la cupola c'e' ma non cade nulla dal cielo»
+# «come si distingue il mortar dagli altri nemici»
+#
+# Sono due difetti di due pezzi diversi e percio' due sezioni: `_m15_forme` guarda
+# **la forma** (le cinque specie non sono piu' tutte lo stesso GLB) e `_m15_colpo`
+# guarda **il colpo in volo** (arriva a terra quando i secondi residui arrivano a
+# zero). Nessuna delle due tocca `src/sim/` e nessuna delle due aggiunge un nodo per
+# elemento.
+
+## ## LA DISTRIBUZIONE, dichiarata qui e verificata sotto
+##
+## Con tre modelli e cinque specie **due specie ne condividono uno**, e la scelta va
+## dichiarata perche' un criterio che dice solo «le mesh sono diverse» non dice
+## *quali* e non dice *perche'*:
+##
+##   - **runner e grunt condividono `enemy_small.glb`.** Sono le due specie piu'
+##     numerose (145 su 200 nel campione di m8, 72%) e le due piu' piccole (1,53 m e
+##     2,04 m disegnate: mezzo metro di differenza si vede senza guardare la forma).
+##     Non hanno bisogno di essere identificate a distanza — sono la folla che arriva
+##     addosso al giocatore — e il modello da 20 triangoli tiene basso il costo della
+##     folla, dove il boss da 80 ne raggiungerebbe 200 su 200.
+##   - **brute e mortar condividono `enemy_big.glb`.** Il cubo e' l'unica forma con
+##     spigoli duri: a 10,42 m, che e' dove il mortar si ferma, una sfera e' una
+##     macchia e un cubo e' un'arma piantata a terra. E' la risposta diretta a «non
+##     riesco a distinguerlo»: non e' una tinta piu' satura, e' una forma che a
+##     quella distanza ha quattro angoli instead of zero.
+##   - **boss da solo su `enemy_boss.glb`.** E' l'unico corpo che deve essere
+##     riconoscibile a 40 m perche' e' quello che si deve decidere di affrontare, ed
+##     e' l'unico modello con 80 triangoli: metterlo anche in mano alla folla costerebbe
+##     200 corpi da 80 triangoli per non guadagnare niente.
+##
+## ### LA COPPIA PEGGIORE, e perche' non e' quella che si e' scelta
+##
+## **boss e mortar.** Sono le due uniche specie che il giocatore deve **decidere** da
+## lontano e le due decisioni sono opposte (schiva / affronta), hanno i due raggi di
+## morso piu' diversi (3,10 m contro 2,42 m) e sono le due piu' grandi. Due corpi
+## della stessa forma e della stessa taglia con due morsi diversi e' il modo piu'
+## economico di far sbagliare una schivata, e nessuna tinta li salva perche' il
+## giocatore li vede in campo pieno, dove le tinte si confondono. Quella e' la coppia
+## che questa sezione dichiara **non** scritta, ed e' l'unica giudicabile dall'occhio
+## senza un numero.
+const M15_COPPIA_CONDIVISA := ["grunt", "runner"]
+
+## Tolleranza della banda fra **quello che si vede** e **quello che morde**. E' la
+## stessa natura di `RADIUS_TOLERANCE` (un `float` a 32 bit passato per una `Basis`):
+## 1e-4 m e' quattro ordini sopra il rumore e quattro sotto il difetto da prendere,
+## cioe' un corpo che si vede piu' grande di quanto morde.
+const BANDA_MORSO := 0.0001
+
+func _m15_forme(h, arena: Node3D, horde) -> void:
+	var t0 := Time.get_ticks_msec()
+	var renderers := _renderers_ordine(arena)
+	if not h.check(renderers.size() == 3 and renderers[0] != null
+			and renderers[1] != null and renderers[2] != null,
+			"m15: la scena deve avere i tre renderer dell'orda (Enemies, EnemiesBig, EnemiesBoss): una `MultiMesh` ha una sola mesh, quindi tre modelli sono tre nodi"):
+		return
+
+	# ## LE DUE TABELLE, lette dai loro proprietari e confrontate voce per voce
+	#
+	# `KIND_SLOT` e' di -arena (`src/render/horde_renderer.gd`) e `KIND_NAMES` e' di
+	# -orda (`src/sim/enemy.gd`). Sono due indici diversi sulla stessa cosa — «quale
+	# specie e' questa?» — quindi nessuna delle due puo' muoversi senza che questa
+	# sezione se ne accorga: e' la stessa catena chiusa che m9 chiuse per il raggio.
+	var slot := _const_list_of(RENDERER_SCRIPT, "KIND_SLOT")
+	var mesh_scenes := _const_list_of(RENDERER_SCRIPT, "MESH_SCENES")
+	var kind_names := _kind_names(horde)
+	if not h.check(slot.size() > 0 and mesh_scenes.size() > 0 and kind_names.size() > 0,
+			"m15: KIND_SLOT e MESH_SCENES di src/render/horde_renderer.gd e KIND_NAMES di src/sim/enemy.gd devono esistere tutte e tre: letti %d, %d e %d"
+				% [slot.size(), mesh_scenes.size(), kind_names.size()]):
+		return
+	h.eq(slot.size(), kind_names.size(),
+		"m15: KIND_SLOT deve avere una voce per ogni specie che -orda dichiara: %d voci contro %d nomi. Una specie in piu' senza un modello significa nemici che nessuno sa disegnare"
+			% [slot.size(), kind_names.size()])
+
+	# ## IL CRITERIO 1: le cinque specie non sono piu' tutte lo stesso GLB
+	#
+	# Il difetto di oggi e' `slot == [0,0,0,0,0]`: questa riga **fallisce** su quel
+	# file e passa su quello di adesso, ed e' per questo che il numero minimo e' due
+	# e non uno — se il tetto fosse uno, un renderer che assegna a tutti il modello 0
+	# e uno che assegna a tutti il modello 1 passerebbero entrambi.
+	var distinti := {}
+	for k in slot.size():
+		distinti[int(slot[k])] = true
+	h.check(distinti.size() >= 2,
+		"m15: le cinque specie non possono essere tutte lo stesso GLB: la tabella ne assegna %d modelli distinti su %d (%s). Il difetto di prima era una sola icosfera tinta per istanza, e non si distingueva il mortar"
+			% [distinti.size(), slot.size(), str(_tabella_specie(slot, kind_names))])
+	h.check(distinti.size() <= mesh_scenes.size(),
+		"m15: non si possono usare piu' modelli di quanti ce ne sono dichiarati: %d slot in uso contro %d modelli" % [distinti.size(), mesh_scenes.size()])
+	for s in distinti.keys():
+		h.check(int(s) >= 0 and int(s) < mesh_scenes.size(),
+			"m15: lo slot %d non corrisponde a nessun modello dichiarato (ce ne sono %d): `slot_of_kind()` restituirebbe -1 e quei nemici non sarebbero disegnati da nessuna parte" % [int(s), mesh_scenes.size()])
+
+	# ## LA COPPIA CHE CONDIVIDE: dichiarata qui, verificata sulla tabella
+	#
+	# Non basta dire «sono diverse»: il criterio dice **quali due**, perche' e' la
+	# scelta che l'occhio giudica. Con cinque specie e tre modelli la risposta e'
+	# obbligata a essere una coppia (2 + 2 + 1) e il test la confronta con quella
+	# dichiarata sopra: se domani si scambiasse la coppia, questa riga andrebbe rossa
+	# invece di cambiare silenziosamente il gioco.
+	var per_slot := {}
+	for k in slot.size():
+		var s2 := int(slot[k])
+		if not per_slot.has(s2):
+			per_slot[s2] = []
+		per_slot[s2].append(str(kind_names[k]))
+	var condivise: Array[String] = []
+	for s2 in per_slot.keys():
+		var gruppo: Array = per_slot[s2]
+		if gruppo.size() > 1:
+			var ordinato: Array[String] = []
+			for n2 in gruppo:
+				ordinato.append(str(n2))
+			ordinato.sort()
+			condivise.append(str(ordinato))
+	condivise.sort()
+	var attese: Array[String] = []
+	var dichiarate: Array = M15_COPPIA_CONDIVISA.duplicate()
+	dichiarate.sort()
+	attese.append(str(dichiarate))
+	# Il numero e' **2, non 1**, e il numero giusto e' quello che dice la
+	# distribuzione dichiarata due righe sopra (`2 + 2 + 1`): cinque specie su tre
+	# modelli obbliga a riempire tutti e tre gli slot, e `2 + 2 + 1` sono **due**
+	# coppie, non una. `src/render/horde_renderer.gd` lo dichiara riga per riga
+	# (slot 1 -> brute (2) **e** mortar (4), slot 2 -> boss (3) da solo), quindi
+	# l'1 di questa riga contraddiceva il design dichiarato e non il contrario:
+	# era il numero del test a essere rimasto indietro. La coppia peggiore,
+	# boss+mortar, resta comunque separata dai tre slot, ed e' la cosa che questa
+	# sezione dichiara di voler vedere.
+	h.eq(condivise.size(), 2,
+		"m15: con %d modelli e %d specie la distribuzione dichiarata e' 2 + 2 + 1, quindi le coppie che condividono sono due per forza: ne risultano %d (%s)"
+			% [mesh_scenes.size(), slot.size(), condivise.size(), str(condivise)])
+	h.check(condivise.has(attese[0]),
+		"m15: la coppia dichiarata che condivide il modello e' %s; le coppie che lo condividono sono %s"
+			% [attese[0], str(condivise)])
+
+	# ## LE MESH **DICHIARATE** CONTRO LE MESH **DISEGNATE**
+	#
+	# La tabella puo' essere giusta e la scena sbagliata: se i tre nodi portassero
+	# tutti lo stesso `mesh_slot`, il gioco mostrerebbe un solo modello mentre il
+	# file dichiara tre. Qui si legge `mesh_path()` del nodo vivo, che e' il percorso
+	# che sta davvero nel `MultiMesh`.
+	var righe: Array[String] = []
+	for k in kind_names.size():
+		var nome: String = str(kind_names[k])
+		var chi = _renderer_di(renderers, k)
+		if not h.check(chi != null,
+				"m15: nessun renderer disegna la specie \"%s\": KIND_SLOT la assegna allo slot %d e la scena non ha un nodo con quel mesh_slot"
+					% [nome, int(slot[k])]):
+			continue
+		var path: String = chi.mesh_path()
+		h.eq(path, str(mesh_scenes[int(slot[k])]),
+			"m15: la specie \"%s\" deve essere disegnata da %s, ed e' il percorso che il suo nodo sta disegnando: %s"
+				% [nome, str(mesh_scenes[int(slot[k])]), path])
+		righe.append("%s -> %s" % [nome, path.get_file()])
+	# E i tre renderer devono disegnare tre percorsi **diversi**: e' la prova che i
+	# cinque corpi non sono la stessa forma con la stessa tinta.
+	var percorsi := {}
+	for r in renderers:
+		percorsi[r.mesh_path()] = true
+	h.eq(percorsi.size(), renderers.size(),
+		"m15: i tre renderer dell'orda devono disegnare tre percorsi diversi, non %d: %s"
+			% [percorsi.size(), str(percorsi.keys())])
+
+	# ## LA BANDA COL MORSO: `0,0000`, e perche' questa sezione e' quella che la
+	# ## chiude se la normalizzazione dei tre modelli l'avesse spostata
+	#
+	# Il numero che m8 ha calibrato e' `SIZE_FACTOR`, e la regola e' «la taglia che
+	# vedi e' quella che morde»: il raggio che morde e' `RADIUS[k] x body_scale`, e
+	# quello che si vede e' `scala x lato maggiore della mesh`. Con tre modelli la
+	# scala porta anche `1 / lato maggiore`, quindi i due numeri coincidono **solo**
+	# se la normalizzazione e' quella giusta. Qui si misura la banda fra i due, per
+	# ogni specie, e deve restare **0,0000 m**: non una banda che si allarga e si
+	# dichiara, ma la banda che m11-quarta aveva chiuso e che nessuno puo' spostare
+	# senza che una porta lo dica.
+	var banda := 0.0
+	var righe_banda: Array[String] = []
+	for k in kind_names.size():
+		var chi = _renderer_di(renderers, k)
+		if chi == null:
+			continue
+		var nome: String = str(kind_names[k])
+		# Il raggio del corpo **misurato dall'orda** (`radii`), non `RADIUS[k]`: e'
+		# la stessa regola che m8 si e' data, e cosi' il confronto regge anche se
+		# `-orda` cambiasse una tabella.
+		var r_corpo := -1.0
+		for i in horde.count:
+			if horde.kinds[i] == k:
+				r_corpo = float(horde.radii[i])
+				break
+		# ## LA FONTE DEL RAGGIO, e perche' una specie puo' non essere in campo
+		#
+		# Il raggio lo si legge dall'orda **finche' la specie c'e'**: e' la regola di
+		# m8 e resta la prima scelta. Ma questa sezione gira su un'orda di ondata 1,
+		# dove `Spawner.wave_weights(1)` dà **peso 0,0 al boss**: un nemico di quella
+		# specie non puo' esistere, e chiederlo sarebbe chiedere un numero che il
+		# motore non puo' produrre — la stessa cosa che la sezione m8 dichiara gia'
+		# per il mortar. Per quelle specie il raggio lo si legge da `radius_of(k)`
+		# di `src/sim/enemy.gd`, cioe' **dal proprietario**, non da una copia qui.
+		#
+		# Il confronto resta lo stesso e non diventa circolare: `bite_range_of(k) -_
+		# TOUCH_REACH` vale `RADIUS[k] x body_scale`, quindi la banda che si misura
+		# qui e' `r x SIZE_FACTOR` contro `RADIUS[k] x body_scale`, e resta la
+		# domanda di m8 (la normalizzazione per mesh tiene i due numeri uguali),
+		# non un'identita' che il test si e' scritto da solo.
+		var fonte := "orda"
+		if r_corpo <= 0.0:
+			r_corpo = _raggio_di_specie(k)
+			fonte = "src/sim/enemy.gd::radius_of"
+		if not h.check(r_corpo > 0.0, "m15: nessun raggio per la specie \"%s\": ne' l'orda in campo ne' `radius_of()` di -orda lo danno, e senza un raggio non c'e' niente da confrontare col morso" % nome):
+			continue
+		var t: Transform3D = chi.instance_transform(Vector3.ZERO, r_corpo, 0)
+		var visto: float = _drawn_extent(t.basis, chi.mesh_size())
+		var morde: float = float(horde.bite_range_of(k)) - _reach_del_morso()
+		var scarto: float = absf(visto - morde)
+		banda = maxf(banda, scarto)
+		h.check(scarto <= BANDA_MORSO,
+			"m15: la taglia che vedi deve essere quella che morde anche su %s: disegna %.6f m di lato maggiore e morde fino a %.6f m, banda %.6f m"
+				% [nome, visto, morde, scarto])
+		righe_banda.append("%s r=%.3f m (%s) visto %.4f m morde %.4f m banda %.6f m" % [nome, r_corpo, fonte, visto, morde, scarto])
+
+	print("test_arena: m15 forme: %s" % " | ".join(righe))
+	print("test_arena: m15 forme, tabella: %s; coppia che condivide %s (dichiarata in questo file, col perche'), coppia peggiore boss+mortar perche' e' l'unica da decidere a distanza con due raggi di morso diversi"
+		% [str(_tabella_specie(slot, kind_names)), str(condivise)])
+	print("test_arena: m15 banda col morso, per specie: %s; banda massima %.6f m (tolleranza dichiarata %.4f m): la normalizzazione per mesh non ha spostato l'invariante che m8 aveva chiuso"
+		% ["; ".join(righe_banda), banda, BANDA_MORSO])
+	print("test_arena: m15 forme, sezione in %d ms" % (Time.get_ticks_msec() - t0))
+
+## `slot -> [specie]` come stringa leggibile, per i messaggi.
+func _tabella_specie(slot: Array, kind_names: Array) -> String:
+	var parti: Array[String] = []
+	for k in slot.size():
+		var nome: String = str(kind_names[k]) if k < kind_names.size() else "specie %d" % k
+		parti.append("%s=%d" % [nome, int(slot[k])])
+	return str(parti)
+
+## Il raggio del corpo della specie `kind`, letto dal **proprietario**:
+## `src/sim/enemy.gd::radius_of(kind)`. Serve a m15 per le specie che l'onda 1 non
+## puo' produrre (il boss ha peso 0,0 all'onda 1) e che quindi non hanno nessun
+## nemico in campo da cui prendere `radii[i]`.
+##
+## Non e' una copia della tabella: e' una chiamata alla funzione che -orda usa per
+## lo stesso numero. `-1.0` se lo script non c'e' o non espone `radius_of`, cosi'
+## la banda dice «non misurabile» invece di dirsi 0. L'indice e' controllato qui e
+## non affidato a `clamp_kind`, che taglierebbe fuori tabella e restituirebbe
+## l'ultima specie: un `kind` sbagliato deve dire che non e' misurabile, non
+## misurare il boss e chiamarlo mortar.
+func _raggio_di_specie(kind: int) -> float:
+	var scr = load("res://src/sim/enemy.gd")
+	if scr == null or not (scr is Script) or not scr.has_method("radius_of"):
+		return -1.0
+	if kind < 0 or kind >= _kind_names_count(scr):
+		return -1.0
+	return float(scr.call("radius_of", kind))
+
+## Quante specie -orda dichiara, dalla stessa fonte di `_kind_names()`.
+func _kind_names_count(scr) -> int:
+	if scr == null or not (scr.has_method("get_script_constant_map")):
+		return 0
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has("KIND_NAMES"):
+		return 0
+	var v = map["KIND_NAMES"]
+	return v.size() if v is Array else 0
+
+## Il raggio del corpo del giocatore che il morso mette fra la portata e il centro:
+## `TOUCH_REACH` di `src/sim/enemy.gd`, letto dalla **fonte** e non ricopiato qui.
+## `-1.0` se non c'e' piu', cosi' la banda dice «non misurabile» invece di dirsi 0.
+func _reach_del_morso() -> float:
+	var scr = load("res://src/sim/enemy.gd")
+	if scr == null or not (scr is Script):
+		return -1.0
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has("TOUCH_REACH"):
+		return -1.0
+	var v = map["TOUCH_REACH"]
+	return float(v) if (typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT) else -1.0
 
 ## Un nodo e tutto quello che ha sotto, ricorsivamente. Il tetto del criterio n.
 ## 3 e' su questo numero, quindi il conteggio non puo' essere quello di un altro.
@@ -4216,6 +4874,77 @@ func _count_nodes(node: Node) -> int:
 	for child in node.get_children():
 		total += _count_nodes(child)
 	return total
+
+## I renderer dell'orda, **nell'ordine degli slot**: `Enemies`, `EnemiesBig`,
+## `EnemiesBoss`. L'ordine non e' decorativo: `KIND_SLOT` e' una lista per slot e
+## i confronti di questa sezione accoppiano uno slot al suo nodo, quindi la lista
+## tiene conto di `MESH_SCENES` nello stesso ordine in cui il renderer le dichiara.
+##
+## `null` invece di un nodo mancante: il chiamante deve poter dire «manca
+## `EnemiesBig`» e non leggere `null` come se fosse un renderer vuoto.
+func _renderers_ordine(arena: Node3D) -> Array:
+	return [arena.get_node_or_null("Enemies"),
+		arena.get_node_or_null("EnemiesBig"),
+		arena.get_node_or_null("EnemiesBoss")]
+
+## Quanti nemici hanno disegnato i renderer **insieme**. Il numero che confronta
+## con `horde.count` e' questo: nessuno dei tre, da solo, puo' dire se l'orda e'
+## disegnata.
+func _disegnati(renderers: Array) -> int:
+	var n := 0
+	for r in renderers:
+		if r != null:
+			n += int(r.drawn_count())
+	return n
+
+## La ripartizione per modello, per la stampa: e' il numero che rende leggibile la
+## somma, perche' `200` da solo non dice se l'orda e' finita su tre modelli o se due
+## renderer stanno guardando il vuoto.
+func _ripartizione(renderers: Array) -> String:
+	var parti: Array[String] = []
+	for r in renderers:
+		if r == null:
+			parti.append("manca")
+		else:
+			parti.append("%s slot %d = %d" % [r.name, int(r.get("mesh_slot")), int(r.drawn_count())])
+	return str(parti)
+
+## Il renderer che disegna la specie `kind`, o `null` se nessuno lo dichiara. La
+## domanda e' posta al nodo e non alla tabella, perche' e' il nodo che nel gioco fa
+## la scelta: una tabella giusta con un nodo che non la usa e' un difetto che questa
+## sezione deve vedere.
+func _renderer_di(renderers: Array, kind: int):
+	for r in renderers:
+		if r != null and r.handles_kind(kind):
+			return r
+	return null
+
+## Una lista dalla mappa delle costanti di uno script, o un array vuoto. Serve per
+## `KIND_SLOT` e `MESH_SCENES`, che sono **liste** e quindi non passano da
+## `_const_of` (che legge numeri). Il chiamante dichiara l'assenza invece di
+## confrontare una lista vuota con una tabella: un criterio che passa sul vuoto e'
+## un criterio che non ha denti.
+func _const_list_of(path: String, const_name: String) -> Array:
+	var scr = load(path)
+	if scr == null or not (scr is Script):
+		return []
+	if not scr.has_method("get_script_constant_map"):
+		return []
+	var map: Dictionary = scr.get_script_constant_map()
+	if not map.has(const_name):
+		return []
+	var v = map[const_name]
+	return v if v is Array else []
+
+## Gli slot che la scena deve mettere sui tre renderer, **letti dal renderer**: e'
+## `MESH_SCENES` come lo dichiara `src/render/horde_renderer.gd`, quindi un numero di
+## modelli che non corrisponde a un numero di nodi va rosso qui e non a occhio.
+func _slot_attesi() -> Array:
+	var mesh_scenes := _const_list_of(RENDERER_SCRIPT, "MESH_SCENES")
+	var out: Array = []
+	for i in mesh_scenes.size():
+		out.append(i)
+	return out
 
 ## Il path dello script attaccato a un nodo, o "" se non ce n'e'. Serve a dire che
 ## il nodo `Horde` usa il file di -orda e non uno stub con gli stessi campi.

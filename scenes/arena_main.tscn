@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 ; -arena. La scena principale: `res://scenes/arena_main.tscn`, il path che
 ; project.godot dichiara come `run/main_scene`.
@@ -60,6 +60,7 @@
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="7_hud"]
 [ext_resource type="Script" path="res://src/render/arena_obstacles.gd" id="8_obstacles"]
 [ext_resource type="Script" path="res://src/render/mortar_renderer.gd" id="9_mortar"]
+[ext_resource type="Script" path="res://src/render/mortar_shot_renderer.gd" id="10_shot"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_arena"]
 sky_top_color = Color(0.08, 0.09, 0.16, 1)
@@ -181,6 +182,35 @@ seed = 4242
 
 [node name="Enemies" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("3_enemies")
+mesh_slot = 0
+
+; ## I TRE RENDERER DELL'ORDA: UN NODO PER MODELLO, E PERCHE' TRE
+;
+; Le cinque specie non sono piu' tutte `enemy_small.glb`: dal 2026-10-15 hanno tre
+; forme diverse, e una `MultiMesh` ha **una sola mesh**: due modelli nella stessa
+; `MultiMeshInstance3D` non si possono disegnare. Quindi l'orda costa tre nodi
+; **fissi** invece di uno:
+;
+;   `Enemies`       slot 0  enemy_small.glb  -> runner e grunt
+;   `EnemiesBig`    slot 1  enemy_big.glb    -> brute e mortar
+;   `EnemiesBoss`   slot 2  enemy_boss.glb   -> boss
+;
+; La tabella `kind -> slot` e' `KIND_SLOT` in `src/render/horde_renderer.gd`, con la
+; dichiarazione della coppia che condivide e della coppia peggiore; il test la
+; confronta voce per voce con `KIND_NAMES` di `-orda`.
+;
+; Il tetto di 120 e' assoluto e questi tre nodi ci stanno dentro: sono **tre nodi con
+; zero nemici come con duecento**, quindi il numero di nodi non dipende ancora dal
+; numero di nemici, che e' la regola che conta. Ogni nodo passa tutta l'orda e
+; scrive solo i nemici del proprio modello.
+
+[node name="EnemiesBig" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("3_enemies")
+mesh_slot = 1
+
+[node name="EnemiesBoss" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("3_enemies")
+mesh_slot = 2
 
 ; ## LA CUPOOLA ROSSA DEL MORTAR, e perche' sta DOPO `Enemies`
 ;
@@ -206,6 +236,21 @@ script = ExtResource("3_enemies")
 ; poi chi lo disegna.
 [node name="MortarDome" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("9_mortar")
+
+; ## IL COLPO CHE CADE, e perche' sta dopo `MortarDome`
+;
+; La cupola dice **dove**; il colpo dice **da dove arriva**. Il canale e' lo stesso
+; di quello delle cupole (`horde.mortar_shot_count`, `mortar_shot_at(i)`,
+; `mortar_shot_left(i)`, letti con i metodi) e questo file lo disegna come lo ha
+; disegnato `MortarDome`: una `MultiMeshInstance3D` sola, con la mesh procedurale e
+; il materiale impostati una volta sola in `_ready()`.
+;
+; Un colpo in volo e' un dato, non un oggetto di scena: se ogni colpo fosse un
+; `Node3D` il `node_count` salirebbe col fuoco dell'orda. Quindi **un nodo** con zero
+; colpi in volo come con sette: 46 nodi a vuoto e 46 a pieno diventano 47 e 47
+; (i tre renderer dell'orda contano gia' dentro i 46).
+[node name="MortarShot" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("10_shot")
 
 [node name="Player" parent="." instance=ExtResource("6_player")]
 

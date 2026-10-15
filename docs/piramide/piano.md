@@ -3250,6 +3250,86 @@ brute). Quindi: **alla scala 1,00 il mortar uccide anche uno che guarda in alto.
 
 I 600 s dell'utente sono **22,71 volte** il minimo a scala 1,00.
 
+### 1.14-ventiduesima **m15 e m16: due richieste dell'utente, e la macchina che mente**
+
+L'utente ha giocato e ha detto due cose, entrambe vere e entrambe misurabili:
+
+1. *«non vedo nessun proiettile, come distinguo il mortar?»*
+2. *«quando sono coperto di nemici non mi uccidono rapidamente, essere sopraffatti non deve lasciare troppe occasioni, morire è parte del processo in questo tipo di giochi»*
+
+**m15 — il colpo e le forme.** `src/render/mortar_shot_renderer.gd`: il colpo **cade** da
+`START_HEIGHT = 26,0 m`, motivato con i numeri del progetto — sotto i 6,46 m del corpo più alto è
+dentro la folla e dentro la propria cupola da 5,21 m, sopra i 34 m della camera è fuori inquadratura
+per 49,8 passi. Caduta lineare `START_HEIGHT × remaining / mortar_telegraph_s` **letta dal contratto a
+ogni refresh**: scarto sull'impatto **0,000004 s = 0,000 passi**, canale avvelenato a 7,5 s e riletto
+7,5 s.
+
+Cinque modelli distinti non c'erano, ma **tre GLB esistevano e non erano caricati**:
+
+```
+runner → enemy_small.glb   grunt → enemy_small.glb   brute → enemy_big.glb
+mortar → enemy_big.glb     boss  → enemy_boss.glb    coppia peggiore: boss+mortar
+```
+
+`node_count` 46 → **49**. La **banda col morso resta 0,000000 m su tutte e cinque**: la
+normalizzazione per i tre AABB diversi (1,000 / 1,200 / 2,000 m) non ha rotto l'invariante di m8.
+
+**m16 — l'invulnerabilità, da 0,7 s a 0,25 s.** Decisione dell'utente. Il difetto misurato era che
+**essere accerchiato era tanto pericoloso quanto essere da solo**: a 200 nemici la porta contava 144
+morsi offerti e 39 accettati, e 39 è il **91% del massimo che 0,7 s permette**. Con `TOUCH_INTERVAL =
+0,150 s`, 0,7 era **4,7 volte** la cadenza minima di morso: circa 105 morsi su 144 scartati da un
+timer, non dal numero di nemici.
+
+| | misurato |
+|---|---|
+| offerta → accettati, 200 nemici, 30 s | **149 → 88**, il **59%** (era 39 su 144, il 27%) |
+| **morire accerchiato** | finestra **0,25 s → passo 223 (3,72 s)** · 0,70 s → passo 776 (12,93 s) — **fattore 3,5** |
+| scena vera, 200 vivi, da fermo | **morto dopo 6,33 s**, era 9,02 s |
+| scena vera, morsi | 145 offerti, **90 accettati** (era 39), 55 scartati (era 106) |
+
+**Denti eseguiti e tolti:** con `0,7` tornano **39 accettati** e **26%** di conversione, entrambi sotto
+i due perni (`> 43` e `≥ 50%`) e quindi entrambi rossi. Un solo controllo: 38 colpi entrati e 562
+rifiutati in 600 passi, 0 rifiuti fuori finestra, 0 entrati dentro, gap minimo 0,2667 s.
+
+**Un difetto che la foglia ha trovato in se stessa e che vale più del numero:** riscrivere `invuln` a
+ogni passo in cui è positivo **riapre la finestra ogni frame** e rende il giocatore permanentemente
+invulnerabile dal primo colpo. Misurato: **1 solo colpo accettato in 60 s** e nessuna morte in nessuno
+dei due scenari. Ora `invuln` viene portato alla finestra **solo quando un colpo è entrato**.
+
+**Il numero 120 non è un perno, e il perché va scritto:** l'offerta reale è 4,97/s, non 6,67/s, e
+un'offerta che arriva dopo la chiusura della finestra **non aspetta**. Il tetto teorico è 120 colpi in
+30 s e il massimo raggiunto è 88: un tetto non raggiungibile non è un tetto, è un numero decorativo.
+
+## E LA MACCHINA CHE MENTE, che ha quasi fatto buttare un'ora di lavoro
+
+`test_orda` ha cominciato a superare i 120 s. Il sospetto del vertice era `m15`: due
+`MultiMeshInstance3D` in più a ogni montaggio della scena, i cui `_process` girano durante i passi
+simulati. Il sospetto **sembrava giusto** — e il benchmark `costo per passo con 200 nemici` era
+passato da `min 2,859 / medio 3,144` a `min 3,576 / medio 5,359`.
+
+`-orda` ha fatto l'esperimento che chiude la domanda: **due corse, stessa macchina, stesso codice,
+differenza gli 8 nodi di `src/render/`**:
+
+| corsa | `scena_vera` | totale |
+|---|---|---|
+| com'è | 35,228 s | 160674 ms |
+| renderer **distaccati** prima di `_ready` | 35,033 s | 167305 ms |
+
+**−195 ms, −0,6%.** Il costo dei renderer è rumore. La verità è che la macchina era **1,6 volte più
+lenta** in quel momento: lo stesso codice che stamattina faceva 79–83 s ne faceva 160–167 s, e
+quindici minuti dopo è tornata a **75,455 s** con `costo per passo` a **2,685 ms**.
+
+**La lezione, che è di metodo e non di codice:** ho portato all'utente una premessa — «il codice si è
+gonfiato» — e lui ha deciso su quella premessa. **Era falsa, e l'ho saputo solo perché qualcuno ha
+misurato invece di accettare la diagnosi.** Il sospetto più economico da verificare è quasi sempre
+quello che si spiega meglio, e quasi sempre è quello che va smentito per primo.
+
+Resta un difetto vero emerso dalla stessa misura, **diverso e più serio del timeout**: il criterio
+«la griglia batte la scansione lineare» è **rosso a intermittenza** — `0,93×` in una corsa e `1,03×`
+nella successiva, sullo stesso codice, con code che si sovrappongono (min 8,9–10,8 ms contro 8,3–11,2
+ms). Un criterio che cambia verdetto da solo è un criterio che non ha denti nella direzione giusta.
+`-orda` lo dichiara difetto di `spatial_grid.gd`; è **aperto**.
+
 ### Le onde della milestone 3
 
 | onda | agenti | esito | gate | stato |

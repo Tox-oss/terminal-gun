@@ -3074,6 +3074,19 @@ lo era.
 debris entrano nell'eseguibile. I due script `_probe_obstacles.gd` e `_tmp_rng_probe.gd` sono
 **non tracciati e nessuno li può cancellare**: sono nel suo scope, non nel mio. Restano aperti.
 
+**CHIUSO il 2026-10-15 dall'utente**, e la verifica è del vertice: `git status` pulito, nessun
+codice li referenziava (le due occorrenze erano prosa qui nel piano, non `preload`), e
+`GATE: 8/8` **dopo** la cancellazione. Erano tre, non due: `_probe_obstacles.gd`,
+`_tmp_rng_probe.gd` e `_probe_m15_meshes.gd` (quest'ultimo nato da m15).
+
+**Il modo in cui si sono chiusi dice cosa manca al progetto, e non è `rm`.** Non li ha potuti
+cancellare il vertice (scope di un'altra foglia), non li ha potuti cancellare la foglia che li ha
+creati (`-arena` non ha `rm` in allowlist), e la sola via rimasta è l'utente. Un file che nessuno
+può cancellare è un file che non dovrebbe poter essere creato: **le foglie non dovrebbero avere
+`rm` negato**, perché il divieto che le protegge dai danni le blocca anche dal rimuovere il proprio
+rifiuto. Il `-` davanti a `rm -rf *` va tenuto (è una forma pericolosa); il divieto secco su `rm`
+no.
+
 ### 1.14-diciannovesima **m14-a: la mezza proiettile del bug che l'utente aveva segnalato**
 
 Il difetto segnalato all'inizio — *«alcuni nemici non riescono a farmi danno»* — aveva due metà.

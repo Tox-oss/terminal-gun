@@ -4166,6 +4166,94 @@ Non si risolve muovendo `CATCHUP_SAFETY`: quel numero parla di portata, e il pro
 Il margine e' sceso di 6 s in tre giorni e `difficolta` costa 23.737 ms da sola: e' il primo file da
 guardare quando qualcosa si rompe perche' non ci sta piu'.
 
+### 1.14-ventisettesima **m12 EMENDATA: il run è a orologio, la mappa è un volume, e la lava è il tetto**
+
+Sei decisioni dell'utente, 2026-10-16, sul gioco giocato. **Questa sezione emenda
+§1.14-ventiquarta** e ne cambia la decisione 2 e la forma della 1; le decisioni 3, 4 e 5 (comandi,
+casse con `E`, differenze per bioma) **restano quelle** e non sono toccate.
+
+1. **Rallentare il rateo di fuoco iniziale.**
+2. **Scaling di 12 minuti fino al boss finale**, «make it or break it».
+3. **Anche i mob iniziali sono troppi**: si parte piano e con poco.
+4. **Ogni 3 minuti un'orda**, per testare la build e dare la possibilità di sistemarla.
+5. **Mappa lineare da attraversare andando verso l'alto**, con una **lava** che costringe a
+   raggiungere il bioma finale e il boss **entro 12 minuti**.
+6. **I nemici devono poter nascere fuori dalla mappa**, altrimenti basta rasare i bordi.
+
+**Le tre domande che il vertice ha poste, e le risposte:**
+
+| domanda | risposta | cosa significa |
+|---|---|---|
+| come si sale | **volume verticale, «su» è una direzione** | il giocatore si muove liberamente in un volume; **nessun sistema di movimento nuovo**. Era la scelta che poteva costare un'intera milestone |
+| la lava | **danno continuo** | serve un **terzo canale di danno** dopo morso e mortar |
+| i mob iniziali | **solo il rateo** | `POP_BASE = 25` e la curva di crescita **restano**; scende solo `SPAWN_RATE` |
+
+#### La struttura, e i numeri che combaciano da soli
+
+```
+720 s (12 minuti) ÷ 180 s (ogni 3 minuti)  =  4 segmenti  =  i 4 biomi di §1.14-ventiquarta
+MORTAR_AFTER_S = 180,0 s                   =  esattamente un segmento
+```
+
+Non è una coincidenza: il piano chiedeva quattro biomi e la descrizione dell'utente ne produce
+quattro. La struttura è coerente **prima** di essere scritta, e questo è il primo caso in cui i
+numeri di una sezione e quelli di un'altra si confermano a vicenda senza nessuno averli accordati a mano.
+
+#### Cosa questa emenda butta via, e cosa no
+
+| oggi | esito |
+|---|---|
+| `Run.END_WAVE = 61` | **non esiste più**: il run è a **orologio**, non a onda |
+| mappa a disco, `arena_radius = 60` in **sei copie** | un **volume**; il raggio non basta, serve un'estensione verticale e una larghezza |
+| **27 dischi di ostacoli** | **morto**: la sonda sulla capacità degli anelli che il vertice doveva scrivere per m12-w1a **non serve più**. Un disco in un volume non è un ostacolo, è un punto |
+| griglia di densità 69×69 | topologia diversa, va rifatta |
+| legge di m19 tarata sul livello 213 | in 720 s il livello sarà molto più basso: la legge resta nella **forma** (`ing/usc` in hp/s) e va ricalibrata |
+| `POP_MAX = 200` | **resta**, ed è un tetto di vivi contemporanei, che è una cosa diversa da una densità |
+| `Game.ground_visible` | **resta ed è giusto così com'è**: è esattamente «non far nascere dove il giocatore vede» |
+| regione fuori schermo misurata | **resta come fatto di camera** (18,70–66,06 m a terra, 15,73–57,94 m in cima), ma va **rimisurata** sul volume: il «fuori mappa» è un vincolo **nuovo** e si somma al «fuori schermo» |
+| `B` (pausa + build menu) | **resta ed è ciò che rende possibile il punto 4**: durante un'orda il giocatore può fermarsi e sistemare la build |
+
+#### IL PRIMO NUMERO DERIVATO, e non è inventato
+
+«Piano e con poco» è una richiesta; `SPAWN_RATE` è un numero. Il vincolo che lo determina è **misurato**:
+
+```
+DPS al livello 1              28,57 hp/s     (m14 uscita, misurato)
+hp del runner, il più economico  14 hp        (m13, tabelle allineate 1:1, misurato)
+  → al livello 1 il giocatore abbatte  28,57 / 14  =  2,04 runner al secondo
+SPAWN_RATE di oggi            8,0 /s   →  1.440 nascite nei 180 s del primo segmento
+8,0 / 2,04                    =  3,92 volte
+```
+
+Quindi **`SPAWN_RATE` di avvio non può restare `8,0/s`**: è quasi **quattro volte** il massimo che un
+giocatore di livello 1 può assorbire senza che la popolazione cresca per forza. Questo e' il primo
+numero della legge nuova, e viene da due misure esistenti — non da una stima.
+
+Ed e' la stessa forma della legge di m19, applicata a **un'altra variabile**: m19 scala i **punti vita**
+dell'orda con la potenza del giocatore; qui la leva che l'utente ha scelto («solo il rateo») scala il
+**rateo di nascita** con la stessa potenza. Stessa legge, variabile diversa.
+
+#### I NUMERI CHE RESTANO, dichiarati e NON scritti
+
+Nessuno di questi e' nella sezione, perche' nessuno e' stato misurato:
+
+- il **danno della lava** al secondo, e il suo periodo. `TOUCH_INTERVAL = 0,150 s` e il mortar hanno
+  un periodo; la lava deve avere un suo canale, non essere un morso con un nome diverso
+- l'**estensione verticale e la larghezza** del volume, e di conseguenza la velocita' della lava, che
+  e' `estensione / 720 s` e non e' scritta finche' l'estensione non lo e'
+- lo **spawn rate dei segmenti 2, 3 e 4**: dal primo si deriva la legge, non dagli altri tre
+- i **quattro biomi** come si chiamano e cosa cambia in ciascuno (densita', terreno, potenziamenti)
+- il **tetto per ondata** della lava e il suo comportamento alle mura
+
+#### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
+
+Il vertice aveva annunciato una sonda su **«a che livello si arriva a 720 s»**, per capire se il
+rateo di fuoco iniziale serviva ancora. **La sonda non gira**, e il motivo va scritto perche' e' la
+trappola di §1.4b: il livello a 720 s dipende da `SPAWN_RATE`, che e' uno dei numeri **non ancora
+misurati** qui sopra. Misurarlo ora significherebbe misurare contro un rateo **indovinato**, cioe'
+scrivere il numero che si voleva misurare. Prima il rateo del segmento 1, che ha un vincolo
+misurato; poi la sonda diventa possibile e risponde davvero.
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

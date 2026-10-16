@@ -4353,6 +4353,67 @@ un numero di disegno che si regge solo sull'estetica diventa arbitrario alla pri
 
 **Il boss dura `300 s` e da qui in poi l'unico orologio che conta e' quello.**
 
+#### Il volume verticale: `raggio 20 m, alto 80 m`, e cosa lo rende possibile
+
+Deciso dall'utente il 2026-10-17, e prima va scritto **perche' non e' vincolato dall'orologio**, che
+era la cosa che sembrava renderlo impossibile.
+
+```
+velocita' del giocatore      13,65 m/s        src/sim/enemy.gd:343
+salita di 80 m                5,86 s
+margine reale                600 s - 5,86 s = 594,14 s
+velocita' del firewall       80 m / 600 s = 0,133 m/s   -> il giocatore e' 102 volte piu' veloce
+```
+
+**Quindi il firewall non e' un inseguitore: e' una frontiera.** Non insegue nessuno e non ha
+occasioni di catching, e di conseguenza **la sua velocita' non e' un numero da tarare** — quello che
+decide se l'orologio di m12 morde e' il **danno**, cioe' se starci dentro due secondi uccide. Questo
+cancella un numero che fino a ieri era nell'elenco dei mancanti.
+
+**La correzione che il vertice aveva sbagliato, e che il controllo ha fermato.** Il vertice aveva
+obiettato che 27 ostacoli da `3,90 m` non ci stanno in un raggio di `20 m`. **L'obiezione era
+sbagliata**, perche' il raggio dell'ostacolo **non e' un numero ma una frazione**:
+`RADIUS_FRACTION := 0,065` (`obstacles.gd:87`), quindi `0,065 x 60 = 3,90 m` e `0,065 x 20 = 1,30 m`.
+L'occupazione degli ostacoli resta **esattamente 11,4% a qualunque raggio**, per costruzione. Gli
+ostacoli sono **agnostici al raggio** e questa misura li salva da sole.
+
+**Ma lo stesso controllo fa emergere la cosa vera, e non la dice nessuna delle due parti**: il raggio
+dell'ostacolo scala, **quello dei nemici no**.
+
+```
+ARENA_RADIUS  60 m -> pi pavimento  11.309,7 m2     (pi x 60^2)
+ARENA_RADIUS  20 m -> pi pavimento   1.256,6 m2     (pi x 20^2)   9,0 volte piu' piccolo
+
+SEPARATION_RADIUS = 1,6 m   (horde.gd:133)  -> ASSOLUTO, non una frazione
+200 nemici x pi x 1,6^2 = 1.608,5 m2 di dischi di esclusione
+```
+
+A raggio `60` quei `1.608,5 m2` sono il **14,2%** del pavimento. A raggio `20` sono il **128%**: il
+campo **non ci sta**.
+
+**Non e' una legge che si rompe**, perche' la separazione e' una **forza morbide**, non un vincolo
+rigido (`horde.gd:1746` restituisce una direzione, non una posizione). E il tetto
+`SEPARATION_CHECKS := 6` **non e' il vincolo**: oggi ogni nemico ha `0,14` vicini entro `1,6 m` e a
+raggio `20` ne avrebbe `1,28`, quindi il tetto di `6` non viene mai toccato in nessuno dei due casi.
+Quindi **nessuna legge si rompe e nessun codice si rompe**.
+
+**Quello che cambia e' la sensazione, ed e' il numero che va scritto**: a raggio `20` ogni nemico ha
+**9 volte piu' vicini** entro il raggio di separazione (`1,28` contro `0,14`). Il campo non e' piu'
+una folla, e' **una massa compressa**. E la misura che ne risente e' gia' presa: **fermo al centro
+con 200 nemici si muore in `16,93 s`** — un tempo che a `9 volte` la densita' non sopravvive.
+
+**Il numero che ne segue, e che e' il vero contenuto di questa scelta**: mantenendo l'occupazione di
+oggi (`14,2%`), un raggio di `20 m` regge **`22` nemici sul pavimento**, non `200`.
+
+```
+1.256,6 m2 x 14,2% / (pi x 1,6^2)  =  22,2 nemici
+```
+
+**Quindi `POP_MAX = 200` non puo' restare un totale.** O diventa **per piano** — e allora il volume ha
+dei **piani**, e la domanda «la salita senza un nuovo sistema di movimento come si fa?» ha la sua
+risposta: **rampa**, che e' geometria e non un sistema di movimento — oppure scende, e allora il
+raggio deve restare `60 m` e «su» smette di essere una direzione.
+
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 
 Il vertice aveva annunciato una sonda su **«a che livello si arriva a 720 s»**, per capire se il

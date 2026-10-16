@@ -523,13 +523,17 @@ Quindi il percorso, in ordine di onestà, **oggi**:
 
 1. **`godot --path . scenes/arena_main.tscn`** — parte senza editor. È il modo più vicino a un eseguibile che esiste **adesso**, e non richiede nessuna delle cose qui sotto.
 2. **Un `.cmd` sul desktop** con due righe: `cd /d` sulla root e il comando di sopra. Doppio clic. **Non lo può scrivere nessun agente**: il desktop è fuori progetto e fuori scope. È un atto dell'utente, e resta il modo più veloce per giocare.
-3. **Export a `.exe`** — **FATTO il 2026-10-13.** `C:\Users\bisco\Desktop\terminal-gun.exe`, **109 441 360 byte**, un file solo (`embed_pck=true`: con il PCK esterno spostare il solo `.exe` romperebbe il gioco), niente console, `export_path` **relativo**. `GATE: 8/8` e `PERM: 15/15` verdi dopo. **`project.godot` NON è stato toccato**: `run/main_scene` era già giusta, e mettere a rischio il file più delicato del progetto senza un motivo misurato non è stato un rischio che `-scheletro` ha accettato.
+3. **Export a `.exe`** — **FATTO il 2026-10-13, ri-esportato il 2026-10-16 dopo m19.** `C:\Users\bisco\Desktop\terminal-gun.exe`, **109 803 176 byte**, un file solo (`embed_pck=true`: con il PCK esterno spostare il solo `.exe` romperebbe il gioco), niente console, `export_path` **relativo**. `GATE: 8/8` e `PERM: 15/15` verdi dopo. **`project.godot` NON è stato toccato**: `run/main_scene` era già giusta, e mettere a rischio il file più delicato del progetto senza un motivo misurato non è stato un rischio che `-scheletro` ha accettato.
 
 **Tre cose dichiarate sull'export, e nessuna è un trionfo.**
 
 - **Non è verificato che il gioco parta.** Io posso produrre il file e misurarne i byte; l'unica prova è che **l'utente lo apra**. `-scheletro` l'ha detto nel suo report senza che nessuno glielo chiedesse, ed è la frase giusta da mettere in un report.
 - **`export_filter="all_resources"` imballa dentro al gioco tutti gli otto `tests/test_*.gdc`**, più `tools/gate.gdc`, `tools/test_harness.gdc` e `docs/piramide/probe_knockback.gdc`. Non rompe niente, ma **in un rilascio il gate non ci va**. Il filtro giusto è per risorse, non tutto.
-- **`build/` non esiste**, quindi l'export al path di default del preset fallisce con `ERROR: Prepare Template: The given export path doesn't exist.` L'artefatto è stato prodotto **esportando sulla Desktop**, che è una directory che esiste. `mkdir` è assente da tutte le allowlist per scelta (§11.3), quindi creare `build/` è un atto dell'utente.
+- **`build/` ora esiste** (creato dall'utente il 2026-10-15), quindi il path di default del preset non fallisce piu' e l'artefatto si produce dentro il progetto. **Resta il fatto che il vertice non lo puo' spostare sul Desktop**, ed e' la stessa classe di difetto delle `kiro-cli` che segue: `cp` **non e' in allowlist**, per scelta deliberata e dichiarata (`.opencode/agents/terminal-gun.md` righe 123-127: «con `>` una allowlist non puo' distinguere "stampa" da "sovrascrivi il file di un altro agente"»), quindi `cp build/terminal-gun.exe C:/Users/...` cade sul `shell * deny` del blocco 1 e **non apre prompt**. Il vertice **non puo' aggiungere la riga**: `.opencode/agents/**` e' fuori dal suo scope `edit` per costruzione. **La strada che c'e' e' l'export col path come argomento**, perche' `godot *` e' in `allow`:
+  ```
+  godot --headless --path . --export-release "Windows Desktop" "C:/Users/bisco/Desktop/terminal-gun.exe"
+  ```
+  **Usata il 2026-10-16 con l'approvazione esplicita dell'utente** (`question`), non di nascosto: e' la stessa via del 2026-10-13, ma il `deny` di `cp` e' arrivato in quella sessione ed e' informazione nuova, quindi la sceltaAlternativa non si prende da sola. `PERM: 15/15` resta verde **perche' nessuno dei 15 check guarda `cp`**: e' il buco che `perm_kiro` chiudera' per `kiro-cli` e che nessuno chiude per `cp`.
 
 ### 1.6 Due difetti che il 2026-10-13 ha aggiunto, e che nessuna porta prende
 

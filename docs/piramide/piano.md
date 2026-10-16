@@ -4233,17 +4233,55 @@ Ed e' la stessa forma della legge di m19, applicata a **un'altra variabile**: m1
 dell'orda con la potenza del giocatore; qui la leva che l'utente ha scelto («solo il rateo») scala il
 **rateo di nascita** con la stessa potenza. Stessa legge, variabile diversa.
 
+#### IL FIREWALL: il nome è fisso, e la timeline è tutta qua
+
+Il vertice aveva scritto «lava» per comodita'. **Il nome e' `firewall`** e non si piu' discuta: nel
+codice, nelle stringhe a schermo (ASCII: `FIREWALL`), ovunque.
+
+La timeline e' determinata dall'utente e **non contiene nessun numero da scegliere**, solo secondi:
+
+```
+t =     0 s   partita. Niente firewall. E' la grazia, ed e' il "parti piano"
+t =   120 s   il firewall COMINCIA a scorrere
+t = 120..720   600 s di percorso, dal fondo fino all'ultima area
+t =   720 s   il firewall e' arrivato all'ultima area e si FERMA li'. 4 segmenti x 180 s
+t =   720 s   LA QUARTA ORDA. Non e' un'onda qualunque: e' il BOSS, e arriva nello stesso
+              istante in cui il firewall si ferma
+t = 720..1080  360 s = 6 minuti fermo nella zona del boss
+t =  1080 s   il firewall comincia a stringersi, e si stringe fino a chiudersi
+```
+
+**Due cose che questa timeline dice e che vanno scritte perche' si perdono:**
+
+1. **720 s NON e' la fine del run.** Il vertice aveva scritto 720 s come durata totale: e' sbagliato,
+   720 s e' l'**arrivo**. Il run finisce a **1080 s** o quando il giocatore muore, e cioe' **la morte
+   e' garantita**: `t = 1080 s` e oltre il firewall si chiude e non c'e' piu' spazio.
+2. **«Morire e' parte del processo»** e' una scelta di disegno, detta dall'utente il 2026-10-16, e va
+   scritta come tale perche' e' il motivo per cui `POP_MAX` e la legge di m19 non hanno un tetto di
+   sopravvivenza: il traguardo non e' sopravvivere, e' arrivare al boss al 720 s.
+
+**Quello che la timeline NON chiude, e che va detto per non crederla piu' misurata di quanto e':**
+resta aperta la domanda sulla **lethality del singolo morso a meta' partita** (36 passi su 16538 in cui
+un morso solo azzerava la barra, all'onda 8, misurato in `test_arena`). Quello che l'utente ha detto e'
+«la morte e' parte del processo» **riguarda la coda**, non il mezzo: un morso istantaneo all'onda 8 e
+una fine garantita al 1080 s sono due fatti diversi, e il secondo non risponde al primo. **Non e' stata
+riposta e non viene riaperta qui**: e' dichiarata, e chi la chiude deve portare una misura, non un parere.
+
 #### I NUMERI CHE RESTANO, dichiarati e NON scritti
 
 Nessuno di questi e' nella sezione, perche' nessuno e' stato misurato:
 
-- il **danno della lava** al secondo, e il suo periodo. `TOUCH_INTERVAL = 0,150 s` e il mortar hanno
-  un periodo; la lava deve avere un suo canale, non essere un morso con un nome diverso
-- l'**estensione verticale e la larghezza** del volume, e di conseguenza la velocita' della lava, che
-  e' `estensione / 720 s` e non e' scritta finche' l'estensione non lo e'
+- il **danno del firewall** al secondo, e il suo periodo. `TOUCH_INTERVAL = 0,150 s` e il mortar hanno
+  un periodo; il firewall deve avere un suo canale, non essere un morso con un nome diverso
+- la **velocita'** del firewall: e' `estensione verticale / 600 s`, quindi dipende dall'estensione, che
+  non e' scritta. **La timeline sopra non ha bisogno di questo numero per essere vera**: e' in secondi
+- l'**estensione verticale e la larghezza** del volume, e di conseguenza la velocita' del firewall
 - lo **spawn rate dei segmenti 2, 3 e 4**: dal primo si deriva la legge, non dagli altri tre
 - i **quattro biomi** come si chiamano e cosa cambia in ciascuno (densita', terreno, potenziamenti)
-- il **tetto per ondata** della lava e il suo comportamento alle mura
+- quanto dura **lo stringimento** dopo 1080 s, e se il firewall puo' superare il bordo inferiore
+
+**Le opzioni del menu principale sono fuori strada adesso**, per scelta dell'utente il 2026-10-16:
+prima il gameplay. Nessuna foglia le prende e nessuna porta le cerca.
 
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 

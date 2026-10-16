@@ -675,6 +675,47 @@ func damage_player(amount: float) -> bool:
 	_missing("damage_player", "terminal-gun-gameplay")
 	return false
 
+## -gameplay. **Il primo canale `orda -> giocatore`**: il nemico ha toccato il
+## giocatore e con il contatto gli ha **togliuto di mezzo un comando equipaggiato**.
+## Restituisce `true` se un comando e' andato davvero offline, `false` altrimenti.
+##
+## ## IL PAYLOAD E' DELIBERATAMENTE VUOTO, e questa e' la parte che conta
+##
+## Tutti gli altri canali hanno un argomento perche' dicono **quanto** o **dove**:
+## `damage_enemy(index, amount, knockback)` dice il bersaglio e la misura. Qui non
+## c'e' niente da dire, e il motivo e' lo stesso che rende `damage_player` senza
+## navigazione: **la scelta di quale comando perdere non spetta a chi chiama**.
+##
+## Se questo canale portasse l'id del comando da disabilitare, `-orda` dovrebbe
+## conoscere i cinque comandi che il giocatore ha equipaggiato, cioe' dovrebbe
+## **leggere `player.gd`**: esattamente l'antipattern che la sezione 5 del piano
+## esiste per impedire (vedi la nota sopra `damage_player`). Quindi il canale dice
+## solo «ti hanno toccato», e **la politica — quale comando, e per quanto tempo —
+## resta di `-gameplay`**, che e' chi possiede l'equipaggiamento.
+##
+## Il nome del tasto e' un'altra faccenda: questo canale **non dice quale**, quindi
+## nessuna foglia deve indovinarlo. Resta dichiarato a parte.
+##
+## ## Il neutro e' `false` e rumora
+##
+## Non registrata, questa funzione dice che **non e' successo niente**. Il
+## chiamante e' un nemico, quindi `false` vuol dire «nessun comando e' andato
+## offline»: una prova che asserisce «un comando e' stato tolto» va **rossa** e
+## non passa in silenzio. Il contrario sarebbe una prova che passa perche' non
+## e' stata montata, che e' il falso verde peggiore.
+##
+## ## I due numeri che qui NON ci sono
+##
+## **Quale** comando e **per quanto** tempo: nessuno dei due e' misurato, quindi
+## nessuno dei due e' scritto, in qui o in `player.gd`. Un canale che dichiara un
+## effetto e ne tace la durata e' un canale che mente su se stesso.
+func disable_command() -> bool:
+	var c := _live("disable_command")
+	if c.is_valid():
+		return c.call() as bool
+	_missing("disable_command", "terminal-gun-gameplay")
+	return false
+
 ## -gameplay. Tira un proiettile da `pos` verso `dir` alla velocita' `speed`.
 ## Restituisce `true` se ha ottenuto uno slot dal pool, `false` se il pool era
 ## pieno. Come `nearest_enemy`, non restituisce un nodo: i proiettili non sono

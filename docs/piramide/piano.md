@@ -4412,6 +4412,50 @@ applicato, sono errori **a runtime** e passano l'analisi sintattica. **L'unica c
 che qualcuno esegue il test**, e in questa piramide quello e' il vertice: quindi una foglia che
 riporta «compila pulito» ha detto la verita' e **non ha detto che funziona**, e va letta cosi'.
 
+#### Due decisioni dell'utente, 2026-10-16: LE ARMI SONO I COMANDI, e l'ordine è mappa → biomi → armi
+
+**1. Un solo sistema.** I cinque comandi `echo` / `grep` / `ping` / `curl` / `rm` **sono** le armi.
+**Nessuna arma classica.** Questo scioglie il conflitto che §1.14-ventiquarta aveva lasciato aperto
+(«i cinque comandi sostituiscono l'arma attuale») e ne cancella uno gia' dichiarato:
+
+```
+-r  ricorsione/divisione   <->  carta "Perforante +1"
+-f  forza/rinculo         <->  carta "Spinta +30%"
+sudo danno doppio         <->  carta "Danno +25%"
+```
+
+**La collisione sparisce per costruzione, non per una regola.** Le carte diventano **token** che
+metti in una riga, non numeri gia' applicati: non c'e' piu' «la stessa idea in due vocabolari»
+perche' c'e' **un vocabolario solo**. E questa era la risposta 1 della domanda B di
+`prompt_armi_e_augment.md`, scelta dall'utente senza che servisse chiederla.
+
+**2. L'ordine e' mappa → biomi → armi**, che e' anche l'ordine che l'utente aveva imposto il
+2026-10-15 («prima la mappa, poi il mortar, poi il resto»), con il mortar gia' dentro m13.
+
+**3. LA RICALIBRATURA DI m19 VA NELLA STESSA ONDA DELLE ARMI, e non dopo.** Non e' una buona
+regola di sequenza, e' una conseguenza:
+
+`power_ratio_of(player_level_at(w - 1))` e' uno **scalare**, e lo e' solo perche' oggi c'e' **un'arma
+sola**. Con i comandi il DPS diventa `f(riga scritta)` e non e' piu' ne' lineare ne' uguale per tutti:
+`ping` ricorsivo moltiplica per i rimbalzi, `curl` insegue un bersaglio solo, `rm` e' area ravvicinata.
+**Stesso pool di carte, tre potenze diverse.** Quindi la legge smette di descrivere qualcosa **non perche'
+sia sbagliata ma perche' il suo denominatore passa da un numero a una distribuzione su uno spazio
+discreto e combinatorio** (5 comandi × 3 flag × operatori).
+
+#### PERCHE' IL BILANCIAMENTO AVEVA BISOGNO DELLE ARMI, e non era una questione di misura
+
+La difficolta' **non era tarata male: era a una dimensione**. Un asse per il giocatore (8 carte,
+tutte multiplicative, `28,57 -> 63.937 hp/s`, un fattore **2.238** ma sempre lo stesso fattore) e un
+asse per l'orda (i punti vita; la miscela ramps da `boss 0%` a `17%` all'onda 8, ma ogni scontro e'
+«una massa che abbassi con il DPS»). Con due assi paralleli e uno solo trasformabile, **due giochi
+diversi durano lo stesso**: non si puo' rendere uno scontro *diverso*, solo *piu' lungo*.
+
+I comandi aprono il **secondo asse dalla parte giusta**: cambiano la **forma** dello scontro (area,
+bersaglio singolo, rimbalzo) e non la sua lunghezza. Il costo e' che il costo di scrittura **e' la
+nuova difficolta'**, ed e' il punto aperto di `prompt_armi_e_augment.md` domanda C: il sovraccarico
+punisce chi gioca male, che e' esattamente chi non dovrebbe punire di piu'. **Non e' deciso** e resta
+dichiarato.
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

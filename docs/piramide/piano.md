@@ -4459,6 +4459,30 @@ pura, nel contratto, perche' tre foglie che la implementano da sole concordano f
 torre — e `player_floor()`, che `-gameplay` deve dare perche' durante una rampa il giocatore e' **fra
 due piani** e `floor_of` su mezzo piano risponderebbe con sicurezza sbagliata.
 
+#### L'interfaccia degli ostacoli, dichiarata perche' due foglie la chiamerebbero diversamente
+
+`game.obstacles` e' gia' **un `PackedVector3Array` piatto** e questa forma **non si cambia**: lo
+leggono `player.gd:751`, `horde.gd:784` e `flow_field.gd:196`, e su tre foglie. Con quattro piani
+diventa un array di `27 x 4` voci con quattro `y` diversi, e **la torre non aggiunge nessun canale**:
+`floor_of()` nel contratto basta a `-orda` e a `-arda` per tagliarlo **lo stesso modo**, che e'
+esattamente il motivo per cui `floor_of()` sta nel contratto e non in una foglia.
+
+**La firma che invece va cambiata e' una sola, e la possiede `-orda`**:
+`src/sim/obstacles.gd:layout(radius)`, oggi chiamata da `arena.gd:151` con `ARENA_RADIUS`.
+
+```
+prima    layout(radius)                 ->  27 dischi su UN piano
+dopo     layout(radius, floor: int)     ->  27 dischi sul piano `floor`, con la y gia' dentro
+```
+
+`-arena` chiama `layout()` **quattro volte, una per piano**, e **concatena**: prendere il primo
+risultato e' l'errore che non si vede.
+
+**Perche' il parametro serve e non e' un di piu'**: senza, le quattro chiamate restituirebbero **lo
+stesso identico layout**, cioe' quattro biomi con la stessa mappa dentro. `RADIUS_FRACTION = 0,065`
+resta valido perche' e' una frazione del raggio, quindi gli ostacoli **continuano a essere agnostici
+al raggio** anche sui quattro piani.
+
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 
 Il vertice aveva annunciato una sonda su **«a che livello si arriva a 720 s»**, per capire se il

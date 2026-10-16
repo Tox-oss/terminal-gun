@@ -147,6 +147,21 @@ var arena_radius: float = 60.0
 ## silenzioso, e chi lo registra e' `-arena`.
 var enemy_body_scale: float = 3.4
 
+## ## m12, 2026-10-17: la torre. Due numeri, e la stessa forma di `arena_radius`.
+##
+## Il volume verticale e' **quattro piani** di raggio `20 m` e `80 m` in totale (la decisione
+## e' nel piano, sez. «Il volume verticale»). I due numeri qui sono i **geometrici**
+## della torre, e hanno lo stesso statuto di `arena_radius`: la **fonte** e'
+## `src/render/arena.gd`, che li registra nel proprio `_enter_tree()`; **`-orda`,
+## `-gameplay` e `-ui` li leggono** e non li possiedono.
+##
+## **Il default di `floor_height` e' `0,0` e questa volta e' il neutro giusto**, non un
+## fallback silenzioso: `0,0` significa **«non c'e' una torre»**, cioe' il mondo di prima
+## di m12, che e' un piano solo. `floor_of()` sotto lo tratta come tale e restituisce
+## `0`, che in quel mondo e' la risposta **esatta** e non una approssimazione.
+var floor_count: int = 1
+var floor_height: float = 0.0
+
 ## ## m11: il telegrrafo del mortar, e perche' attraversa il contratto
 ##
 ## ## La decisione dell'utente, 2026-10-15
@@ -715,6 +730,52 @@ func disable_command() -> bool:
 		return c.call() as bool
 	_missing("disable_command", "terminal-gun-gameplay")
 	return false
+
+## -orda, -gameplay e -ui. **A che piano appartiene l'altezza `y`.** E' **aritmetica
+## pura** sul contratto, quindi vive **qui** e non in una foglia: se ognuna delle tre
+## implementasse la divisione per `floor_height`, avremmo tre versioni che concordano
+## **finche' non c'e' una torre**, e cioe' esattamente finche' nessuno ci fa caso.
+##
+## Il piano `i` copre `y` in `[i * floor_height, (i+1) * floor_height)`. **Il bordo
+## inferiore e' del piano di sotto**: a `y = 20,0` con `floor_height = 20,0` si e' sul
+## piano `1`, non sul `0`. La convenzione e' scritta perche' a `y` esattamente sul
+## bordo i due lati danno numeri diversi, e senza dichiararlo una foglia arrotonda e
+## l'altra troncano.
+##
+## **Il risultato e' sempre limitato a `[0, floor_count - 1]`**: chi cade sotto zero
+## e' sul piano `0` e chi supera l'alto e' sull'ultimo. Qui **nessuna caduta e' una
+## morte** — la gravita' e' un'altra cosa, e qui non deve inventarsi un piano per
+## punire una caduta che nessuno ha ancora misurato.
+##
+## **Il `0,0` non avvisa e questa e' una scelta, non una dimenticanza**: `floor_height`
+## non e' registrato significa che la torre non e' montata, e in quel mondo `0` e' la
+## risposta vera. Un avviso qui ripeterebbe a ogni passo su tre foglie per dire una cosa
+## che non e' un errore.
+func floor_of(y: float) -> int:
+	var h := floor_height
+	if h <= 0.0:
+		return 0
+	return clampi(int(floor(y / h)), 0, maxi(floor_count - 1, 0))
+
+## -gameplay. **Il piano su cui sta il giocatore**, che non e' la stessa cosa di
+## `floor_of(player_position().y)` solo perche' la posizione arriva gia' calcolata:
+## durante una caduta o un passaggio di rampa il giocatore e' **fra due piani**, e
+## `floor_of` su un'altezza di mezzo piano restituirebbe il piano sbagliato con
+## sicurezza. Percio' **la risposta la dà chi possiede il giocatore**, che sa se sta
+## scivolando o salendo.
+##
+## **Il neutro e' `-1` e rumora, ed e' l'unico `-1` di questo file che non significa
+## «non c'e'» ma «non lo so»**: `0` e' un piano **valido**, quindi un neutro a `0`
+## passerebbe la prova che asserisce «il nemico e' apparso sul piano del giocatore»
+## senza che nessuno sia stato montato. `-1` invece non e' un piano e fallisce la
+## prova. E' la regola di `nearest_enemy` applicata a un numero che somiglia a un
+## indice ma descrive una posizione.
+func player_floor() -> int:
+	var c := _live("player_floor")
+	if c.is_valid():
+		return c.call() as int
+	_missing("player_floor", "terminal-gun-gameplay")
+	return -1
 
 ## -gameplay. Tira un proiettile da `pos` verso `dir` alla velocita' `speed`.
 ## Restituisce `true` se ha ottenuto uno slot dal pool, `false` se il pool era

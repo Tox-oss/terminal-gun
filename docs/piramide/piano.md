@@ -4283,6 +4283,61 @@ Nessuno di questi e' nella sezione, perche' nessuno e' stato misurato:
 **Le opzioni del menu principale sono fuori strada adesso**, per scelta dell'utente il 2026-10-16:
 prima il gameplay. Nessuna foglia le prende e nessuna porta le cerca.
 
+#### `Spam`: il nome del evento dei 3 minuti, e due correzioni alle 720 s
+
+**`Spam`** e' il nome dell'evento di aumento dei mob che avviene **ogni 3 minuti**. Nome fisso, come
+`firewall`. Quattro `Spam`: `180`, `360`, `540`, `720` s.
+
+**Correzione 1 — alle 720 s il firewall NON si ferma insieme all'orda.** Il vertice aveva scritto che
+la quarta orda e il boss arrivassero nello stesso istante in cui il firewall si ferma. **Non e' cosi'**:
+
+```
+t = 720 s   la quarta Spam: il CHECK DELLA BUILD. Il giocatore si ferma (B) e sistema
+t =   ...   il firewall ARRIVA e si ferma all'ultima area, DOPO
+t =   ...   il BOSS comincia
+t = 1080 s  il firewall comincia a stringersi
+```
+
+La sequenza che l'utente ha scelto fra due (`question` del 2026-10-16) e' **«l'orda prima, il
+firewall si ferma dopo»**, cioe' le due cose sono **due istanti distinti** e il firewall e' la
+ricompensa per aver superato la `Spam`. Il boss **non** e' la quarta `Spam`: e' un'onda sua, dopo.
+
+**Correzione 2 — il rateo NON cresce con la potenza del giocatore.** Il vertice aveva proposto di
+trasferire la forma della legge di m19 dal numero di punti vita al rateo di nascita, e la misura ha
+detto che **non si puo'**:
+
+```
+guadagno del ciclo, per segmento        1   ->   47   ->   3.000   ->   640
+rateo richiesto nell'ultimo segmento     ~1.300 /s
+tetto meccanico di _top_up               1/DT = 5 /s   (a DT 1/60: 60/s)
+```
+
+Non e' un artefatto del passo di simulazione: a `DT` fine servono sempre 1.300 al secondo e il tetto
+e' 60. **I punti vita possono essere `1e12` perche' sono una proprieta' del nemico** e l'orda puo'
+davvero averli; **il rateo e' un meccanismo** e non se ne eseguono piu' di uno per passo. La forma
+della legge **non trasferisce**, e la proposta era del vertice, non dell'utente.
+
+**Deciso dall'utente: rateo piatto al tetto di assorbimento.** `spawn_rate` resta al numero derivato
+`ASSIMILATION_1 = 2,0408 /s` e il moltiplicatore `power_ratio_of(livello)` **va tolto**. Il rateo
+diventa una scelta di **gestione della popolazione**, non una leva di difficolta'. La difficolta' resta
+dove **gia' funziona e ha gia' denti**: i punti vita con la legge di m19 (`ing/usc` verde, legge di
+prima rossa a `2,12e-12`), il firewall, e la miscela di specie.
+
+#### IL NUMERO CHE MANCA, e da cui dipende tutto il finale
+
+** Quanto dura la `Spam`?** Il vertice non lo scrive perche' non lo sa, e non lo indovina. Da questa
+durata dipende **l'istante in cui il firewall si ferma**, e quindi la durata dell'arena del boss.
+
+| se la `Spam` dura | il firewall si ferma | il boss dura (fino a 1080 s) |
+|---|---|---|
+| 60 s | 780 s | 300 s = 5 min |
+| 120 s | 840 s | 240 s = 4 min |
+| 180 s (tutto il segmento) | 900 s | 180 s = 3 min |
+
+L'utente ha detto «il **minuto** di orda» parlando del check della build, che è un indizio e non una
+misura: e' la prima riga della tabella, ma **resta una riga letta, non una riga scritta**. Chi lo
+chiude porta un numero.
+
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 
 Il vertice aveva annunciato una sonda su **«a che livello si arriva a 720 s»**, per capire se il

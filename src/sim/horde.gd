@@ -1325,7 +1325,15 @@ func _top_up(delta: float) -> void:
 
 ## Usato solo se `run` non c'e' ancora, cioe' mai: sta qui perche' `population`
 ## si puo' pilotare a mano anche su un'orda senza partita.
-const SPAWN_RATE_FALLBACK := 8.0
+##
+## ## m12-w1a: adesso e' uno **specchio**, e non un numero scritto qui
+##
+## Era `8,0` scritto a mano mentre `Run.SPAWN_RATE` scendeva a `2,04/s`: due
+## numeri che si dicevano la stessa cosa e che potevano divergere senza che nessuno
+## lo vedesse — la classe di difetto che questo progetto chiude in ogni altro
+## punto. Quindi la riga ora **guarda** la fonte invece di ricopiarla, e
+## `tests/test_orda.gd` la asserisce.
+const SPAWN_RATE_FALLBACK := Run.SPAWN_RATE
 
 ## Un nemico che entra a meta' partita, e **la sua specie viene dalla stessa
 ## tabella dei pesi dell'onda** con cui e' nato il primo nemico dell'onda: la

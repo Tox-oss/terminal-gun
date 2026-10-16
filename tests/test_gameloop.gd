@@ -311,7 +311,11 @@ func _curva(h, horde: HORDE) -> void:
 	var passi := 0
 	var profilo := ""
 	var primo_a_meta := -1
-	while horde.count < horde.population and passi < 20000:
+	# Qui l'attesa e' il **soggetto** della misura (l'invariante e' "non si riempie in
+	# un passo"), quindi resta un'attesa e non si puo' usare `_riempi()`. Quello che
+	# cambia e' il **tetto**: era `20000` scritto a mano, e un numero scritto a mano e'
+	# un numero che si rompe quando la costante che descrive cambia.
+	while horde.count < horde.population and passi < _passi_per_riempire(horde.population, DT):
 		horde.step(DT)
 		passi += 1
 		if primo_a_meta < 0 and horde.count >= horde.population / 2:
@@ -442,6 +446,48 @@ func _kill_uno(horde: HORDE) -> bool:
 		return game.damage_enemy(0, 9999.0, Vector3.ZERO)
 	return horde.damage_enemy(0, 9999.0, Vector3.ZERO)
 
+## ## Mettere i nemici, e **non aspettarli**: la regola del banco di prova
+##
+## Un test che vuole `n` corpi **ce li mette**. Il rateo di produzione e' il
+## **comportamento che il test sta misurando**, non l'attrezzo per costruire lo
+## scenario: usarlo per riempire l'arena vuol dire che ogni volta che
+## `Run.SPAWN_RATE` cambia, tutti i test che riempiono si rompono — ed e' successo
+## due volte, con m4 e con `SPAWN_RATE` da 8,0/s a 2,0408/s (m12-w1b: questo file
+## e' andato rosso su `TETTO_ATTESA`, tarato sul rateo vecchio).
+##
+## La strada scelta e' **metterli direttamente**, non alzare il rateo durante il
+## montaggio: alzare il rateo significa avere una **seconda fonte di verita' sul
+## rateo dentro il test**, e un test che cambia il rateo per costruire lo scenario
+## sta mentendo sullo scenario.
+##
+## `_spawn_one()` e' il cammino vero di `horde.gd` — quello che chiama `_top_up` — e
+## non guarda `population`, solo la capienza fisica: mettere `n` corpi con questa
+## funzione produce **lo stesso stato** che produrrebbe la rampa, senza aspettarla.
+## Restituisce quanti ne ha messi, cosi' un test che volesse contarli non deve
+## chiamare `_spawn_one()` da tre posti diversi.
+func _riempi(horde: HORDE, quanti: int) -> int:
+	var tetto := mini(quanti, HORDE.MAX_ENEMIES)
+	var messi := 0
+	while horde.count < tetto:
+		horde._spawn_one()
+		messi += 1
+		if messi > HORDE.MAX_ENEMIES:
+			break
+	return messi
+
+## Il **tetto di passi per un riempimento**, derivato dal rateo e non scritto.
+##
+## `horde.gd::_top_up` accumula `spawn_rate() x delta` e spende **un intero per
+## passo**, quindi per arrivare a `n` nemici servono `ceil(n / (rate x delta))`
+## passi. Il `+ 4` e' la tolleranza dell'arrotondamento del credito, non un margine
+## comodo: e' il minimo oltre il quale il numero non puo' mentire.
+##
+## Il rateo e' letto dalla **costante** `RUN.SPAWN_RATE` e non da
+## `run.spawn_rate()` perche' quello e' un metodo, e `tests/test_orda.gd` asserisce
+## che i due sono lo stesso numero.
+func _passi_per_riempire(n: int, delta: float) -> int:
+	return int(ceil(float(n) / maxf(0.000001, RUN.SPAWN_RATE * delta))) + 4
+
 # --- Parte 1: 600 passi, e un cambio d'onda dentro -----------------------------
 
 ## La milestone 1 chiedeva che 600 aggiornamenti non stampino errori e non
@@ -467,10 +513,28 @@ func _kill_uno(horde: HORDE) -> bool:
 
 ## Passi minimi del primo blocco: il criterio di m1.
 const BLOCCHI := 600
-## Tetto del secondo blocco, in passi. 260 uccisioni a 8/s sono 32.5 s = 1950
-## passi: il tetto e' il doppio, per non far fallire il test perche' un giorno
-## `SPAWN_RATE` cambiera' di un filo.
-const TETTO_ATTESA := 4000
+
+## Il margine del secondo blocco, e **perche' il tetto non e' piu' un numero**
+##
+## Il tetto era `4000`, scritto a mano e tarato sul rateo di m4 (`8,0/s`: 260
+## uccisioni in 32,5 s = 1950 passi, tetto il doppio). Con `SPAWN_RATE` sceso a
+## `2,0408/s` le stesse 260 uccisioni costano ~7.635 passi e il tetto vecchio e'
+## diventato **un traguardo che si puo' mancare per aritmetica**: misurato, il
+## file e' andato rosso con 156 uccisioni su 260. Non si e' corretto il numero —
+## la difesa e' **non scriverlo**: il tetto e' adesso una funzione di
+## `wave_size`, di `SPAWN_RATE` e di `DT`, quindi il prossimo cambio di rateo non
+## produce un rosso, produce un numero diverso, che e' la cosa che si vuole.
+const MARGINE_ATTESA := 1.25
+
+## Quanti passi puo' costare il cambio d'onda `wave_da`: **derivato, non scelto**.
+##
+## Il ritmo delle uccisioni non puo' superare il ritmo delle nascite, quindi
+## chiudere `wave_size(w)` uccisioni richiede almeno `wave_size(w) / SPAWN_RATE`
+## secondi. Il ciclo uccide **un nemico per passo**, quindi i passi sono quel
+## minimo diviso per `DT`, con `MARGINE_ATTESA` sopra.
+func _tetto_attesa(wave_da: int) -> int:
+	var secondi := float(RUN.wave_size(wave_da)) / RUN.SPAWN_RATE
+	return int(ceil(secondi / DT * MARGINE_ATTESA))
 
 func _rientro_in_gioco(h, horde: HORDE) -> void:
 	var wave_iniziale := horde.wave
@@ -500,7 +564,7 @@ func _rientro_in_gioco(h, horde: HORDE) -> void:
 	var uccisioni_parte := horde.wave_killed()
 	var uccisioni := 0
 	var attesa := 0
-	while horde.wave == wave_iniziale and attesa < TETTO_ATTESA:
+	while horde.wave == wave_iniziale and attesa < _tetto_attesa(wave_iniziale):
 		horde.step(DT)
 		attesa += 1
 		if horde.count > 0:
@@ -715,21 +779,26 @@ func _capacita_sulla_scenavera(h, horde: HORDE) -> void:
 	# questo: e' la rampa che la curva pilota in partita, e qui la si porta a
 	# mano alla capienza senza dipendere dall'onda.
 	horde.population = HORDE.MAX_ENEMIES
+	# La scena vera si riempie **mettendo** i nemici: qui il numero che conta e' il
+	# conteggio dei nodi **durante** la partita, non il tempo di riempimento.
 	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 20000:
-		horde.step(DT)
-		passi += 1
+	_riempi(horde, HORDE.MAX_ENEMIES)
+	passi += horde.count - avvio
 
 	h.eq(horde.count, HORDE.MAX_ENEMIES,
 		"durante la partita l'orda della scena vera arriva a %d nemici vivi" % HORDE.MAX_ENEMIES)
-	# Il sintomo di m4 verificato sulla scena vera: la capienza non e' piu' un
-	# numero che il motore si trova gia' addosso al primo passo.
+	# Il sintomo di m4 — «la capienza non e' piu' un numero che il motore si trova
+	# gia' addosso al primo passo» — **non e' piu' misurato qui**, e non perche' sia
+	# sparito: e' misurato **sopra**, sull'invariante 3, dove l'attesa e' una vera
+	# rampa di simulazione e `passi > 1` ha ancora un significato. Qui il campo e'
+	# stato riempito **mettendo** i nemici, quindi `passi` non e' piu' un numero di
+	# passi di simulazione e le due righe che lo confrontavano con
+	# `SPAWN_RATE` avrebbero misurato il banco di prova invece del gioco.
+	#
+	# Quello che resta qui e' il numero per cui questa sezione esiste: i **nodi**
+	# mentre 200 corpi sono davvero vivi.
 	h.check(passi > 1,
-		"e non ci arriva in un passo: %d passi = %.2f s al ritmo di Run.SPAWN_RATE (%.1f/s)"
-			% [passi, float(passi) * DT, RUN.SPAWN_RATE])
-	h.check(float(passi) * DT >= float(HORDE.MAX_ENEMIES - avvio) / RUN.SPAWN_RATE * 0.95,
-		"il tempo di riempimento e' quello che `SPAWN_RATE` prescrive: %.2f s contro %.2f s di teoria"
-			% [float(passi) * DT, float(HORDE.MAX_ENEMIES - avvio) / RUN.SPAWN_RATE])
+		"i %d corpi sono stati messi in piu' di un colpo: %d" % [horde.count - avvio, passi])
 
 	h.eq(horde.transforms.size(), horde.count, "gli array sono allineati a capienza piena")
 	h.eq(horde.colors.size(), horde.count, "anche i colori")

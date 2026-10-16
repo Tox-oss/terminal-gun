@@ -4347,6 +4347,71 @@ misurati** qui sopra. Misurarlo ora significherebbe misurare contro un rateo **i
 scrivere il numero che si voleva misurare. Prima il rateo del segmento 1, che ha un vincolo
 misurato; poi la sonda diventa possibile e risponde davvero.
 
+#### m12-w1a chiusa: il rateo e' piatto al tetto di assorbimento, e il ciclo e' TAGLIATO
+
+`GATE: 8/8` e `PERM: 15/15`, rieseguiti dal vertice. E' la prima volta che il gioco e' **a orologio**.
+
+```
+spawn_rate = ASSIMILATION_1 = 2,0408 /s,  piatto,  identico a t=1 s e a t=1080 s
+```
+
+| segmento | livello | uccisioni/s | vivi medi |
+|---|---|---|---|
+| 1 (0-180 s) | 1 | 2,04 | 4,8 su 6 |
+| 2 (180-360 s) | 19 | 2,04 | 4,8 su 13 |
+| 3 (360-540 s) | 27 | 2,04 | 4,8 su 25 |
+| 4 (540-720 s) | 33 | 6,12 | 4,8 su 31 |
+
+**al boss (720 s) il giocatore e' al livello 38; a 1080 s e' al 47, all'onda 8, con 2204 uccisioni.**
+
+I due criteri, entrambi con denti nelle due direzioni:
+
+```
+m12 CRITERIO (SPAWN_RATE piatto a 8.0/s):  ROSSO   (3,13 s, sotto il pavimento di 5,52)
+m12 CRITERIO (legge nuova):                VERDE   (12,40 s a DT 0,2  e  12,25 s a DT 1/60)
+m14 CRITERIO (legge di PRIMA): ROSSO (1,85e-12)   m14 CRITERIO (legge di oggi): VERDE
+```
+
+**Il ciclo `tempo -> nascite -> uccisioni -> livello -> rateo` e' stato tagliato, non smorzato**, e
+adesso e' provato su una partita intera: il livello sale di 46 e il rateo non si muove.
+
+**Il numero che m12 ha finalmente misurato, e che era la domanda aperta di ieri**: il giocatore arriva a
+**livello 47**, non a 213. Quindi `LAW_HORIZON_WAVE = 61` e `CATCHUP_SAFETY` sono tarati su un
+orizzonte che **il gioco non raggiunge piu'**. **Debito dichiarato, non chiuso**: la ricalibratura
+richiede il livello a 720 s, che dipende dal rateo, e il rateo questa volta e' misurato — quindi la
+prossima onda puo' farlo.
+
+**Un numero che ti cambia cosa aspettarti**: `test_progression` dice che l'**onda 1 da sola dura
+`106,72 s`** (era `45,85 s`). Sono 2,33 volte, e un segmento e' 180 s: **l'onda 1 mangia il 59% del
+primo segmento**. E' «parti piano e con poco» fatto al massimo, forse oltre.
+
+#### LA REGOLA DEI FORMATI, che adesso vive QUI e non in una porta
+
+**Godot accetta solo `%d`, `%s`, `%x`, `%c`, `%f`/`%.Nf`. I caratteri di conversione `g` ed `e` non
+esistono**, e con loro tutte le loro forme con flag, larghezza e precisione davanti: `%g`, `%.3g`,
+`%11.4g`, `%e`, `%.2e`. Se serve notazione scientifica si scrive il numero **a mano**, che e' quello
+che fa `_sci()` in `tests/test_orda.gd`.
+
+**Una porta che cercava questa regola e' stata cancellata**, e la ragione va scritta perche' e' la cosa
+piu' istruttiva di m12-w1b: ne ha avute **tre versioni** in due giorni, ognuna delle quali produceva
+almeno un falso — un falso **negativo** sulla propria prova dei denti, un falso **positivo** su `% g`
+(che era l'operatore di concatenazione dentro una stringa di prova). Il quarto difetto e' che «un `%`
+dentro una stringa e' un segnaposto» e' **falso su GDScript**: una stringa puo' contenere il testo
+`% g_med` senza che sia un formato. **Corretta richiedeva un parser di GDScript dentro un file di
+test**, cioe' dieci righe di regole che cercano di essere un compilatore.
+
+**Una porta che sbaglia in entrambe le direzioni e' rumore che si spaccia per controllo.** Il `%g` era
+gia' risolto dalla regola «si scrive `_sci`», e la regola sta qui, dove costa zero e non ha bisogno di
+manutenzione. E' la terza volta in questo progetto che la cosa giusta e' **togliere** invece di
+sostituire (dopo `touch_damage_last`, che non leggeva nessuno, e il pavimento di `test_ui`, derivato al
+contrario).
+
+**Una cosa che questa onda ha insegnato e che vale per tutte le foglie**: `--check-only` dice che un
+file **compila**, non che **gira**. Un `h.eq` chiamato con due argomenti invece di tre, o un `%` non
+applicato, sono errori **a runtime** e passano l'analisi sintattica. **L'unica cosa che li vede e'
+che qualcuno esegue il test**, e in questa piramide quello e' il vertice: quindi una foglia che
+riporta «compila pulito» ha detto la verita' e **non ha detto che funziona**, e va letta cosi'.
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

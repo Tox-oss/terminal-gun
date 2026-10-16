@@ -87,13 +87,83 @@ const WAVE_MAX := 900
 ## base**.
 const HP_SCALE_BASE := 1.0
 
-## ## L'onda a cui finisce la partita, e la soglia del criterio
+## # m12-w1a: LA PARTITA È A OROLOGIO, e `END_WAVE` non esiste piu'
 ##
-## Non e' un numero di design: e' il numero che l'utente ha citato («sono al
-## livello 61») e la wave su cui il criterio di m14 si chiude. Tutto quello che
-## segue e' ancorato a qui, quindi cambiarlo cambia la difficolta' **in modo
-## dichiarato** invece che di nascosto.
-const END_WAVE := 61
+## La timeline e' **dell'utente** (2026-10-16, piano sez. 1.14-ventisettesima) e
+## non contiene nessun numero da scegliere: solo secondi.
+##
+##     t =     0 s   partita, niente firewall
+##     t =   120 s   il firewall comincia
+##     t =   180 s   fine segmento 1  ->  onda 1
+##     t =   360 s   fine segmento 2  ->  onda 2
+##     t =   540 s   fine segmento 3  ->  onda 3
+##     t =   720 s   fine segmento 4  ->  il BOSS, il firewall si ferma
+##     t =  1080 s   il firewall comincia a stringersi: da qui la morte e' garantita
+##
+## **Due cose che questa timeline dice e che vanno scritte perche' si perdono:**
+##
+## 1. **720 s NON e' la fine del run.** 720 s e' l'**arrivo** del boss. Il run
+##    finisce a **1080 s** o quando il giocatore muore, e quindi **la morte e'
+##    garantita**: oltre i 1080 s il firewall si chiude e non c'e' piu' spazio.
+## 2. **«Morire e' parte del processo»** e' una scelta di disegno, e sta scritta
+##    qui perche' e' il motivo per cui `POP_MAX` e la legge di m19 non hanno un
+##    tetto di sopravvivenza: **il traguardo non e' sopravvivere**, e' arrivare al
+##    boss al 720 s.
+
+## ## Il firewall: la soglia e' dichiarata, il canale **non esiste**
+##
+## Solo il secondo. Il danno al secondo e il periodo del firewall **non sono
+## stati misurati** e il vertice non ha ancora scritto il campo di contratto:
+## quindi qui non c'e' un `firewall_damage()`, e non puo' esserci. Quello che
+## c'e' e' la domanda «il firewall e' partito?», che e' un predicato di tempo
+## esattamente come `mortar_unlocked()` e non pretende di essere un canale.
+## `-arena` e' la foglia che lo implementa.
+const FIREWALL_AFTER_S := 120.0
+
+## ## Il segmento: quattro da 180 s, e sono quattro
+##
+## La struttura e' **derivata**, non scelta: `720 s ÷ 180 s = 4` segmenti, che e'
+## anche il numero di biomi che la descrizione dell'utente produce. E
+## `MORTAR_AFTER_S = 180,0 s` (m17) e' **esattamente un segmento**: il mortar si
+## sblocca alla fine del primo.
+const SEGMENT_S := 180.0
+const SEGMENTS := 4
+
+## Il boss: fine segmento 4. `4 x 180 s`, scritto come prodotto e non come
+## letterale perche' il letterale e' il numero che si sbaglia quando `SEGMENTS`
+## si tocca.
+const BOSS_AT_S := SEGMENT_S * float(SEGMENTS)
+
+## Fine del run: 1080 s. **Sei segmenti**, cioe' quattro di orda e due di zona
+## del boss fermo. Il giocatore che arriva vivo al 1080 s e' un caso, non una
+## promessa: vedi il punto 1 sopra.
+const RUN_END_S := 1080.0
+
+## Da questo secondo il firewall si stringe e non c'e' piu' spazio. Vale
+## `RUN_END_S`: sono lo stesso istante detto una volta come promessa di fine e una
+## volta come meccanismo, e due numeri per lo stesso istante sono due numeri che
+## possono divergere.
+const SQUEEZE_AT_S := RUN_END_S
+
+## ## L'orizzonte della legge di m19, e perche' **non** e' la fine della partita
+##
+## `END_WAVE = 61` non esiste piu': 61 onde non ci stanno in 1080 s (servirebbero
+## ~30.000 uccisioni, e il tetto di assorbimento e' 2,04/s). Quindi il 61 non
+## e' piu' «l'onda in cui finisce la partita» e non puo' continuare a
+## chiamarsi cosi': e' **l'onda su cui la legge di m19 e' tarata**, e nient'altro.
+##
+## **La ricalibrazione e' dovuta e non e' fatta qui, e il motivo e' dichiarato:**
+## ricalibrarla vuol dire rimuovere questo 61 e metterci il numero di onde che il
+## giocatore chiude davvero entro i 1080 s — e quel numero **non e' ancora
+## misurabile**, perche' dipende da `SPAWN_RATE`, che e' uno dei numeri che
+## questa stessa sezione introduce (piano sez. 1.14-ventisettima: «prima il rateo
+## del segmento 1, che ha un vincolo misurato; poi la sonda diventa possibile»).
+##
+## Quindi il 61 resta, dichiarato per quello che e', e
+## `tests/test_orda.gd::_m12_orologio` **assicura che non sia la fine del
+## partita**: stampa quante onde il giocatore chiude davvero entro i 1080 s e va
+## rossa se il 61 le raggiunge. Il debito e' visibile a ogni lancio.
+const LAW_HORIZON_WAVE := 61
 
 ## ## I cinque numeri che la legge **copia** da altre foglie, e perche' sono onesti
 ##
@@ -155,11 +225,18 @@ const POWER_CYCLE := 3
 ##                / ((1 / TOUCH_INTERVAL) * TOUCH_DAMAGE_BASE)   =  2,679
 ##
 ## e poi `necessario * CATCHUP_SAFETY`, distribuito **linearmente** su
-## `END_WAVE - 1` onde. `CATCHUP_SAFETY` e' il margine dichiarato: `1 /
+## `LAW_HORIZON_WAVE - 1` onde (`END_WAVE` fino a m12-w1a, quando era la fine della
+## partita e ha smesso di esserlo). `CATCHUP_SAFETY` e' il margine dichiarato: `1 /
 ## TOUCH_INTERVAL` e' una cadenza **massima** teorica, e nessun giocatore che si
 ## muove la raggiunge mai, quindi il confronto va fatto con un margine e non sul
 ## carta. E' l'unico numero qui sotto che non sia derivato, ed e' dichiarato come
 ## tale perche' un numero che non si sa da dove viene e' il difetto di partenza.
+##
+## **Lo stesso numero governa anche la legge del rateo** (`rate_catchup_of`), e il
+## motivo e' lo stesso: l'offerta reale raggiunge il **73%** del tetto di cadenza
+## (m14: 4,83 morsi offerti su un tetto di 6,67/s), quindi il confronto va fatto
+## con un margine. La differenza fra le due leggi e' **l'orizzonte**: questa
+## distribuisce su 61 onde, il rateo sui 4 segmenti da 180 s.
 const CATCHUP_SAFETY := 4.0
 
 # --- LA CURVA DELLA POPOLAZIONE (milestone 4) --------------------------------
@@ -219,6 +296,16 @@ const CATCHUP_SAFETY := 4.0
 #   2. `population` **non supera mai** `POP_MAX`, che vale `Horde.MAX_ENEMIES`.
 #   3. `population` non puo' saltare da 0 a tutto in un passo: e' il compito di
 #      `SPAWN_RATE` qui sotto e di `horde.gd::_top_up`.
+#   4. **m12-w1a: questa curva e' ancora la curva delle ONDE, e le onde esistono
+#      ancora.** L'utente ha scelto «solo il rateo» fra le tre leve: quindi
+#      `POP_BASE`, `POP_STEP` e `POP_MAX` **non si toccano**, e l'orologio di m12
+#      non ci ha messo dentro niente. Quello che e' diventato orologio e' il
+#      **rateo** (`spawn_rate()`) e il **traguardo** (`run_end_s()`); l'onda
+#      continua a chiudersi sulle uccisioni perche' e' quella cosa che
+#      `tests/test_gameloop.gd` verifica, e quel file non e' di questa foglia.
+#      Sono due indici distinti — `wave` conta le uccisioni, `segment` conta i
+#      secondi — e la riga che li tiene separati e' `horde.gd::_sync_wave` /
+#      `_sync_population`, che restano sulla curva e non sull'orologio.
 
 ## Nemici vivi contemporaneamente sull'onda 1: un ottavo della capienza.
 const POP_BASE := 25
@@ -234,25 +321,176 @@ const POP_MAX := 200
 ## piatta perche' non puo' crescere oltre: dichiararlo e' parte dell'invariante 1.
 const POP_SATURATION := 8
 
-## Quanti nemici al secondo l'orda puo' **guadagnare** (`horde.gd::_top_up`).
+## # m12-w1a: LA LEGGE DEL RATEO DI NASCITA
 ##
-## Il numero e' stretto da due fatti misurati, non scelto a occhio:
+## ## Il difetto che l'utente ha trovato, detto come l'ha detto
 ##
-## - **Il pavimento.** `wave_total` dell'onda 1 e' 200 uccisioni e quelle devono
-##   poter arrivare. Con 5 al secondo l'onda 1 durerebbe almeno 40 s, che e'
-##   gia' il caso peggiore misurato **prima** di m4 (criterion 1.4b): sotto questa
-##   soglia la curva renderebbe la prima onda piu' lenta di com'e' adesso, e il
-##   giocatore non potrebbe piu' accorciarla con l'arma. Quindi `>= 5/s`.
-## - **Il soffitto.** Prima di m4 un campo vuoto si riempiva in 1 passo. La
-##   misura del contatto e' 1.68 s per arrivare a 25 nemici entro 6 m: con
-##   `SPAWN_RATE` nemici al secondo, in quella finestra ne arrivano
-##   `1.68 * SPAWN_RATE`, e il tetto e' che siano **meno dei 25** misurati allora,
-##   altrimenti un campo svuotato ti riaddossa la folla piu' in fretta di quella
-##   che ti si era appena liberata. Da qui `SPAWN_RATE < 15`.
+## «anche i mob iniziali sono troppi: si parte piano e con poco». Le tre leve
+## che potevano scendere erano tre: il tetto per segmento, il solo rateo, o
+## far ripartire ogni segmento vuoto. **L'utente ha scelto «solo il rateo»**:
+## `POP_BASE = 25` resta, la curva di crescita resta, `POP_MAX = 200` resta (ed e'
+## un tetto di **vivi contemporanei**, che e' una cosa diversa da una densita'), e
+## a scendere e' **solo `SPAWN_RATE`**.
 ##
-## **8/s**: sta dentro la finestra (25 passerebbero in 3.1 s) e tiene l'onda 1 a
-## un pavimento di 200/8 = **25 s**, dentro la banda 5-40 s misurata prima di m4.
-const SPAWN_RATE := 8.0
+## ## Il numero, e da dove viene: due misure, non una stima
+##
+##     DPS al livello 1                    28,57 hp/s   (m14 uscita, misurato)
+##     hp del runner, il piu' economico     14 hp       (m13, tabelle 1:1)
+##       -> al livello 1 il giocatore abbatte  28,57 / 14  =  2,04 runner al secondo
+##     SPAWN_RATE di oggi                    8,0 /s
+##       -> 1.440 nascite nei 180 s del primo segmento, cioe' 8,0 / 2,04 = 3,92 volte
+##
+## Quindi `2,04/s` e' **il tetto di assorbimento** di un giocatore di livello 1:
+## sopra quella soglia la popolazione cresce **per forza**, non per scelta. Il
+## rateo di avvio non poteva restare `8,0/s`, e questo e' il primo numero della
+## legge nuova.
+##
+## ## La legge, e la sua forma: **quella di m19, con un'altra variabile**
+##
+##     m19:   scala(w)     = BASE    x potenza(livello_a_cui_si_era) x recupero(w)
+##     m12:   rateo(seg)   = SPAWN_RATE x potenza(livello_a_cui_si_era) x recupero(seg)
+##
+## Stessa forma, stessa potenza, stesso `CATCHUP_SAFETY`, **variabile diversa**:
+## il rateo invece dei punti vita. La chiave non e' piu' l'onda ma **il tempo**,
+## e il tempo e' segmenti di 180 s.
+##
+## ## I tre fattori, e a cosa serve ognuno
+##
+##   - **SPAWN_RATE = ASSIMILATION_1 = 2,04/s** e' l'ancoraggio: al segmento 1,
+##     con il giocatore al livello 1, il rateo **e' esattamente** il tetto di
+##     assorbimento. Non un tetto e non una media: il punto in cui la legge e' 1,0
+##     come `scale_of(1)` lo e' per la vita, cosi' il numero del primo segmento non
+##     e' una scelta e' una divisione.
+##   - **la potenza** segue il giocatore, perche' i potenziamenti sono
+##     moltiplicativi e senza tetto: chi e' piu' forte regge piu' corpi.
+##   - **il recupero** e' l'unico fattore che non viene dal giocatore, ed e' lo
+##     stesso numero di m19 per lo stesso motivo: il tetto di cadenza e' una
+##     **massima teorica** e l'offerta reale ne raggiunge il 73% (m14: `4,83` morsi
+##     offerti su un tetto di `6,67/s`), quindi il confronto va fatto con un margine
+##     e non sul carta.
+
+## ## `enemy.gd::HP_MAX[RUNNER]`
+##
+## E' una **copia**, come le altre sette sopra, e `tests/test_orda.gd::_m12_orologio`
+## la confronta con la tabella vera: se `-gameplay` cambia i 14 hp, la porta va
+## rossa **e dice quale**. Il numero e' messo qui e non letto da `enemy.gd` perche'
+## `horde.gd` preloada `run.gd` e il giro inverso sarebbe un riferimento circolare.
+const ENEMY_HP_RUNNER := 14.0
+
+## ## Il tetto di assorbimento di un giocatore di livello 1, in nemici al secondo
+##
+##     (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL) / ENEMY_HP_RUNNER
+##       = (10,0 / 0,35 s) / 14 hp
+##       = 28,5714 / 14
+##       = 2,0408 /s
+##
+## Le tre cifre sono tre numeri **misurati** e ognuna porta il posto da cui viene:
+## il potenziale dell'arma nuova (`m14 uscita`, primo numero di `DIFF_LIVELLI`),
+## l'intervallo dell'arma nuova, e i 14 hp del runner. Il risultato e' **un
+## moltiplicatore di uccisioni**, non di hp: e' l'unico che e' confrontabile con un
+## rateo di nascita, che e' un rateo di uccisioni.
+##
+## Il **runner** e' la scelta conservativa e dichiarata: e' il piu' economico
+## della tabella, quindi questo numero e' il **massimo** di corpi che un giocatore
+## di livello 1 puo' abbattere, e scegliere il runner e' scegliere il caso
+## migliore per l'orda — che e' la direzione giusta per un tetto.
+const ASSIMILATION_1 := (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL) / ENEMY_HP_RUNNER
+
+## ## Il rateo di avvio, e perche' `8,0` non puo' restare
+##
+## Era `8,0` e la sua banda dichiarata era `5/s <= SPAWN_RATE < 15/s`, con la
+## derivazione di m4: «un campo svuotato ti riaddossa la folla piu' in fretta di
+## quella che ti si era appena liberata» -> `1,68 s x SPAWN_RATE < 25`, cioe'
+## `SPAWN_RATE < 14,9/s`. **Otto sta dentro quella banda e li' e' sbagliato**,
+## perche' la banda guardava il tempo di riempimento e non guardava **chi riempie**:
+## il tetto vero e' quanto il giocatore riesce ad assorbire, e li' il numero che
+## contava non c'era. Quello e' il difetto che questa legge chiude.
+##
+## Adesso il valore non e' piu' una scelta: e' `ASSIMILATION_1`, cioe' 2,04/s. Il
+## nome resta `SPAWN_RATE` perche' `tests/test_gameloop.gd` e
+## `tests/test_progression.gd` lo leggono come costante e devono continuare a
+## leggere **il rateo di avvio**, che e' esattamente questo numero.
+const SPAWN_RATE := ASSIMILATION_1
+
+## ## IL RECUPERO DEL RATEO **NON ESISTE**, ed e' una decisione, non una dimenticanza
+##
+## La prima stesura scriveva `rate_catchup_of(segment)` con la stessa forma di
+## `catchup_of`, e la legge era
+## `rateo(s) = SPAWN_RATE x power_ratio_of(livello) x rate_catchup_of(s)`.
+## E' andata male, e il numero che lo dimostra e' **stato misurato** su una
+## partita intera da 1080 s (`tests/test_orda.gd::_m12_partita_intera`, riga
+## `m12, anello tempo->nascite->...`):
+##
+##     segmento 4, livello ~33: rateo richiesto ~1.300/s
+##     contro un tetto meccanico di 1/DT = 5,0/s a DT 0,2 s e 60,0/s a DT 1/60
+##     e contro ~2,04/s di uccisioni: guadagno del ciclo ~640, ~47 gia' al segmento 2
+##
+## Il motivo non e' una taratura sbagliata: **i punti vita sono una proprieta' del
+## nemico e possono valere `1e12` senza che nessuno se ne accorga, mentre il rateo
+## di nascita e' un MECCANISMO**: `horde.gd::_top_up` accumula un credito e ne
+## spende **interi per intero**, al massimo **uno per passo**. Una legge che chiede
+## `1e3` al secondo non e' «piu' difficile»: e' **la stessa cosa che a 5/s**, cioe'
+## un numero che la meccanica ha gia' schiacciato e che smette di essere una legge
+## senza dirlo. **La forma di m19 si trasferisce sui punti vita**, che sono l'unica
+## delle due cose che puo' crescere senza tetto.
+##
+## Quindi la funzione non esiste, e **non e' rimasta una versione che restituisce
+## `1,0`**: uno stub che ritorna sempre 1,0 sembrerebbe una legge e sarebbe una
+## costante di comodo travestita da legge, cioe' esattamente la cosa che questa
+## sezione e' stata riscritta per togliere.
+
+## ## Il ciclo e' stato **TAGLIATO**, non smorzato
+##
+##     tempo -> nascite -> uccisioni -> livello -> potenza -> rateo -> nascite
+##
+## Con la legge di prima il livello entrava nel rateo, quindi il rateo dipendeva da
+## una grandezza che il rateo stesso muoveva, e il ciclo divergeva. **Adesso il
+## livello non entra piu'**: il tasso di retroazione e' **esattamente zero** e la
+## divergenza sparisce **per costruzione**, non per una costante di smorzamento
+## inventata. Non e' stato aggiunto nessun numero per ottenerlo: sono due fattori in
+## meno nella formula.
+##
+## Un taglio si **verifica**, una costante si tasteggia: il criterio chiede la legge
+## al segmento 1 col livello 1 e al segmento 4 col livello 60 e deve ricevere **lo
+## stesso numero**, e verifica che in mezzo il **livello sia salito**. Se il livello
+## sale e il rateo no, il taglio e' completo; se il rateo si muove, il taglio non
+## c'e' e la sezione va rossa.
+##
+## ## `CATCHUP_SAFETY` resta, e dove
+##
+## Resta dov'era: `catchup_of(w)`, cioe' la legge dei **punti vita**. Non e' stato
+## spostato sul rateo perche' farlo avrebbe fatto dipendere da una costante di m14 un
+## numero che adesso e' costante per costruzione.
+##
+## ## Il nome resta `SPAWN_RATE`
+##
+## `tests/test_gameloop.gd` e `tests/test_progression.gd` lo leggono come costante e
+## devono continuare a leggere **il rateo**, che adesso e' esattamente questo
+## numero: `2,0408/s`.
+
+## ## Il rateo dichiarato, e **perche' ha due parametri che non usa**
+##
+## `spawn_rate_of(segment, at_level)` restituisce `SPAWN_RATE` qualunque cosa
+## passino i due argomenti. La firma non e' un dettaglio di stile: e' la forma che
+## rende il **taglio verificabile** senza toccare il codice di produzione. Il test
+## chiede la legge al segmento 1 col livello 1 e al segmento 4 col livello 60 e deve
+## ricevere **lo stesso numero**. Se un domani qualcuno rimettesse dentro
+## `power_ratio_of(at_level)`, questa funzione resterebbe quella che lo fa e
+## l'asserzione del taglio andrebbe rossa.
+static func spawn_rate_of(_segment: int, _at_level: int) -> float:
+	return SPAWN_RATE
+
+## ## Il tetto meccanico, e perche' e' una dichiarazione e non un tetto del gioco
+##
+## `horde.gd::_top_up` accumula il credito e **non puo' scaricare piu' di un
+## nemico per passo** (`_budget` viene riportato sotto 1,0). Quindi il rateo che
+## il gioco puo' davvero consegnare e' al massimo `1 / delta`, e a `DT = 1/60 s`
+## sono 60/s. Una legge che chiede piu' di 60/s non e' «piu' difficile»: e'
+## **la stessa cosa che a 5/s**, cioe' un numero che la meccanica ha gia' schiacciato.
+## `tests/test_orda.gd` stampa il confronto segmento per segmento, perche' e' la
+## riga che dice se la legge e' ancora leggibile o e' gia' satura.
+static func spawn_rate_ceiling(dt: float) -> float:
+	return 1.0 / maxf(dt, 0.000001)
 
 # --- Stato --------------------------------------------------------------------
 
@@ -289,6 +527,121 @@ var wave_killed: int = 0
 ## mentire sul nome che ha. Il tempo e' l'unica grandezza che il giocatore misura
 ## davvero, e l'unica che sopravvive a `-gameplay`.
 var elapsed_s: float = 0.0
+
+## ## m12-w1a: le uccisioni **in totale**, e perche' servono
+##
+## Fin qui c'era solo `wave_killed`, che si azzera a ogni cambio d'onda: quindi il
+## numero «quanto ha ucciso il giocatore in questa partita» **non esisteva**. E la
+## legge del rateo lo legge, perche' il livello e' una funzione delle uccisioni
+## cumulate: e' il secondo capo dell'anello
+## `tempo -> nascite -> uccisioni -> livello -> potenza -> rateo -> nascite`.
+##
+## `register_kill()` e' l'unico posto in cui cresce, `restart()` l'unico in cui
+## torna a zero, e `player_level_at(w)` (la versione **sulla tabella**, che serve al
+## controfattuale di m14) e' adesso `level_for_kills(uccisioni_fino_a(w))`: due
+## porte sulla stessa funzione invece di due copie della stessa funzione.
+var kills_total: int = 0
+
+## ## Il livello del giocatore **vero**, e perche' la legge lo legge
+##
+## `player_level_at(w)` chiede «che livello ci sarebbe alla fine dell'onda w», e
+## quella e' una domanda sulla tabella. Qui si chiede «che livello c'e' adesso»,
+## che e' una domanda sullo stato, e la differenza e' **tutto il contenuto
+## dell'anello di retroazione**: e' perche' il rateo dipende da una grandezza che
+## il rateo stesso sta muovendo.
+##
+## Il livello si **blocca** a ogni inizio di segmento (`_segment_level`): il rateo
+## e' costante dentro il segmento, quindi il ciclo non ha dove oscillare e il
+## numero che esce e' confrontabile. Il blocco e' dichiarato qui e non e' una
+## costante di smorzamento: non approssima niente, dice solo **dove** la legge si
+## riallinea al giocatore.
+func level() -> int:
+	return level_for_kills(kills_total)
+
+## Il livello per un numero di uccisioni: la stessa curva di
+## `src/player/progression.gd` (`XP_PER_KILL` per uccisione, soglie
+## `XP_BASE + XP_STEP x (livello - 1)`), letta su un intero. Statica perche' e' una
+## domanda sulla curva e non uno stato: `player_level_at(w)` e' questa funzione su
+## `uccisioni_fino_a(w)`, e il test puo' chiederla per qualunque numero.
+static func level_for_kills(k: int) -> int:
+	var xp_tot := XP_PER_KILL * float(maxi(k, 0))
+	var livello := 1
+	var speso := 0.0
+	while true:
+		var soglia := XP_BASE + XP_STEP * float(livello - 1)
+		if speso + soglia > xp_tot:
+			break
+		speso += soglia
+		livello += 1
+	return livello
+
+## ## Il segmento in cui siamo, e **perche' si legge l'orologio e non un contatore**
+##
+## `segment_of()` e' statica e pura: e' `floor(t / SEGMENT_S) + 1`, bloccato a
+## `SEGMENTS`. Il `clampi` finale e' quello che rende vero l'invariante dichiarato
+## «quattro segmenti, e sono quattro»: dopo i 720 s siamo **ancora nel segmento 4**
+## (quello del boss) e non ne nasce un quinto. Il boss arriva a `BOSS_AT_S` e ci
+## resta fino a `RUN_END_S`: sono due fatti, e perche' siano due e' scritto nella
+## nota lunga sopra.
+static func segment_of(t: float) -> int:
+	if t < 0.0:
+		return 1
+	return clampi(int(floor(t / SEGMENT_S)) + 1, 1, SEGMENTS)
+
+## Il segmento in corso. Numero, non funzione, perche' `horde.gd` e la HUD lo
+## leggono e una funzione che ogni volta ricalcola un `floor` sarebbe una domanda
+## ripetuta dove basta un campo.
+func segment() -> int:
+	return segment_of(elapsed_s)
+
+## Il boss e' arrivato? `t >= BOSS_AT_S`, cioe' fine segmento 4. E' un **predicato
+## di tempo** e non un canale: nessun danno, nessuna velocita', nessuna
+## geometria. Quello che il boss fa quando arriva e' di `-arena`.
+func boss_phase() -> bool:
+	return elapsed_s >= BOSS_AT_S
+
+## Il firewall e' partito? Come `mortar_unlocked()`, e con lo stesso onere: qui c'e'
+## **solo il secondo**. Il danno e il periodo non sono misurati, il vertice non ha
+## scritto il campo di contratto, e quindi un `firewall_damage()` qui sarebbe un
+## numero inventato travestito da meccanica. `-arena` lo implementa.
+func firewall_started() -> bool:
+	return elapsed_s >= FIREWALL_AFTER_S
+
+## ## La partita e' finita, e **le due strade**
+##
+##     1. il giocatore e' morto      -> `enter_game_over()`
+##     2. sono passati 1080 s        -> questo
+##
+## «Morire e' parte del processo» e' una scelta di disegno: la seconda strada non e'
+## una punizione per chi ha giocato bene, e' il motivo per cui `POP_MAX` e la legge
+## di m19 non hanno un tetto di sopravvivenza. **Il traguardo e' arrivare al boss al
+## 720 s**, non arrivare vivi a 1080 s.
+##
+## ## Perche' nessuno lo chiama ancora, e dichiarato
+##
+## `horde.gd` continua a chiamare solo `is_game_over()`, quindi **questa funzione non
+## cambia il comportamento del gioco**: e' la soglia dichiarata, e collegarla allo
+## step e' lavoro di chi deve costruire il volume verticale e il firewall. Un
+## predicato che nessuno chiama e' una dichiarazione; collegarlo a caso sarebbe un
+## cambiamento di gioco fatto in una foglia che non e' la sua.
+func run_over() -> bool:
+	return is_game_over() or elapsed_s >= RUN_END_S
+
+## ## Lo stato interno del rateo: **non esiste piu'**, e questa e' la prova del taglio
+##
+## Qui c'erano `_segment`, `_segment_level` e `_rate_value`: il **blocco** del ciclo,
+## con cui il rateo veniva rivalutato una volta per segmento sul livello di quel
+## momento. Erano tre numeri che esistevano **solo** per chiudere l'anello di
+## retroazione, e con il taglio non hanno piu' niente da chiudere: il rateo non
+## guarda piu' il livello, quindi non ha piu' niente da bloccare.
+##
+## Non sono rimasti come `_segment_level = 1` inutilizzati: **tre campi che nessuno
+## legge sono unInvito a ricollegarli**, e il giorno dopo il criterio del taglio
+## misurerebbe di nuovo una legge che credeva di essere piatta. Il test verifica il
+## taglio passando da `spawn_rate()` e da `spawn_rate_of()`, quindi se qualcuno li
+## ricollega la porta va rossa perche' il numero si muove, non perche' un campo
+## esiste.
+var _segment: int = 1
 
 func _init() -> void:
 	wave_total = wave_size(1)
@@ -381,8 +734,8 @@ static func touch_scale_of(w: int) -> float:
 ## un altro numero. Il tetto che c'era era `HP_SCALE_MAX` e l'ha scelto il caso
 ## invece della legge; adesso non c'e' niente da scegliere, c'e' solo la legge da
 ## capire. `tests/test_orda.gd` asserisce che la scala **cresca strettamente** a
-## ogni onda fino a `END_WAVE`: e' il criterio che oggi mancava, e senza di lui
-## il tetto si potrebbe reintrodurre in un pomeriggio di qualcun altro.
+## ogni onda fino a `LAW_HORIZON_WAVE`: e' il criterio che oggi mancava, e senza di
+## lui il tetto si potrebbe reintrodurre in un pomeriggio di qualcun altro.
 static func scale_of(w: int) -> float:
 	var n := maxi(w, 1)
 	var potenza := power_ratio_of(player_level_at(n - 1))
@@ -410,15 +763,22 @@ static func power_ratio_of(at_level: int) -> float:
 
 ## Il recupero di `CATCHUP_SAFETY`, lineare in `w` e valido **1,0 all'onda 1**.
 ##
-## Il `maxi(..., 1)` nel denominatore e' perche' `END_WAVE` e' dichiarato e puo'
-## essere portato a 2 da qualcuno: senza, la divisione per zero renderebbe tutta
-## la legge `INF` e il difetto si ripresenterebbe come un crash invece che come
-## una difficolta' sbagliata.
+## Il `maxi(..., 1)` nel denominatore e' perche' `LAW_HORIZON_WAVE` e' dichiarato e
+## puo' essere portato a 2 da qualcuno: senza, la divisione per zero renderebbe
+## tutta la legge `INF` e il difetto si ripresenterebbe come un crash invece che
+## come una difficolta' sbagliata.
+##
+## **Il denominatore e' `LAW_HORIZON_WAVE - 1` e non piu' `END_WAVE - 1`, e i due
+## numeri valgono 61.** Non e' una riformattazione: e' il punto in cui la legge di
+## m19 smette di essere «la difficolta' alla fine della partita» e diventa «la
+## difficolta' sull'orizzonte su cui e' tarata». Il denominatore e' rimasto lo
+## stesso numero perche' ancora nessuna misura lo ha spostato — vedi la nota lunga
+## su `LAW_HORIZON_WAVE` e il debito che `tests/test_orda.gd` stampa a ogni lancio.
 static func catchup_of(w: int) -> float:
 	var n := float(maxi(w, 1) - 1)
 	var tetto := (1.0 / TOUCH_INTERVAL) * TOUCH_DAMAGE_BASE
 	var necessario := (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL) / maxf(tetto, 0.000001)
-	return 1.0 + necessario * CATCHUP_SAFETY * n / float(maxi(END_WAVE - 1, 1))
+	return 1.0 + necessario * CATCHUP_SAFETY * n / float(maxi(LAW_HORIZON_WAVE - 1, 1))
 
 ## Quante uccisioni chiude l'onda `w` in tutto, dalla prima all'ultima: il
 ## **numeratore** del livello del giocatore. Statico perche' e' una domanda sulla
@@ -442,17 +802,17 @@ static func uccisioni_fino_a(w: int) -> int:
 ## `player_level_at(0)` vale 1, e quindi `scale_of(1)` non moltiplica per nessuna
 ## potenza: e' il motivo per cui l'onda 1 resta a `1.0` esatto come chiede il
 ## criterio n. 4 della milestone 1.
+##
+## ## Perche' non ha piu' il ciclo dentro (m12-w1a)
+##
+## Il ciclo che calcolava il livello qui dentro e' **spostato** in
+## `level_for_kills()` e questa funzione e' diventata una chiamata. Motivo: la legge
+## del rateo (`spawn_rate_of`) ha bisogno dello stesso livello letto sulle uccisioni
+## **vere**, e due copie dello stesso ciclo in due funzioni dello stesso file sono
+## due numeri che possono divergere senza che nessuno lo veda. Adesso c'e' una
+## sola funzione che sa cosa sia un livello, e questa ne e' il portale sulla tabella.
 static func player_level_at(w: int) -> int:
-	var xp_tot := XP_PER_KILL * float(uccisioni_fino_a(maxi(w, 0)))
-	var livello := 1
-	var speso := 0.0
-	while true:
-		var soglia := XP_BASE + XP_STEP * float(livello - 1)
-		if speso + soglia > xp_tot:
-			break
-		speso += soglia
-		livello += 1
-	return livello
+	return level_for_kills(uccisioni_fino_a(maxi(w, 0)))
 
 ## Quanti nemici vivi **contemporaneamente** sull'onda `w`.
 ##
@@ -473,10 +833,32 @@ static func population_of(w: int) -> int:
 		return POP_MAX
 	return mini(POP_BASE + (n - 1) * POP_STEP, POP_MAX)
 
-## Quanti nemici al secondo l'orda puo' guadagnare. Vedi `SPAWN_RATE`, che
-## dichiara la misura da cui viene.
+## ## Il rateo **vero**, e perche' e' una funzione che restituisce una costante
+##
+## `horde.gd::_top_up` chiama questa funzione **una volta per passo**, quindi qui
+## non ci puo' stare niente di pesante: e non ci sta, perche' non c'e' niente da
+## calcolare. Il numero e' `SPAWN_RATE`, e il fatto che sia una funzione e non un
+## campo esposto e' una scelta: `horde.gd` deve poter chiedere «il rateo adesso» senza
+## sapere se la legge e' una tabella o un calcolo, e quando la legge cambiera' (le
+## `Spam` dell'utente sono il prossimo candidato) il chiamante non cambiera'.
+##
+## La segnalazione di `segment_of(elapsed_s)` che c'era qui e' **stata tolta**: non
+## leggeva piu' niente che servisse, e tenere l'orologio vivo dentro il rateo era
+## stato il primo passo della strada che il taglio ha appena cancellata. Ora
+## l'orologio e' letto da `segment()`, che e' l'indice delle `Spam`, e da nessun
+##'altra parte.
 func spawn_rate() -> float:
 	return SPAWN_RATE
+
+## Il rateo che la legge **chiederebbe** a `dt` di passo, contro quello che
+## `horde.gd::_top_up` puo' consegnare davvero (`1 / dt`, perche' il credito non
+## puo' scaricare piu' di un nemico per passo). Il rapporto dei due e' la riga che
+## dice se la legge e' ancora leggibile: sotto 1 e' la legge, sopra 1 e' il
+## meccanismo, e sopra 1 la legge **smette di essere una legge** senza dirlo. Con
+## `SPAWN_RATE = 2,0408/s` il rapporto e' 0,41 a `DT = 1/60 s`: la legge e' **dentro**
+## il meccanismo, con un fattore 2,4 di margine.
+func spawn_rate_vs_ceiling(dt: float) -> float:
+	return spawn_rate() / spawn_rate_ceiling(dt)
 
 ## Il moltiplicatore di vita dell'onda in corso.
 ##
@@ -535,9 +917,20 @@ func wave_cleared() -> bool:
 # --- Il ciclo ------------------------------------------------------------------
 
 ## `n` nemici ammazzati nell'onda corrente.
+##
+## ## m12-w1a: e anche **in tutta la partita**
+##
+## `kills_total` e' il secondo capo dell'anello
+## `tempo -> nascite -> uccisioni -> livello -> potenza -> rateo -> nascite`: senza
+## questo accumulato la legge del rateo non avrebbe che cosa leggere, e leggere
+## `wave_killed` sarebbe leggere un numero che si azzera a ogni onda, cioe' leggere
+## niente. Quindi **una sola riga** conta le uccisioni, e le due somme sono
+## derivate dalla stessa chiamata: `horde.gd::_kill` chiama `register_kill()` una
+## volta sola per nemico.
 func register_kill(n: int = 1) -> void:
 	if n > 0:
 		wave_killed += n
+		kills_total += n
 
 ## L'onda successiva: il contatore sale di uno e la barra torna piena.
 ##
@@ -583,3 +976,11 @@ func restart() -> void:
 	# se ci fosse un'altra strada, l'orologio ripartirebbe da solo
 	# e la soglia dei 180 s cambierebbe da una partita all'altra.
 	elapsed_s = 0.0
+	# ## m12-w1a: e qui torna a zero anche il contatore delle uccisioni cumulate
+	#
+	# `kills_total` e' il numero che **prova il taglio**: il livello sale durante la
+	# partita e il rateo non si muove. Senza l'accumulato non ci sarebbe niente da
+	# confrontare, perche' `wave_killed` si azzera a ogni onda e quindi non
+	# descrive niente. Il test asserisce che dopo `restart_run()` valga `0`.
+	kills_total = 0
+	_segment = 1

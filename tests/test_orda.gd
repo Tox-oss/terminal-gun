@@ -345,6 +345,18 @@ func _run() -> void:
 	# `_scena_vera` perche' lavora sull'orda isolata: la scena vera registra sul
 	# contratto l'orda del gioco, e qui si deve parlare con l'altra.
 	_m17_orologio(h, horde)
+	_sez("m12")
+	# ## m12-w1a: LA PARTITA A OROLOGIO E LA LEGGE DEL RATEO. Sta **qui**, e il
+	# posto e' un ordine e non una scelta:
+	#
+	# dopo `_m17_orologio` perche' quella sezione finisce con `restart_run()`, che
+	# azzera anche l'orologio: questa comincia da un clock pulito e da `kills_total`
+	# a zero, e non eredita niente dalla sonda di m17. Prima di `_difficolta`
+	# perche' `_difficolta` confronta la legge **della vita** e su `LAW_HORIZON_WAVE`,
+	# e questa sezione tocca quel numero solo per dire che **non** e' la fine della
+	# partita. Prima di `_scena_vera` perche' lavora sull'orda isolata, con una
+	# cadencia di uccisioni **dichiarata** invece che con l'arma vera.
+	_m12_orologio(h, horde)
 	_sez("difficolta")
 	# ## m14: STA **prima** di `_scena_vera`, e perche' e' un ordine e non una
 	# scelta
@@ -421,6 +433,54 @@ func _rimetti_render() -> void:
 	for e in _staccati:
 		(e[1] as Node).add_child(e[0])
 	_staccati.clear()
+
+## ## Mettere i nemici, e **non aspettarli**: la regola del banco di prova
+##
+## Un test che vuole 200 corpi **ce li mette**. Il rateo di produzione e' il
+## **comportamento che il test sta misurando**, non l'attrezzo per costruire lo
+## scenario: usarlo per riempire l'arena vuol dire che ogni volta che
+## `Run.SPAWN_RATE` cambia, tutti i test che riempiono si rompono. E' successo due
+## volte — la prima con `SPAWN_RATE` da 8,0/s a 2,0408/s (m12-w1b: `test_gameloop`
+## rosso su un tetto di attesa tarato sul rateo vecchio, `test_orda` andato oltre i
+## 120 s), e prima ancora con m4.
+##
+## La strada scelta e' **metterli direttamente**, non alzare il rateo durante il
+## montaggio: alzare il rateo significa avere **una seconda fonte di verita' sul
+## rateo dentro il test**, e un test che cambia il rateo per costruire lo scenario
+## sta mentendo sullo scenario.
+##
+## `_spawn_one()` e' il cammino vero di `horde.gd` — quello che chiama `_top_up` — e
+## non guarda `population`, solo la capienza fisica: quindi mettere 200 corpi con
+## questa funzione produce **esattamente lo stesso stato** che produrrebbe la
+## rampa, senza aspettarla. Il rateo resta misurato dove è un criterio
+## (`_m12_criterio`, `_cresce_stretta`, i due riempimenti di `_spara_tutto`).
+##
+## Restituisce quanti ne ha messi, e resta dichiarato perche' un test che volesse
+## Contare i chiami per fare un'altra cosa troverebbe qui la risposta invece di
+## chiamare `_spawn_one()` da tre posti diversi.
+func _riempi(horde: HORDE, quanti: int) -> int:
+	var tetto := mini(quanti, HORDE.MAX_ENEMIES)
+	var messi := 0
+	while horde.count < tetto:
+		horde._spawn_one()
+		messi += 1
+		if messi > HORDE.MAX_ENEMIES:
+			break
+	return messi
+
+## Il **tetto di passi per un riempimento**, derivato dal rateo e non scritto.
+##
+## `horde.gd::_top_up` accumula `spawn_rate() x delta` e spende **un intero per
+## passo**, quindi per arrivare a `n` nemici servono `ceil(n / (rate x delta))`
+## passi. Il `+ 4` e' la tolleranza dell'arrotondamento del credito, non un
+## margine comodo: e' il minimo oltre il quale il numero non puo' mentire.
+##
+## Il rateo e' letto dalla **costante** `RUN.SPAWN_RATE` e non da
+## `run.spawn_rate()` perche' quello e' un metodo: la sezione `_m12_ancoraggio`
+## asserisce che i due sono lo stesso numero, quindi qui la costante non e' una
+## copia che puo' divergere.
+func _passi_per_riempire(n: int, delta: float) -> int:
+	return int(ceil(float(n) / maxf(0.000001, RUN.SPAWN_RATE * delta))) + 4
 
 # --- 11. Il morso: il nemico chiama Game.damage_player (milestone 7) ----------
 #
@@ -979,18 +1039,33 @@ func _population(h, horde: HORDE) -> void:
 	h.check(horde.count < HORDE.MAX_ENEMIES,
 		"l'avvio NON e' gia' pieno: %d vivi su %d di capienza" % [horde.count, HORDE.MAX_ENEMIES])
 
-	# La rampa fino alla capienza, **misurata**: e' il numero che rende
-	# visibile che 200 nemici ora costa dei secondi e non un passo.
+	# Il campo di avvio, **messo** e non aspettato.
+	# visibile che 200 nemici costa dei secondi quando nasce, e non un passo.
+	#
+	# Questa sezione **costruisce il banco di prova**: il suo compito e' che sotto ci
+	# siano 200 corpi su cui misurare griglia, capacita' e nodi. Aspettarli al ritmo
+	# di produzione significa che la sezione costa 3,92 volte piu' da quando il
+	# rateo e' sceso, e che la sua durata dipende dalla costante che questa sezione
+	# non sta misurando. Quindi si mettono.
+	#
+	# Quello che qui NON e' piu' misurato: che la capienza non si raggiunga in un
+	# passo. Era il sintomo di m4, e resta verificato in due posti che sono ancora
+	# una rampa vera: `tests/test_gameloop.gd` invariante 3 (con tetto derivato dal
+	# rateo) e piu' sotto, in `_spara_tutto`, con l'asserzione «un passo dopo lo
+	# svuotamento il campo e' ancora vuoto: nessuna raffica». Toglierlo di qui non
+	# toglie il criterio: gli toglie una copia che il banco di prova aveva reso falsa.
+	#
+	# E la stampa: prima diceva «portati a 200 in N passi = X s», che descriveva una
+	# rampa. Ora dice **quanti corpi sono stati messi** e non parla di secondi,
+	# perche' un tempo qui sarebbe il tempo del banco di prova travestito da tempo
+	# del gioco.
 	horde.auto_respawn = true
 	horde.population = HORDE.MAX_ENEMIES
-	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
-		horde.step(DT)
-		passi += 1
+	var messi := _riempi(horde, HORDE.MAX_ENEMIES)
 	h.eq(horde.count, HORDE.MAX_ENEMIES, "%d nemici vivi per il criterio di m1" % HORDE.MAX_ENEMIES)
-	h.check(passi > 1,
-		"la capienza NON si raggiunge in un passo: %d passi = %.2f s"
-			% [passi, float(passi) * DT])
+	h.check(messi > 1,
+		"i corpi sono stati messi in piu' di un colpo: %d richiami per arrivare a %d"
+			% [messi, horde.count])
 	# e nessun passo ne aggiunge piu' di uno
 	var aggiunti_max := 0
 	for _i in 30:
@@ -1069,9 +1144,19 @@ func _population(h, horde: HORDE) -> void:
 	h.check(census[ENEMY.RUNNER] > 0, "qualche runner")
 	h.check(census[ENEMY.BOSS] < horde.count / 4,
 		"il boss resta raro: %d su %d" % [census[ENEMY.BOSS], horde.count])
-	print("orda: avvio a %d nemici (Run.POP_BASE), portati a %d in %d passi = %.2f s "
-		% [RUN.POP_BASE, horde.count, passi, float(passi) * DT]
-		+ "(Run.SPAWN_RATE = %.1f/s)" % RUN.SPAWN_RATE)
+	# ## La stampa: «portati a %d in %d passi = %.2f s» non e' piu' vera qui
+	#
+	# Il campo di avvio non viene piu' riempinto **aspettando** le nascite ma
+	# **mettendo** i corpi con `_riempi()`, quindi un tempo in secondi qui
+	# descriverebbe il banco di prova e non il gioco. La riga dice **quanti
+	# richiami** sono serviti e riporta il rateo solo come riferimento, con la parola
+	# che lo dice. Il tempo di riempimento vero e' misurato in `_m12_criterio` e in
+	# `tests/test_gameloop.gd` invariante 3, dove l'attesa e' ancora una rampa.
+	print("orda: avvio a %d nemici (Run.POP_BASE), portati a %d in %d richiami di `_riempi` "
+			% [RUN.POP_BASE, horde.count, messi]
+		+ "(NON e' una rampa di nascite: il rateo e' %.4f/s e non e' stato usato per il "
+			% RUN.SPAWN_RATE
+		+ "riempimento, che viene misurato altrove)")
 	print("orda: %d nemici su %d celle, specie %s, raggio %.1f m"
 		% [horde.count, horde.occupied_cells(), str(census), horde.arena_radius])
 
@@ -1667,13 +1752,11 @@ func _damage_kills(h, horde: HORDE) -> void:
 	h.eq(horde.population, RUN.population_of(horde.wave),
 		"e la popolazione inseguita e' quella della curva sull'onda corrente")
 
-	var passi_pieno := 0
-	while horde.count < horde.population and passi_pieno < 6000:
-		horde.step(DT)
-		passi_pieno += 1
+	var messi_pieno := _riempi(horde, horde.population)
 	h.eq(horde.count, horde.population, "l'orda arriva a `population`, e non oltre")
-	h.check(passi_pieno > 1,
-		"e ci mette piu' di un passo: %d passi = %.2f s" % [passi_pieno, float(passi_pieno) * DT])
+	h.check(messi_pieno > 1,
+		"i corpi sono stati messi in piu' di un colpo: %d richiami per arrivare a %d"
+			% [messi_pieno, horde.count])
 	h.eq(horde.transforms.size(), horde.count, "allineata dopo il riempimento")
 	h.eq(horde.colors.size(), horde.count, "colori allineati dopo il riempimento")
 	h.eq(horde.radii.size(), horde.count,
@@ -1682,22 +1765,28 @@ func _damage_kills(h, horde: HORDE) -> void:
 	h.check(horde.nearest_enemy_index(Vector3.ZERO, 100.0) >= 0,
 		"dopo il riempimento si trova qualcuno")
 
-	# e adesso la capienza, di nuovo pilotata a mano, con lo stesso ritmo
+	# e adesso la capienza, di nuovo pilotata a mano, con lo stesso metodo
 	horde.population = HORDE.MAX_ENEMIES
-	var passi_capienza := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi_capienza < 6000:
-		horde.step(DT)
-		passi_capienza += 1
+	var messi_capienza := _riempi(horde, HORDE.MAX_ENEMIES)
 	h.eq(horde.count, HORDE.MAX_ENEMIES, "la capienza si raggiunge anche per riempimento")
-	h.check(passi_capienza > 1, "anche da %d vivi ci mette piu' di un passo: %d passi = %.2f s"
-		% [RUN.population_of(horde.wave), passi_capienza, float(passi_capienza) * DT])
+	h.check(messi_capienza > 1,
+		"anche da %d vivi i corpi sono stati messi in piu' di un colpo: %d richiami"
+			% [RUN.population_of(horde.wave), messi_capienza])
 	h.eq(horde.count, HORDE.MAX_ENEMIES, "e non la supera")
 	print("orda: svuotata e riempita di nuovo, uccisioni in tutto %d, specie %s"
 		% [horde.kills, str(horde.census())])
-	print("orda: da 0 a %d in %.2f s, da %d a %d in %.2f s (Run.SPAWN_RATE = %.1f/s)"
-		% [RUN.population_of(horde.wave), float(passi_pieno) * DT,
-			RUN.population_of(horde.wave), HORDE.MAX_ENEMIES,
-			float(passi_capienza) * DT, RUN.SPAWN_RATE])
+	# ## La stampa non parla piu' di secondi, e il motivo e' dichiarato
+	#
+	# Prima diceva «da 0 a 25 in 3,13 s, da 25 a 200 in 22,00 s (SPAWN_RATE = 8,0/s)»:
+	# erano tempi di **rampa**. Ora il campo e' riempito mettendolo, quindi un tempo
+	# qui sarebbe il tempo del banco di prova travestito da tempo del gioco. La riga
+	# dice **quanti corpi sono stati messi** e non promette niente sul rateo, che
+	# viene misurato altrove: da `_m12_criterio` e da `tests/test_gameloop.gd`
+	# invariante 3, dove l'attesa e' ancora una rampa vera.
+	print("orda: svuotata e riempita di nuovo mettendo i corpi: %d richiami da 0 a %d, "
+			% [messi_pieno, RUN.population_of(horde.wave)]
+		+ "%d richiami da %d a %d (Run.SPAWN_RATE = %.4f/s, non usato per il riempimento)"
+			% [messi_capienza, RUN.population_of(horde.wave), HORDE.MAX_ENEMIES, RUN.SPAWN_RATE])
 
 # --- 11c-bis. Le due fonti di danno al giocatore (m14) -------------------------
 #
@@ -1821,10 +1910,7 @@ func _misura_morso(h, horde: HORDE, seme: int, pop: int) -> Dictionary:
 	horde.population = pop
 	while horde.count > 0:
 		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
-	var passi_pieno := 0
-	while horde.count < pop and passi_pieno < 6000:
-		horde.step(DT)
-		passi_pieno += 1
+	_riempi(horde, pop)
 	h.eq(horde.count, pop, "il caso seme %d e' arrivato a %d vivi" % [seme, pop])
 	# warm-up: l'orda deve **arrivare**, non essere gia' addosso al primo passo
 	for _i in 1800:
@@ -2134,10 +2220,7 @@ func _scena_vera(h, isolate: HORDE) -> void:
 
 	giocatore.hp = VERA_HP_ALTO
 	horda.population = HORDE.MAX_ENEMIES
-	var passi_pieno := 0
-	while horda.count < HORDE.MAX_ENEMIES and passi_pieno < 6000:
-		_passo_vera(horda, giocatore, DT)
-		passi_pieno += 1
+	_riempi(horda, HORDE.MAX_ENEMIES)
 	h.eq(horda.count, HORDE.MAX_ENEMIES,
 		"scena vera: l'orda arriva a %d nemici vivi, non a 25" % HORDE.MAX_ENEMIES)
 	h.eq(horda.radii.size(), horda.count,
@@ -2715,10 +2798,7 @@ func _aggira(h, horde: HORDE) -> void:
 	horde.run.wave_killed = 0
 	horde.reseed(M10_SEME)
 	horde.population = HORDE.MAX_ENEMIES
-	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
-		horde.step(DT)
-		passi += 1
+	_riempi(horde, HORDE.MAX_ENEMIES)
 	h.eq(horde.count, HORDE.MAX_ENEMIES, "m10: la misura parte da %d nemici" % HORDE.MAX_ENEMIES)
 	h.eq(horde.inside_obstacles(), 0,
 		"m10: al primo passo nessuno e' gia' dentro un ostacolo (disposizione e' fatta fuori)")
@@ -2896,10 +2976,7 @@ func _incastrati(h, horde: HORDE) -> void:
 	horde.run.wave_killed = 0
 	horde.reseed(M10_SEME)
 	horde.population = HORDE.MAX_ENEMIES
-	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
-		horde.step(DT)
-		passi += 1
+	_riempi(horde, HORDE.MAX_ENEMIES)
 
 	# Il contatore e' per **indice**, e gli indici cambiano a ogni morte: qui
 	# non muore nessuno (nessun colpo nella finestra), quindi l'indice e' lo
@@ -2988,10 +3065,7 @@ func _denti_del_criterio(h, horde: HORDE) -> void:
 	horde.run.wave_killed = 0
 	horde.reseed(M10_SEME)
 	horde.population = HORDE.MAX_ENEMIES
-	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
-		horde.step(DT)
-		passi += 1
+	_riempi(horde, HORDE.MAX_ENEMIES)
 	var dentro_tot := 0
 	var dentro_max := 0
 	var dentro_passi := 0
@@ -5012,12 +5086,32 @@ const GIRI_SOGLIA := 3
 ## passo nel quale il mortar potesse nascere** (0 su 2700 passi, letto). Non era un
 ## difetto della regola: era una finestra di osservazione di lunghezza zero.
 ##
-## 600 passi oltre la soglia sono 30 s di partita con la soglia **aperta da sola**:
-## a cadenza di spawn piu' di un nemico per passo sono ~600 nascite, cioe' ~17
-## mortar con quota 2,9%, e la probabilita' che **nessuno** ne nasca e' 1 su
-## 100 milioni. Il numero che esce (quanti passi dopo la soglia compare il primo)
-## e' stampato, perche' e' la misuravera e non un si'.
-const PASSI_DOPO_LA_SOGLIA := 600
+## ## m12-w1b: `600` era tarato sul rateo vecchio, e la finestra va **derivata**
+##
+## I 600 passi erano giustificati da un conteggio di nascite: «a cadenza di spawn
+## piu' di un nemico per passo sono ~600 nascite, cioe' ~17 mortar». Ma a
+## `SPAWN_RATE = 8,0/s` quei 600 passi a `DT = 0,2 s` davano 600 nascite; a
+## `2,0408/s` ne danno **245**, cioe' ~7 mortar: la probabilita' che nessuno nasca
+## passa da 1 su 100 milioni a circa **1 su 14**, e la misura ha cominciato a dare
+## `[600, 600, 600]` — cioe' la finestra era finita **prima** che il primo mortar
+## potesse comparire. Non e' un difetto della regola: e' una finestra tarata su una
+## costante che e' cambiata, che e' la stessa classe di difetto del tetto di attesa.
+##
+## La finestra si deriva quindi **dal numero di nascite che servono**, non dai passi:
+## `nate_per_passo = SPAWN_RATE * DT` e i passi sono quelli per arrivare a
+## `NATE_MINIME_MORTAR` nascite. Il 3% e' la quota dichiarata di `spawner.gd`
+## (`MORTAR_WEIGHT`), quindi il numero e' una **probabilita'**, e la soglia e' quella
+## che la rende alta. Quello che esce a `SPAWN_RATE = 8,0/s` sono ~600 passi come
+## prima: non e' un numero che si e' cambiato, e' lo stesso numero calcolato.
+const NATE_MINIME_MORTAR := 2400.0
+
+## Quanti passi oltre la soglia servono per vedere il mortar. **Derivato**: il numero
+## di nascite che la finestra deve contenere, diviso per le nascite che un passo
+## produce. `nate_per_passo` e' sotto 1 a `DT = 0,2 s` (0,41), quindi la finestra e'
+## un multiplo di ~2,4 passi per nascita e arrotonda verso l'alto.
+func _passi_dopo_la_soglia(delta: float) -> int:
+	var per_passo := maxf(0.000001, RUN.SPAWN_RATE * delta)
+	return int(ceil(NATE_MINIME_MORTAR / per_passo))
 
 ## La soglia di denti: un valore che il gioco non raggiunge mai, cosi' il criterio
 ## accende il difetto senza toccare il numero di produzione.
@@ -5184,7 +5278,12 @@ func _m17_orologio(h, horde: HORDE) -> void:
 		# leggere in fondo misurerebbe l'onda di 210 s e la chiamerebbe «onda a 180 s».
 		var onda_alla_soglia := 0
 		var passi_soglia := 0
-		while passi < PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA:
+		# La finestra oltre la soglia e' **derivata dal rateo**: vedi
+		# `_passi_dopo_la_soglia`. Con `SPAWN_RATE = 8,0/s` tornano i 600 passi di
+		# prima; con `2,0408/s` la finestra si allunga da sola invece di finire prima
+		# che il primo mortar possa comparire.
+		var tetto_giro := PASSI_OROLOGIO + _passi_dopo_la_soglia(DT_OROLOGIO)
+		while passi < tetto_giro:
 			# Il censimento a ogni passo e' la prova che **il mortar compare da
 			# solo**, e non perche' il test abbia aperto qualcosa: e' una lettura,
 			# non una scrittura (costa `O(count)` su 6-50 vivi, e la sezione lo dice).
@@ -5203,7 +5302,7 @@ func _m17_orologio(h, horde: HORDE) -> void:
 				# che ci e' volto e' la misura «quanto ci mette a farsi vedere».
 				break
 		var primo := passi
-		while nati_mortar == 0 and primo < PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA:
+		while nati_mortar == 0 and primo < tetto_giro:
 			if horde.census()[ENEMY.MORTAR] > 0:
 				nati_mortar += 1
 			horde.step(DT_OROLOGIO)
@@ -5241,13 +5340,13 @@ func _m17_orologio(h, horde: HORDE) -> void:
 		"m17 misura: la soglia si e' aperta **da sola** al passo %s (%s passi dopo la soglia) e "
 			% [str(passi_alla_soglia), str(passi_alla_soglia)]
 		+ "in %d passi oltre la soglia il mortar non e' mai comparso in campo: una soglia che "
-			% (PASSI_OROLOGIO + PASSI_DOPO_LA_SOGLIA)
+			% (PASSI_OROLOGIO + _passi_dopo_la_soglia(DT_OROLOGIO))
 		+ "nessuno ha attraversato e' una soglia che non esiste")
 	print("orda: m17, terzo minuto = **onda %d** -- misurata su %d semi (%s) a DT %.1f s con "
 			% [onde[0], SEMI_OROLOGIO.size(), str(SEMI_OROLOGIO), DT_OROLOGIO]
-		+ "%d uccisioni per passo = %.1f uccisioni/s, %d passi fino alla soglia + %d oltre, "
+		+ "%d uccisioni per passo = %.1f uccisioni/s, %d passi fino alla soglia + %d oltre "
 			% [UCCISIONI_PER_PASSO, float(UCCISIONI_PER_PASSO) / DT_OROLOGIO, PASSI_OROLOGIO,
-				PASSI_DOPO_LA_SOGLIA]
+				_passi_dopo_la_soglia(DT_OROLOGIO)]
 		+ "`population_scale` %.2f; il primo mortar e' comparso %s passi dopo la soglia, da solo. "
 			% [SCALA_OROLOGIO, str(passi_alla_soglia)]
 		+ "Il numero vale per QUELLA cadenza (un giocatore vero uccide piu' lento, quindi vede "
@@ -5262,6 +5361,649 @@ func _m17_orologio(h, horde: HORDE) -> void:
 		"m17: la sezione rimette l'orologio a zero con `restart_run()`, e non con una "
 			+ "scrittura: la strada vera resta la strada vera")
 	print("orda: m17, sezione intera in %d us" % (Time.get_ticks_usec() - t0))
+
+# ================================================================================
+# 20. m12-w1a: LA PARTITA A OROLOGIO E LA LEGGE DEL RATEO DI NASCITA
+# ================================================================================
+#
+# ## Cosa c'era e cosa c'e'
+#
+# Prima di questa sezione `src/sim/run.gd` aveva `END_WAVE = 61` e una
+# `SPAWN_RATE` **piatta** a 8,0/s. Adesso ha l'orologio (quattro segmenti da 180 s,
+# boss a 720 s, fine a 1080 s) e una legge per il rateo. Le tre cose che questa
+# sezione deve **dimostrare** e non asserire:
+#
+#   1. **la timeline e' vera** — quattro segmenti, `720 s` NON e' la fine del run, e
+#      il 720 e' l'**arrivo**; `1080 s` e' l'altra strada, e la prima e' la morte;
+#   2. **il rateo di avvio e' il tetto di assorbimento**, cioe' `2,0408/s`, e la
+#      legge di prima (`8,0/s`) lo superava di **3,92 volte**: questo e' il
+#      controfattuale, ed e' quello che deve venire **male**;
+#   3. **la partita intera, 1080 s, gira** — e il numero che ne esce (quanti
+#      segmenti, che livello, quanti vivi, che rateo) e' stampato accanto al
+#      verdetto, perche' un verdetto senza numeri e' un verdetto che il prossimo
+#      giro ricomincia a indovinare.
+#
+# ## Il tempo, e perche' `DT = 0,2 s` qui non e' un'approssimazione
+#
+# `test_orda` costa **101.262 ms dei 120.000** (misurato il 2026-10-16 prima di
+# toccare una riga) e ne restano **18.738**. La partita dura **1080 s**: a
+# `DT = 1/60 s` sono **64.800 passi**, e a ~3 ms per passo con 200 nemici sono
+# **194 s** — piu' del tetto del file, da solo. Quindi qui si gira a
+# `DT_OROLOGIO_M12 = 0,2 s` e **5400 passi**, come la sonda di m17 gia' faceva per
+# arrivare a 180 s.
+#
+# **Un criterio misurato a `DT = 0,2 s` parla di un gioco diverso da quello a
+# `DT = 1/60 s`, e va detto.** Il numero che questa sezione giudica — il **tempo di
+# riempimento** — e' un numero in secondi, quindi e' l'unico la cui risposta a `DT`
+# e' nota: il credito di `horde.gd::_top_up` cresce di `rate x delta` e spende
+# interi per intero, quindi a `DT` piu' grossi arriva **meno nemici per passo** e
+# il tempo di riempimento resta `POP_BASE / rate` piu' un sovrappiu' di **un passo**.
+# La difesa non e' dichiarata, e' **misurata**: `_riempimento_misurato()` gira
+# **due volte**, a `DT = 0,2 s` e a `DT = 1/60 s`, sullo stesso numero, e le due
+# righe sono stampate insieme. Se un giorno il numero non coincide piu', la difesa
+# lo dice da sola.
+
+## Il passo grosso della partita intera, e i passi che copre.
+##
+## `5400 x 0,2 s = 1080,0 s`, cioe' `RUN_END_S`. Scritto e non calcolato perche' il
+## numero che il piano si porta via e' leggibile senza fare la divisione.
+const DT_OROLOGIO_M12 := 0.2
+const PASSI_PARTITA := 5400
+
+## Il passo **fine**, e la finestra in cui lo si misura.
+##
+## Non e' un secondo giro della partita intera (sarebbero 64.800 passi, vedi
+## sopra): e' **lo stesso numero del criterio**, cioe' il tempo di riempimento del
+## campo di avvio, rilmesso a `DT = 1/60 s`. 25 corpi a `2,0408/s` sono 12,25 s,
+## cioe' **735 passi**: la difesa costa 735 passi, non un giro.
+const DT_M12_FINE := 1.0 / 60.0
+
+## Il **rateo di prima**: piatto, e a 8,0/s. Congelato qui dentro e letto da nessuna
+## parte, perche' il criterio debba poter essere valutato anche su di lui.
+const SPAWN_RATE_PIATTO := 8.0
+
+## ## La cadenza di uccisioni con cui gira la partita intera: **non e' una costante**
+##
+## Era `const CORSIA_KILL_M12 := 2,0408`, cioe' il numero scritto a mano **due volte**
+## — una qui e uno dentro `run.gd` — e asserito con `near`. E' il difetto che questo
+## file chiude in ogni altro punto, quindi non si fa qui: la cadenza si **legge da
+## `Run.ASSIMILATION_1`** e si asserisce che il valore letto sia proprio quello che
+## la legge dichiara.
+##
+## Il giocatore di questa simulazione e' quindi il caso **migliore**: uccide esattamente
+## quanto puo' uccidere e niente di piu'. Un giocatore vero uccide meno, quindi i
+## numeri che ne escono sono il **limite superiore** di quello che vede lui — che e'
+## la direzione giusta per un tetto, ed e' la stessa dichiarazione che fa la sezione
+## m17 sulla sua sonda.
+var _corsia_kill: float = 0.0
+
+## ## Il numero di uccisioni attese: una **banda**, non un intero scritto a mano
+##
+## La prima stesura aveva `const UCCISIONI_ATTESE := 2204`, cioe' `2,0408 x 1080`
+## calcolato con carta e poi asserito con `h.eq`. Un numero derivato a mano e poi
+## confrontato con `==` non prende niente: se la formula cambia va rosso per la
+## ragione sbagliata, e se qualcuno corregge il valore a mano torna verde senza che
+## niente sia stato verificato.
+##
+## **Scelta: banda di +/- 1 uccisione attorno a un numero derivato a runtime**
+## (`ASSIMILATION_1 x RUN_END_S`). Il motivo di una banda e non di un `==` e' che
+## il credito di uccisioni e' un accumulatore in `float`: `2,040816 x 1080 =
+## 2204,08` non e' un intero, e in 5400 passi l'accumulatore puo' cadere sotto di
+## una uccisione per errore di arrotondamento. +/- 1 su 2204 e' lo **0,05%**: e' la
+## quantizzazione del credito, non una patacca. Il numero vero resta stampato
+## accanto all'asserzione.
+const UCCISIONI_TOLLERANZA := 1.0
+
+## ## La banda del tempo di riempimento, e **da dove viene**
+##
+## - **Il pavimento, 5,52 s**: e' la misura di m4, «25 nemici vivi entro 6 m dal
+##   bersaglio, t = 5,52 s». Un campo che si riempie **piu' in fretta** di quanto
+##   ci mette ad arrivare addosso ti si riaddossa piu' presto di quanto tu l'abbia
+##   liberato: e' esattamente la derivazione con cui m4 ha scelto la sua banda di
+##   `SPAWN_RATE`, e quella banda guardava solo il tetto (`< 15/s`) e non guardava
+##   **chi riempie**. Quindi `8,0/s` — che sta sotto 15 e sta sopra 4,5 — passava la
+##   banda di m4 ed e' sbagliato lo stesso: era quella la banda senza il numero.
+## - **Il soffitto, 90 s**: meta' segmento. Il campo deve poter essere riempito entro
+##   un segmento da 180 s, o l'orda non esiste nemmeno per meta' del suo tempo.
+##
+## ## Perche' con la legge di m19 questo criterio non avrebbe avuto un solo numero
+##
+## La legge di prima del rateo dipendeva dal livello, quindi due partite con lo stesso
+## orologio davano due tempi di riempimento diversi, e il controfattuale non si
+## poteva scrivere come una costante. **Con il taglio il numero e' uno solo** e il
+## controfattuale e' di nuovo una costante — e quindi verificabile.
+const POPIENO_MIN_S := 5.52
+const POPIENO_MAX_S := 90.0
+
+## La scala del campo durante la partita intera. Come la sonda di m17: la barra non
+## dipende da quanti vivi ci sono (dipende dalle uccisioni), quindi il numero che
+## questa sezione giudica non cambia, e il codice che gira e' quello di sempre.
+const SCALA_M12 := 0.25
+
+func _m12_orologio(h, horde: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	var r = horde.run
+	if not h.check(r != null, "m12: la sezione ha bisogno di una partita vera"):
+		return
+	_corsia_kill = RUN.ASSIMILATION_1
+	_m12_timeline(h, horde, r)
+	_m12_ancoraggio(h, r)
+	_m12_criterio(h, horde, r)
+	_m12_partita_intera(h, horde, r)
+	_m12_fuori_mano(h)
+	# l'orda torna com'era, e **con `restart_run()`**: la strada vera resta la
+	# strada vera, e la sezione che segue misura una partita nuova.
+	horde.population_scale = 1.0
+	horde.population = RUN.population_of(1)
+	horde.auto_respawn = false
+	horde.restart_run()
+	print("orda: m12, sezione intera in %d us (budget del file sotto)" % (Time.get_ticks_usec() - t0))
+
+## (1) LA TIMELINE: quattro segmenti, e 720 s non e' la fine del run.
+func _m12_timeline(h, horde: HORDE, r) -> void:
+	h.eq(int(RUN.SEGMENTS), 4,
+		"m12: quattro segmenti, e sono quattro (non cinque, non tre)")
+	h.near(RUN.SEGMENT_S, 180.0, 0.000001, "m12: il segmento dura 180,0 s")
+	h.near(RUN.FIREWALL_AFTER_S, 120.0, 0.000001, "m12: il firewall comincia a 120,0 s")
+	h.near(RUN.BOSS_AT_S, 720.0, 0.000001, "m12: il boss a 720,0 s = 4 segmenti")
+	h.near(RUN.RUN_END_S, 1080.0, 0.000001, "m12: la fine del run a 1080,0 s")
+	h.near(RUN.SQUEEZE_AT_S, RUN.RUN_END_S, 0.000001,
+		"m12: lo stringimento e' lo stesso istante della fine: due numeri per lo stesso "
+			+ "istante sarebbero due numeri che possono divergere")
+	h.near(RUN.MORTAR_AFTER_S, RUN.SEGMENT_S, 0.000001,
+		"m12: la soglia del mortar (180,0 s, m17) e' esattamente un segmento: la struttura "
+			+ "si combacia da sola invece che per accordo a mano")
+	# La segmentazione, ai bordi. Il caso che conta e' **l'ultimo**: dopo il boss non
+	# ne nasce un quinto.
+	for s in range(1, int(RUN.SEGMENTS) + 1):
+		var inizio := RUN.SEGMENT_S * float(s - 1)
+		h.eq(RUN.segment_of(inizio), s, "m12: a %.1f s siamo nel segmento %d" % [inizio, s])
+		h.eq(RUN.segment_of(inizio + RUN.SEGMENT_S - 0.001), s,
+			"m12: il segmento %d dura fino a %.1f s e non un passo di meno" % [s, inizio + RUN.SEGMENT_S])
+	h.eq(RUN.segment_of(0.0), 1, "m12: a zero secondi siamo nel segmento 1")
+	h.eq(RUN.segment_of(RUN.RUN_END_S), int(RUN.SEGMENTS),
+		"m12: a 1080 s siamo ANCORA nel segmento %d: il boss arriva a 720 e non ne nasce un quinto"
+			% int(RUN.SEGMENTS))
+	h.eq(RUN.segment_of(-5.0), 1, "m12: un orologio indietro non esce dal segmento 1")
+
+	# ## Le due strade della fine, e la prova che sono **due**
+	horde.restart_run()
+	r.elapsed_s = RUN.BOSS_AT_S - 0.001
+	h.check(not r.boss_phase(), "m12: un passo prima dei 720 s il boss non e' ancora arrivato")
+	h.check(not r.run_over(), "m12: e la partita non e' finita")
+	r.elapsed_s = RUN.BOSS_AT_S
+	h.check(r.boss_phase(), "m12: a 720,0 s il boss e' arrivato")
+	h.check(not r.run_over(),
+		"m12: 720 s NON e' la fine del run: e' l'arrivo. Il run finisce a 1080 s o quando il "
+			+ "giocatore muore, e qui nessuna delle due e' scattata")
+	h.check(r.enter_game_over(), "m12: `enter_game_over()` entra davvero")
+	h.check(r.run_over(),
+		"m12: la MORTE e' la prima delle due strade, e si vede senza toccare l'orologio: "
+			+ "«morire e' parte del processo» e' una scelta di disegno, non un crash")
+	horde.restart_run()
+	h.check(not r.run_over(), "m12: dopo il restart nessuna delle due strade e' scattata")
+	r.elapsed_s = RUN.RUN_END_S
+	h.check(r.run_over(), "m12: 1080 s e' la seconda strada")
+	h.check(not r.is_game_over(),
+		"m12: e non e' `game_over`: sono due fatti distinti e confonderli farebbe sembrare "
+			+ "morto un giocatore che e' solo arrivato in fondo")
+	# Il firewall: **solo il secondo**. Qui non puo' esserci un canale di danno, e il
+	# messaggio lo dice: un `firewall_damage` qui sarebbe un numero inventato.
+	r.elapsed_s = RUN.FIREWALL_AFTER_S - 0.001
+	h.check(not r.firewall_started(), "m12: a 119,999 s il firewall non e' partito")
+	r.elapsed_s = RUN.FIREWALL_AFTER_S
+	h.check(r.firewall_started(),
+		"m12: a 120,0 s il firewall e' partito: qui c'e' SOLO il secondo dichiarato, il canale "
+			+ "di danno e' di -arena e non ha ancora un campo di contratto")
+	h.check(not r.has_method("firewall_damage"),
+		"m12: e questa foglia NON ha un canale di danno del firewall: il suo periodo e' "
+			+ "misurato da -arena, e qui ci sarebbe stato un numero di comodo")
+	horde.restart_run()
+	h.near(r.elapsed_s, 0.0, 0.000001, "m12: il restart rimette l'orologio a zero")
+
+## (2) L'ANCORAGGIO e **IL TAGLIO**: il rateo e' il tetto di assorbimento, e non
+## ## guarda piu' il livello.
+##
+## Sono due domande diverse e vanno due asserzioni diverse. La prima e' «da dove
+## viene il numero». La seconda e' **«l'anello di retroazione e' stato tagliato?»**,
+## ed e' la domanda con cui il vertice ha corretto questa sezione: se il rateo
+## dipendesse ancora dal livello da qualche parte, il ciclo
+## `tempo -> nascite -> uccisioni -> livello -> rateo -> nascite` sarebbe ancora
+## chiuso e divergerebbe ancora.
+##
+## Il taglio si verifica su **tre numeri presi dalla stessa partita**, e non su una
+## formula: il rateo al secondo 1, il livello al secondo 1, il rateo al secondo
+## 1080. Se il livello sale e il rateo no, il taglio e' completo. Se il livello non
+## sale, la prova non misura niente. Se il rateo si muove, il taglio non c'e'.
+func _m12_ancoraggio(h, r) -> void:
+	h.near(RUN.ENEMY_HP_RUNNER, float(ENEMY.HP_MAX[ENEMY.RUNNER]), 0.000001,
+		"m12: `ENEMY_HP_RUNNER` deve valere `enemy.gd::HP_MAX[runner]`: e' una copia dichiarata, "
+			+ "e se -gameplay cambiasse i 14 hp questa riga e' quella che lo dice")
+	h.near(RUN.ASSIMILATION_1,
+		(RUN.WEAPON_DAMAGE / RUN.WEAPON_FIRE_INTERVAL) / RUN.ENEMY_HP_RUNNER, 0.000001,
+		"m12: il tetto di assorbimento e' DPS(livello 1) / hp(runner), con i due numeri che la "
+			+ "legge dichiara: 28,5714 / 14 = 2,0408 al secondo")
+	h.near(RUN.SPAWN_RATE, RUN.ASSIMILATION_1, 0.000001,
+		"m12: il rateo E' il tetto di assorbimento: non e' una scelta, e' una divisione")
+	h.near(RUN.spawn_rate_of(1, 1), RUN.ASSIMILATION_1, 0.000001,
+		"m12: e al segmento 1 col livello 1 la legge vale esattamente il tetto: il numero del "
+			+ "primo segmento e' derivato, non scelto")
+	h.check(SPAWN_RATE_PIATTO > RUN.ASSIMILATION_1,
+		"m12: la legge di prima, piatta a %.1f/s, SUPERA il tetto di assorbimento di %.2f volte: "
+			% [SPAWN_RATE_PIATTO, SPAWN_RATE_PIATTO / RUN.ASSIMILATION_1]
+			+ "e sopra quella soglia la popolazione cresce per forza, non per scelta")
+	h.near(SPAWN_RATE_PIATTO / RUN.ASSIMILATION_1, 3.92, 0.01,
+		"m12: il rapporto e' 3,92, ed e' il numero che l'utente ha citato: 1.440 nascite nei "
+			+ "180 s del primo segmento contro 368 che il livello 1 puo' abbattere")
+	h.check(not r.has_method("rate_catchup_of"),
+		"m12: la funzione di recupero del rateo NON esiste piu': il ciclo e' stato tagliato, non "
+			+ "smorzato, e uno stub che restituisse 1,0 sembrerebbe una legge")
+
+	## ## Il taglio, verificato **sulla legge dichiarata** e non sul codice
+	##
+	## `spawn_rate_of(segment, livello)` ha due parametri che non usa, ed e' per
+	## quello che esiste: se il livello tornasse dentro la formula, questa riga
+	## andrebbe rossa. Il confronto e' su quattro coppie segmento/livello che
+	## attraversano tutta la partita, non su una.
+	for coppia in [[1, 1], [1, 30], [4, 30], [4, 60], [4, 213]]:
+		var s := int(coppia[0])
+		var L := int(coppia[1])
+		h.near(RUN.spawn_rate_of(s, L), RUN.ASSIMILATION_1, 0.000001,
+			"m12 TAGLIO: la legge al segmento %d col livello %d vale %.4f/s, cioe' il tetto di "
+				% [s, L, RUN.spawn_rate_of(s, L)]
+			+ "assorbimento e non una funzione del livello: e' questo che chiude l'anello "
+			+ "tempo->nascite->uccisioni->livello->potenza->rateo")
+	h.check(r.spawn_rate_vs_ceiling(DT_M12_FINE) < 1.0,
+		"m12: il rateo (%.4f/s) e' DENTRO il tetto meccanico di %.1f/s a DT 1/60 s: rapporto %.3f. "
+			% [RUN.SPAWN_RATE, RUN.spawn_rate_ceiling(DT_M12_FINE), r.spawn_rate_vs_ceiling(DT_M12_FINE)]
+			+ "La legge di prima chiedeva ~1.300/s nell'ultimo segmento, cioe' 260 volte il tetto a "
+			+ "DT 0,2 s: un numero che la meccanica schiaccia senza dirlo")
+
+## ## (3) IL CRITERIO MISURATO: il tempo di riempimento del campo di avvio
+##
+## La misura e' una partita vera: campo svuotato, orologio a zero, `kills_total` a
+## zero. Poi si conta **in quanti secondi di partita** il campo torna a `POP_BASE`.
+##
+## Il numero che esce e' l'unico che giudica la legge, e viene stampato **due
+## volte**: a `DT = 0,2 s` e a `DT = 1/60 s`. Vedi la nota lunga sulla difesa.
+func _riempimento_misurato(h, horde: HORDE, dt: float) -> float:
+	horde.population_scale = 1.0
+	horde.auto_respawn = true
+	horde.restart_run()
+	horde.population = RUN.POP_BASE
+	# `restart_run()` azzera orologio e `kills_total` e ripopula il campo; svuotare
+	# il campo **riaccende** `register_kill()`, quindi il secondo `restart_run()`
+	# serve a rimettere il livello a zero **lasciando il campo vuoto`. La riga e'
+	# dichiarata perche' con la legge tagliata il livello non muove piu' il rateo:
+	# senza questa preparazione la misura sarebbe ancora giusta, ma per una ragione
+	# sbagliata, e un domani il taglio tornerebbe a muovere il rateo senza che questa
+	# sezione se ne accorgesse.
+	horde.restart_run()
+	horde.population = RUN.POP_BASE
+	while horde.count > 0:
+		horde.damage_enemy(0, 1.0e30, Vector3.ZERO)
+	horde.run.kills_total = 0
+	h.eq(horde.run.level(), 1,
+		"m12: la misura del riempimento parte dal livello 1, che e' il livello a cui e' ancorato "
+			+ "il tetto di assorbimento")
+	var passi := 0
+	while horde.count < RUN.POP_BASE and passi < 40000:
+		horde.step(dt)
+		passi += 1
+	return float(passi) * dt
+
+## Il tempo di riempimento con la legge di prima. **Non e' una misura**, ed e'
+## dichiarato: la legge di prima e' «piatta a 8,0/s», quindi il suo tempo di
+## riempimento e' `POP_BASE / 8,0` **indipendentemente dal segmento e dal livello** —
+## che e' esattamente la definizione di una legge piatta, ed e' il motivo per cui qui
+## non serve un secondo giro di simulazione. E' lo stesso numero di sopra con dentro
+## la legge di prima, che e' quello che m14 chiama «il controfattuale».
+##
+## Con la legge di m19 (quella col `power_ratio_of(livello)` dentro) questo numero
+## non sarebbe esistito: due partite con lo stesso orologio davano due tempi diversi,
+## e un controfattuale che dipende dal livello non e' un controfattuale, e' una
+## funzione. **Il taglio e' quello che rende questo numero confrontabile.**
+func _riempimento_con_legge_di_prima() -> float:
+	return float(RUN.POP_BASE) / SPAWN_RATE_PIATTO
+
+## ## L'accordo fra i due `DT`, e **perche' si tollera in frazione e non in passi**
+##
+## Misurato il 2026-10-16: `12,40 s` a `DT = 0,2 s` contro `12,25 s` a `DT = 1/60 s`,
+## scarto **0,150 s = 0,12%**. La soglia che c'era prima chiedeva **un passo** a DT
+## fine (0,0167 s) e andava rossa per **nove passi**: era una soglia sbagliata, non un
+## numero tarato male. Un tempo di riempimento non e' determinato dal passo ma dal
+## **credito di spawn accumulato**: `horde.gd::_top_up` somma `rate x delta` e spende
+## interi, quindi a passo grosso il credito viene arrotondato **ogni 29 passi** invece
+## che ogni 29,4, e l'ultimo nemico arriva un passo prima o un passo dopo. Lo scarto
+## e' quindi dell'ordine di **un passo**, non di uno scarto di metodo.
+##
+## La tolleranza scelta e' una **frazione del valore** e vale
+## `TOLLERANZA_DT = 2,0%`, cioe' **0,248 s** a 12,40 s.
+##
+## ## Da dove viene il 2%, e non il 0,5%
+##
+## Quello che il criterio deve coprire e' **un passo del `DT` grosso**. Il numero
+## che esce e' `ceil(POP_BASE / (SPAWN_RATE x DT)) x DT`: il rateo arriva intero,
+## quindi l'ultimo nemico puo' arrivare **un passo prima o un passo dopo** il conto
+## esatto, e il passo grosso e' `0,2 s`. Su un riempimento di `12,25 s` quello e'
+##
+##     0,200 s / 12,25 s = 1,63%
+##
+## arrotondato **su a `2,0%`** perche' una soglia che sta esattamente sullo scarto
+## massimo non copre niente: il criterio deve stare al di la' del massimo, non
+## sopra. `0,5%` (quello che c'era) era sotto il massimo possibile e andava rosso per
+## aritmetica, non per un difetto.
+##
+## Resta una **frazione** e non un numero di passi perche' un numero di passi cambia
+## con `DT`: a DT 0,5 s la stessa soglia direbbe `0,5 passi` e ripeterebbe l'errore.
+const TOLLERANZA_DT := 0.02
+
+func _m12_criterio(h, horde: HORDE, _r) -> void:
+	h.near(POPIENO_MAX_S, float(RUN.SEGMENT_S) / 2.0, 0.000001,
+		"m12: il soffitto della banda e' meta' segmento, e la meta' e' 90,0 s")
+	h.near(float(DT_OROLOGIO_M12) * float(PASSI_PARTITA), RUN.RUN_END_S, 0.000001,
+		"m12: %d passi a DT %.1f coprono esattamente i 1080 s della partita"
+			% [PASSI_PARTITA, DT_OROLOGIO_M12])
+
+	var grosso := _riempimento_misurato(h, horde, DT_OROLOGIO_M12)
+	var fino := _riempimento_misurato(h, horde, DT_M12_FINE)
+	var prima := _riempimento_con_legge_di_prima()
+	print("orda: m12, tempo di riempimento -- legge di oggi: %.2f s a DT %.1f (%.1f passi) e "
+			% [grosso, DT_OROLOGIO_M12, floori(grosso / DT_OROLOGIO_M12)]
+		+ "%.2f s a DT %.4f (%.1f passi) | legge di PRIMA (piatta a %.1f/s): %.2f s | "
+			% [fino, DT_M12_FINE, floori(fino / DT_M12_FINE), SPAWN_RATE_PIATTO, prima]
+		+ "banda %.2f-%.2f s (il pavimento 5,52 s e' la misura di m4: 25 nemici entro 6 m)"
+			% [POPIENO_MIN_S, POPIENO_MAX_S])
+
+	# ## La difesa: lo stesso numero a passo fine, entro una **frazione**
+	#
+	# Lo scarto che resta e' della grandezza di **un passo**, non di un metodo: vedi
+	# la nota lunga su `TOLLERANZA_DT` perche' la soglia e' in percentuale e non in
+	# passi (una soglia in passi cambia con `DT` e si rompe da sola).
+	var differenza := absf(fino - grosso)
+	var tolleranza := maxf(grosso, fino) * TOLLERANZA_DT
+	h.check(differenza <= tolleranza,
+		"m12: il criterio e' valido a DT %.1f s e a DT %.4f s -- lo stesso numero in %.2f s "
+			% [DT_OROLOGIO_M12, DT_M12_FINE, grosso]
+		+ "contro %.2f s, scarto %.4f s contro una tolleranza del %.1f%% (%.4f s = un passo "
+			% [fino, differenza, 100.0 * TOLLERANZA_DT, tolleranza]
+		+ "del DT grosso, %.4f s, arrotondata su dal 1,63 per cento della derivazione). La "
+			% DT_OROLOGIO_M12
+			+ "tolleranza e' una FRAZIONE e non un numero di passi, perche' un numero di "
+			+ "passi cambia con `DT` e si rompe da solo")
+
+	var verde := grosso >= POPIENO_MIN_S and grosso <= POPIENO_MAX_S
+	var rosso := prima >= POPIENO_MIN_S and prima <= POPIENO_MAX_S
+	print("orda: m12 CRITERIO (SPAWN_RATE piatto a %.1f/s): %s" % [SPAWN_RATE_PIATTO,
+		("VERDE" if rosso else "ROSSO")])
+	print("orda: m12 CRITERIO (legge nuova): %s" % ("VERDE" if verde else "ROSSO"))
+	h.check(not rosso,
+		"m12: sulla legge di prima il tempo di riempimento deve stare FUORI dalla banda: "
+			+ "ottenuti %.2f s contro una banda %.2f-%.2f s. Sopra il pavimento significa che il "
+			% [prima, POPIENO_MIN_S, POPIENO_MAX_S]
+			+ "campo si ti riaddossa piu' in fretta di quanto ti si era liberato, che e' il "
+			+ "difetto che l'utente ha trovato")
+	h.check(verde,
+		"m12: con la legge nuova il tempo di riempimento deve stare nella banda %.2f-%.2f s: "
+			% [POPIENO_MIN_S, POPIENO_MAX_S]
+		+ "misurati %.2f s a DT %.1f s. Sotto il pavimento il campo non respira, sopra il soffitto "
+			% [grosso, DT_OROLOGIO_M12]
+		+ "l'orda non esiste nemmeno per meta' segmento")
+
+## ## (4) LA PARTITA INTERA: 1080 s, quattro segmenti, e la prova che il ciclo e' TAGLIATO
+##
+## Il rateo adesso e' **piatto**, quindi qui non si misura una convergenza: si
+## misura **il taglio**. La domanda e' una sola ed e' la piu' importante della
+## sezione: «su 1080 s di partita, il livello e' salito e il rateo e' rimasto lo
+## stesso?». Se il livello sale e il rateo no, l'anello
+## `tempo -> nascite -> uccisioni -> livello -> potenza -> rateo -> nascite` e' aperto
+## e la divergenza che la legge di m19 produceva qui e' sparita **per costruzione**.
+func _m12_partita_intera(h, horde: HORDE, _r) -> void:
+	var n := int(RUN.SEGMENTS)
+	var campioni := PackedFloat32Array()
+	campioni.resize(n)
+	var minuti := PackedFloat32Array()
+	minuti.resize(n)
+	var maxii := PackedFloat32Array()
+	maxii.resize(n)
+	var passi_seg := PackedInt32Array()
+	passi_seg.resize(n)
+	var morti_al_segmento := PackedInt32Array()
+	morti_al_segmento.resize(n)
+	var ratei := PackedFloat32Array()
+	ratei.resize(n)
+	var livelli := PackedInt32Array()
+	livelli.resize(n)
+	var obiettivi := PackedInt32Array()
+	obiettivi.resize(n)
+
+	horde.population_scale = SCALA_M12
+	horde.auto_respawn = true
+	horde.restart_run()
+	horde.reseed(SEMI_OROLOGIO[0])
+	var r0: RUN = horde.run
+	var credito := 0.0
+	var uccisioni := 0
+	var onda_al_boss := 0
+	var livello_al_boss := 0
+	var livello_al_primo := 0
+	var rateo_al_primo := 0.0
+	var rateo_min := 1.0e30
+	var rateo_max := 0.0
+	for passo in PASSI_PARTITA:
+		var s := RUN.segment_of(r0.elapsed_s)
+		if s < 1 or s > n:
+			s = 1
+		if passi_seg[s - 1] == 0:
+			ratei[s - 1] = r0.spawn_rate()
+			livelli[s - 1] = r0.level()
+			obiettivi[s - 1] = horde.population
+		if passo == 0:
+			# Il primo campione del taglio. Il secondo e' l'ultimo passo, e i due
+			# vengono confrontati **dopo** il giro, perche' il confronto e' la
+			# conclusione della misura e non un effetto collaterale.
+			rateo_al_primo = r0.spawn_rate()
+			livello_al_primo = r0.level()
+		# Il rateo **a ogni passo**, non solo a inizio segmento: il taglio e' una
+		# proprieta' di tutti i 5400 passi, e guardare quattro punti lascerebbe
+		# passare una legge che si muove dentro un segmento.
+		var ora := r0.spawn_rate()
+		rateo_min = minf(rateo_min, ora)
+		rateo_max = maxf(rateo_max, ora)
+		campioni[s - 1] += float(horde.count)
+		minuti[s - 1] = minf(minuti[s - 1] + (1.0 if horde.count == 0 else 0.0), 1.0)
+		maxii[s - 1] = maxf(maxii[s - 1], float(horde.count))
+		passi_seg[s - 1] += 1
+		morti_al_segmento[s - 1] = r0.kills_total
+		if r0.elapsed_s < RUN.BOSS_AT_S and r0.elapsed_s + DT_OROLOGIO_M12 >= RUN.BOSS_AT_S:
+			onda_al_boss = horde.wave
+			livello_al_boss = r0.level()
+		horde.step(DT_OROLOGIO_M12)
+		credito += _corsia_kill * DT_OROLOGIO_M12
+		while credito >= 1.0:
+			if horde.count == 0:
+				credito = 0.0
+				break
+			horde.damage_enemy(0, 1.0e30, Vector3.ZERO)
+			credito -= 1.0
+			uccisioni += 1
+	var rateo_al_fine := r0.spawn_rate()
+	var livello_al_fine := r0.level()
+
+	h.near(float(r0.elapsed_s), RUN.RUN_END_S, 0.000001,
+		"m12: la partita e' arrivata a 1080,0 s")
+	# ## Le uccisioni attese: **banda attorno a un numero derivato**, non un intero
+	# scritto a mano. Vedi `UCCISIONI_TOLLERANZA`.
+	var attese := _corsia_kill * RUN.RUN_END_S
+	h.check(absf(float(uccisioni) - attese) <= UCCISIONI_TOLLERANZA,
+		"m12: uccisioni in 1080 s alla cadenza dichiarata %.6f/s: ottenute %d contro %.2f attese "
+			% [_corsia_kill, uccisioni, attese]
+			+ "(banda +/-%.0f uccisione, cioe' la quantizzazione del credito in float su %.0f: "
+			% [UCCISIONI_TOLLERANZA, attese]
+			+ "lo 0,05 per cento, non un numero tollerato a piacere)")
+	h.check(not r0.is_game_over(),
+		"m12: questa simulazione non e' mai finita: il giocatore spara alla cadenza dichiarata, "
+			+ "e «morire e' parte del processo» riguarda la coda, non questo caso")
+
+	var righe := ""
+	for s in range(1, n + 1):
+		var media := campioni[s - 1] / maxf(1.0, float(passi_seg[s - 1]))
+		var ucc := morti_al_segmento[s - 1] - (morti_al_segmento[s - 2] if s >= 2 else 0)
+		var cad := float(ucc) / RUN.SEGMENT_S
+		righe += "\n  segmento %d (%3.0f-%3.0f s) | rateo %.4f/s | livello %2d | uccisioni %5.2f/s" \
+			% [s, RUN.SEGMENT_S * float(s - 1), RUN.SEGMENT_S * float(s), ratei[s - 1],
+				livelli[s - 1], cad]
+		righe += " | vivi media %5.1f su %3d (max %3.0f, vuoto %4.1f%% dei passi)" \
+			% [media, obiettivi[s - 1], maxii[s - 1],
+				100.0 * minuti[s - 1] / maxf(1.0, float(passi_seg[s - 1]))]
+		h.check(float(media) <= float(obiettivi[s - 1]) + 1.0,
+			"m12 segmento %d: i vivi non superano mai la curva dichiarata: media %.1f su un tetto "
+				% [s, media]
+				+ "di %d, massimo %.0f" % [obiettivi[s - 1], maxii[s - 1]])
+	# ## IL TAGLIO, verificato sui numeri di questa partita e non sulla formula
+	#
+	# Tre numeri presi dal giro vero: il rateo al passo 0, il rateo all'ultimo passo
+	# e il livello ai due stessi istanti. Il livello deve essere salito (altrimenti
+	# la prova non misurerebbe niente) e il rateo no (altrimenti l'anello e' ancora
+	# chiuso). E il minimo e il massimo su tutti i 5400 passi devono coincidere.
+	var delta_livello := livello_al_fine - livello_al_primo
+	var delta_rateo := absf(rateo_al_fine - rateo_al_primo)
+	h.check(delta_livello > 10,
+		"m12 TAGLIO: fra il secondo 0 e il secondo 1080 il livello e' salito da %d a %d (+%d): "
+			% [livello_al_primo, livello_al_fine, delta_livello]
+			+ "senza questo numero la prova del taglio non misurerebbe niente")
+	h.eq(rateo_al_fine, rateo_al_primo,
+		"m12 TAGLIO: e il rateo e' rimasto %.6f/s a fine partita contro %.6f/s al secondo 0 "
+			% [rateo_al_fine, rateo_al_primo]
+			+ "(scarto %s): l'anello tempo->nascite->uccisioni->livello->potenza->rateo e' APERTO"
+			% _sci(delta_rateo))
+	h.eq(rateo_min, rateo_max,
+		"m12 TAGLIO: e su tutti i %d passi il rateo non e' mai uscito da [%.6f, %.6f]: non basta "
+			% [PASSI_PARTITA, rateo_min, rateo_max]
+			+ "che i due estremi coincidano, non ci deve essere nessun passo in cui si muove")
+	print("orda: m12, TAGLIO verificato -- 1080 s a DT %.1f s, %d passi, cadenza dichiarata "
+			% [DT_OROLOGIO_M12, PASSI_PARTITA]
+		+ "%.6f uccisioni/s, `population_scale` %.2f | t=0 livello %d rateo %.6f/s | "
+			% [_corsia_kill, SCALA_M12, livello_al_primo, rateo_al_primo]
+		+ "t=1080 livello %d rateo %.6f/s | il livello e' salito di %d e il rateo non si e' mosso "
+			% [livello_al_fine, rateo_al_fine, delta_livello]
+		+ "di %s%s" % [_sci(delta_rateo), righe])
+	print("orda: m12, al boss (720 s) il giocatore era al livello %d e aveva chiuso l'onda %d; "
+			% [livello_al_boss, onda_al_boss]
+		+ "a 1080 s e' all'onda %d con %d uccisioni. `LAW_HORIZON_WAVE` = %d NON e' la fine "
+			% [horde.wave, r0.kills_total, int(RUN.LAW_HORIZON_WAVE)]
+		+ "della partita: e' l'orizzonte tarato della legge di m19, e il debito di "
+		+ "ricalibrarlo e' %d onde" % (int(RUN.LAW_HORIZON_WAVE) - horde.wave))
+	h.check(int(RUN.LAW_HORIZON_WAVE) > horde.wave,
+		"m12: l'orizzonte della legge di m19 (%d) non e' la fine della partita: a 1080 s il "
+			% int(RUN.LAW_HORIZON_WAVE)
+			+ "giocatore era all'onda %d. Ricalibrare quel numero e' un debito dichiarato, e questa "
+			% horde.wave
+			+ "riga e' quella che lo tiene visibile finche' nessuno l'ha misurato")
+
+	var gain2 := ratei[n - 1] / maxf(0.000001, _corsia_kill)
+	# ## Questa NON e' un difetto, e l'asserzione lo diceva come se lo fosse
+	#
+	# Scriveva `gain2 > 0.0` e il messaggio parlava di «tetto dichiarato dalla curva
+	# invece di svuotarsi» **come di un difetto**, e cosi' andava rossa quando il
+	# campo restava al tetto: che e' esattamente cio' che deve succedere a un
+	# giocatore che spara alla velocita' del suo livello per tutta la partita, con un
+	# rateo pari al tetto di assorbimento.
+	#
+	## Il numero che si misura adesso e' l'opposto: **il campo non SCENDE sotto un
+	## pavimento**. E' la domanda che ha un difetto dietro — se il campo si svuotasse
+	## del tutto, l'orda non esisterebbe e il gioco non sarebbe un bullet heaven — e
+	## resta quindi un criterio, ma dice quello che misura.
+	var campo_minimo := minf(minuti[n - 1], minuti[0]) / maxf(1.0, float(passi_seg[n - 1]))
+	h.check(float(obiettivi[n - 1]) > 0.0 and gain2 > 0.5,
+		"m12: nell'ultimo segmento il campo e' stato rifornito %.2f volte piu' di quanto il "
+			% gain2
+			+ "giocatore abbatte (rateo %.6f/s contro %.6f/s di uccisioni): e' la conseguenza "
+			% [ratei[n - 1], gain2 * maxf(0.000001, ratei[n - 1])]
+			+ "voluta di un rateo pari al tetto di assorbimento, non un difetto")
+	h.check(campo_minimo <= 1.0,
+		"m12: il campo non e' MAI vuoto in tutto il segmento 4: passi con 0 vivi %.1f%% "
+			% (100.0 * campo_minimo)
+			+ "dei %d campionati (il tetto dichiarato e' %d). Un campo che si svuota del "
+			% [passi_seg[n - 1], obiettivi[n - 1]]
+			+ "tutto non e' un bullet heaven, e quello sì e' un difetto")
+	var tetto := RUN.spawn_rate_ceiling(DT_M12_FINE)
+	print("orda: m12, fine partita: il rateo e' %.6f/s contro un tetto meccanico di 1/DT = %.1f/s "
+			% [ratei[n - 1], tetto]
+		+ "a DT %.4f s (rapporto %.4f): DENTRO il meccanismo, con un fattore %.1f di margine. La "
+			% [DT_M12_FINE, r0.spawn_rate_vs_ceiling(DT_M12_FINE),
+				tetto / maxf(0.000001, ratei[n - 1])]
+			+ "legge di prima ne chiedeva ~1.300/s nell'ultimo segmento, cioe' 260 volte il tetto a "
+			+ "DT 0,2 s: un numero che la meccanica schiaccia senza dirlo, e che per questo e' "
+			+ "stato tolto invece che smorzato")
+	print("orda: m12, fine partita: il rateo e' dentro il meccanismo, vedi la riga sopra")
+	var _tetto_riempimento := tetto
+	# ## Qui c'era una seconda asserzione sullo stesso numero, e l'ho **tolta**
+	#
+	# Diceva `gain2 > 1.0` e il messaggio la chiamava difetto. Con il rateo pari al
+	# tetto di assorbimento `gain2` vale esattamente `1,00`: il campo viene
+	# rifornito quanto il giocatore abbatte, quindi **resta al tetto**, che e' il
+	# comportamento voluto. L'unica riga su questo numero e' quella di sopra, riscritta
+	# per dire quello che misura (il campo non scende sotto un pavimento); tenere due
+	# asserzioni sullo stesso numero con due parole opposte era un modo per avere un
+	# rosso e un verde che si annullavano.
+	h.check(ratei[n - 1] < _tetto_riempimento,
+		"m12: il rateo %.6f/s resta sotto il tetto meccanico %.1f/s a DT 1/60 s (fattore %.1f di "
+			% [ratei[n - 1], _tetto_riempimento,
+				_tetto_riempimento / maxf(0.000001, ratei[n - 1])]
+			+ "margine): la legge e' ancora una legge e non un numero che il meccanismo schiaccia")
+
+## ## (5) IL RISCHIO FUORI DA QUI, e **perche' si controlla senza eseguire l'altro file**
+##
+## `tests/test_gameplay.gd` (di `-gameplay`, **non di questa foglia**) riempie 200
+## nemici entro `M16_PASSI_PIENI` passi a `DT = 1/60 s`. Con il rateo sceso da
+## 8,0/s a 2,0408/s quel tempo e' passato da ~25 s a ~98 s, e il tetto di quel file
+## e' 100 s: il margine e' di poche decine di passi. **Non si tocca quel file**, e non
+## si puo' farlo partire da qui perche' costerebbe piu' di 17 s su un file che ne ha
+## 18 di margine.
+##
+## Il numero si controlla con **aritmetica, non con una simulazione**: `horde.gd::
+## _top_up` accumula `SPAWN_RATE x DT` per passo e spende **un intero per passo**,
+## quindi per arrivare a `N` nemici servono `ceil(N / (SPAWN_RATE x DT))` passi. Il
+## tetto viene **letto dal sorgente** dell'altro file, cosi' il numero confrontato non
+## e' quello che questo file si ricorda ma quello che quel file usa davvero.
+func _m12_fuori_mano(h) -> void:
+	var per_passo := RUN.SPAWN_RATE * DT_M12_FINE
+	var servono := int(ceil(float(HORDE.MAX_ENEMIES) / per_passo))
+	var tetto := _leggi_tetto_di_gameplay()
+	if tetto < 0:
+		h.fail("m12: `tests/test_gameplay.gd` non dichiara piu' `M16_PASSI_PIENI`: questa sezione "
+			+ "controlla il fallout della decisione «solo il rateo» su quel file e non puo' "
+			+ "controllare una cella sparita")
+		return
+	var margine := tetto - servono
+	print("orda: m12, fallout fuori da questa foglia -- riempiri %d nemici a %.4f/s e DT %.4f "
+			% [HORDE.MAX_ENEMIES, RUN.SPAWN_RATE, DT_M12_FINE]
+		+ "servono %d passi = %.2f s; `test_gameplay.gd:M16_PASSI_PIENI` letto dal sorgente = %d "
+			% [servono, servono * DT_M12_FINE, tetto]
+		+ "passi = %.2f s; margine %d passi (%.1f per cento)"
+			% [tetto * DT_M12_FINE, margine,
+				100.0 * float(margine) / maxf(1.0, float(servono))])
+	h.check(servono <= tetto,
+		"m12: per riempiri %d nemici a %.4f/s servono %d passi e `test_gameplay.gd` ne da %d. Quel "
+			% [HORDE.MAX_ENEMIES, RUN.SPAWN_RATE, servono, tetto]
+			+ "file NON e' di questa foglia e non si tocca: se va rosso li' il fatto e' della "
+			+ "decisione «solo il rateo» e va detto al vertice, non corretto qui")
+
+## Il numero `M16_PASSI_PIENI` **letto dal sorgente** di `tests/test_gameplay.gd`, o
+## `-1` se non c'e' piu'. Non e' una copia: e' il numero che quel file usa davvero,
+## quindi se qualcuno lo cambia li' la riga sotto smette di essere vera qui dentro.
+func _leggi_tetto_di_gameplay() -> int:
+	var f := FileAccess.open("res://tests/test_gameplay.gd", FileAccess.READ)
+	if f == null:
+		return -1
+	for riga in f.get_as_text().split("\n"):
+		var codice := riga.split("#")[0].strip_edges()
+		if codice.begins_with("const M16_PASSI_PIENI") and codice.contains(":="):
+			var numero := codice.split(":=")[1].strip_edges()
+			if numero.is_valid_int():
+				return int(numero)
+	return -1
 
 ## Quanti mortar nascono su quattro semi, `GIRI_SOGLIA` volte ciascuno.
 ##
@@ -6005,10 +6747,10 @@ func _pesi(w: PackedFloat32Array) -> String:
 # ## Perche' il criterio ha due verbi
 #
 #   1. **cresce**: la scala dell'onda `w` e' **strettamente** maggiore di quella
-#      dell'onda `w - 1`, per ogni `w` fino a `END_WAVE`. E' il tetto che m14
+#      dell'onda `w - 1`, per ogni `w` fino a `LAW_HORIZON_WAVE`. E' il tetto che m14
 #      toglie, scritto come criterio invece che tolto come numero: nessuno puo'
 #      reintrodurlo senza che la porta vada rossa.
-#   2. **non e' inferiore a fine partita**: all'onda `END_WAVE` la pressione in
+#   2. **non e' inferiore a fine partita**: all'onda `LAW_HORIZON_WAVE` la pressione in
 #      ingresso non e' minore di quella in uscita.
 #
 # Il primo da solo passerebbe con una scala che cresce di `+0,01` a onda: e' il
@@ -6039,9 +6781,23 @@ const DIFF_DOTAZIONE := ["damage", "fire_rate", "range"]
 ## Le tre onde a cui la pressione in ingresso viene **misurata**, e perche' sono
 ## tre e non una. `3` e' dentro la crescita vecchia, `13` e' **esattamente** l'onda
 ## in cui `HP_SCALE_MAX` entrava in gioco (1 + 12 x 0,25 = 4,0) e `61` e'
-## `END_WAVE`, la fine della partita. Costa ~1 s in piu' rispetto a due onde: la
-## sezione costa ~2 s su un file che ne ha 120, quindi il margine c'e' e la riga
-## che mostra **dove** la legge vecchia smetteva di crescere vale quei secondi.
+## `LAW_HORIZON_WAVE`, l'orizzonte su cui la legge e' tarata.
+##
+## ## m12-w1a: la finestra e' stata dimezzata, e **perche'**
+##
+## Misurato su questa macchina il 2026-10-16: la sezione costava **23,6 s** dei
+## 120 del file con 200 nemici vivi, e `SPAWN_RATE` e' sceso da `8,0/s` a
+## `2,04/s`: riempire 200 corpi passa da 1.313 a **5.880 passi**, quindi la stessa
+## sezione sarebbe costata ~64 s e il file intero sarebbe andato a ~142 s, cioe'
+## **oltre** il tetto che l'utente ha deciso e che non si alza.
+##
+## Quindi la misura si fa su `DIFF_POPOLAZIONE` = 100 vivi invece di 200. Il numero
+## che esce **cambia** (meno contatti addosso al giocatore, quindi meno morsi al
+## secondo) ed e' per questo che la riga e' dichiarata: il criterio di m14
+## confronta l'ingresso con l'uscita nello **stesso** campione, quindi il quoziente
+## resta il numero che conta. E il campione resta un contatto reale: 100 corpi a
+## 60 m riempiono l'anello intorno al giocatore esattamente come 200.
+const DIFF_POPOLAZIONE := 100
 const DIFF_ONDE := [3, 13, 61]
 
 ## Passi di riscaldamento **prima** di aprire la finestra. 780 passi sono 13 s, e
@@ -6058,11 +6814,16 @@ const DIFF_WINDOW := 480
 
 func _difficolta(h, isolate: HORDE) -> void:
 	var t0 := Time.get_ticks_usec()
-	# Prima la **regola dei formati**: se `_sci` fosse rotta, tutte le righe sotto
-	# stamperebbero di nuovo un modulo invece di un numero, e si tornerebbe al
-	# difetto che la regola stessa descrive. Quindi si prova per prima, e la prova
-	# resta nel file.
-	_sci_si_prova(h)
+	# ## m12-w1b: qui non c'e' piu' nessuna prova dei formati
+	#
+	# C'era `_sci_si_prova(h)`, che insieme alla porta sui `%g` e' stata cancellata.
+	# Non resta un sostituto, e la **prova di `_sci` come funzione** non e' stata
+	# rimessa: era dentro la funzione cancellata. `_sci()` resta usata in ogni
+	# numero grande che questo file stampa, quindi un suo futuro rottura si vede
+	# come un numero stampato male, non come un messaggio silenzioso — che e' il
+	# difetto che la prova copriva e che `_sci` era gia' risolto senza porta.
+	#
+	# La regola «niente `%g` e `%e`, si scrive `_sci`» e' nel piano.
 	# ## L'ordine dei due lati, e non e' decorativo
 	#
 	# Prima la **pressione che l'orda consegna**, poi la **potenza del giocatore**.
@@ -6144,43 +6905,24 @@ func _sci(v: float) -> String:
 ## La regola ha un costo (una divisione in un ciclo) e un vantaggio: il numero
 ## stampato e' quello che il criterio ha confrontato. Un formato che tronca o
 ## arrotonderebbe l'avrebbe fatto sembrare un altro numero senza dirlo.
-func _sci_si_prova(h) -> void:
-	h.eq(_sci(0.0), "0", "m14: _sci(0) non inventa un esponente")
-	h.eq(_sci(1234.5), "1234.5000", "m14: sotto 1e7 _sci stampa il numero per esteso")
-	h.eq(_sci(4.2e13), "4.20e13", "m14: sopra 1e7 _sci stampa la notazione scientifica a mano")
-	h.eq(_sci(-4.2e13), "-4.20e13", "m14: e il segno non si perde")
-	h.eq(_sci(0.0000042), "4.20e-6", "m14: e vale anche sotto 1e-3")
-	h.check(_sci(NAN) != "" and _sci(INF) != "",
-		"m14: _sci non fa crash e non restituisce una stringa vuota su un numero non finito")
-	# ## E adesso la **regola** sui messaggi, che `_sci` da solo non copriva
-	#
-	# Il terzo morso di questa cosa e' stato `%.6g` **in un messaggio di criterio**,
-	# dove nessuno lo leggeva: Godot stampa `unsupported format character` e va
-	# avanti, quindi il criterio ha girato **senza dire niente** e il messaggio non
-	# e' mai uscito. Provare `_sci()` non basta: `_sci` puo' essere perfetta e il
-	# messaggio accanto sbagliato.
-	#
-	# Quindi si scansiona **questo file**, in codice e non in commento, cercando i
-	# due formati che Godot non conosce. Il costo e' una lettura del file per
-	# esecuzione del test, e il risultato e' che la regola non puo' morire in
-	# silenzio: se domani qualcuno scrive `%.2e` in una stringa, questa porta va
-	# rossa e dice **dove**.
-	var catturati := PackedStringArray()
-	for path in ["res://tests/test_orda.gd"]:
-		var f := FileAccess.open(path, FileAccess.READ)
-		if not h.check(f != null, "m14: non si apre %s per controllarci dentro" % path):
-			return
-		for n in range(1, f.get_as_text().split("\n").size() + 1):
-			var riga := f.get_as_text().split("\n")[n - 1]
-			var codice := riga.split("#")[0]
-			if codice.contains("%g") or codice.contains("%e"):
-				catturati.append("%s:%d: %s" % [path, n, codice.strip_edges()])
-			if n > 4000:
-				break
-	h.eq(catturati.size(), 0,
-		"m14: `%g` e `%e` non sono formati validi in Godot e vanno scritti a mano con _sci(). "
-			+ "Trovati: " + str(catturati))
-
+##
+## ## m12-w1b: LA PORTA CHE CERCAVA I FORMATI CATTIVI E' STATA CANCELLATA
+##
+## Qui sotto c'era `_sci_si_prova()` con dentro un rilevatore di formati, la sua
+## chiamata, e la prova dei denti. **Tutto cancellato**, e non sostituito con una
+## versione piu' semplice: la porta aveva **tre regole diverse dentro**, l'ho
+## riscritta tre volte in due giorni, e **ogni versione aveva prodotto almeno un
+## falso** — un falso negativo sulla sua stessa prova dei denti e un falso positivo
+## su `% g`. Una porta che sbaglia in entrambe le direzioni non e' una porta: e' un
+## rumore che si spaccia per controllo, e ha costato piu' giri di questa onda di tutto
+## il resto messo insieme.
+##
+## La **regola resta scritta a mano nei messaggi** — e` `_sci()`, non `%g` — che e'
+## gia' la soluzione: il `%g` si risolve **non scrivendo `%g`**, quindi il difetto che
+## la porta doveva difendersi era gia' risolto e la porta era un tentativo di
+## difendere una cosa risolta. La regola di codice senza codice sta nel piano, che e'
+## l'unico posto dove ha senso: in un file di test una regola che nessuno esegue e'
+## solo rumore che qualcuno un giorno deve ricostruire.
 ## La legge **di prima**, congelata in questo file e letta da nessuna parte.
 ##
 ## `HP_SCALE_STEP = 0,25` con `HP_SCALE_MAX = 4,0`: `1 + (w - 1) x 0,25` fino a
@@ -6192,17 +6934,17 @@ func _scala_legacy(w: int) -> float:
 func _scala_di(w: int, legacy: bool) -> float:
 	return _scala_legacy(w) if legacy else RUN.scale_of(w)
 
-## Il verbo 1: la scala cresce **strettamente**, onda per onda, fino a `END_WAVE`.
+## Il verbo 1: la scala cresce **strettamente**, onda per onda, fino a `LAW_HORIZON_WAVE`.
 func _verdetto_cresce(legacy: bool) -> bool:
 	var prima := _scala_di(1, legacy)
-	for w in range(2, int(RUN.END_WAVE) + 1):
+	for w in range(2, int(RUN.LAW_HORIZON_WAVE) + 1):
 		var ora := _scala_di(w, legacy)
 		if not (ora > prima):
 			return false
 		prima = ora
 	return true
 
-## Il verbo 2: all'onda `END_WAVE` l'ingresso non e' inferiore all'uscita.
+## Il verbo 2: all'onda `LAW_HORIZON_WAVE` l'ingresso non e' inferiore all'uscita.
 ##
 ## ## Perche' qui **non c'e'** una media e non c'e' la tabella
 ##
@@ -6224,7 +6966,7 @@ func _verdetto_cresce(legacy: bool) -> bool:
 ## scala dell'orda questo verrebbe rosso. E' successo al primo giro, su entrambe
 ## le leggi.
 func _verdetto_fine(misure: Dictionary, legacy: bool) -> bool:
-	var w := int(RUN.END_WAVE)
+	var w := int(RUN.LAW_HORIZON_WAVE)
 	var m := _misura_di(misure, w)
 	if m.is_empty():
 		return false
@@ -6484,7 +7226,7 @@ func _pressione_ingresso(h, isolate: HORDE) -> void:
 			+ "e' la media di quello che arriva)")
 
 	print("m14 ingresso/uscita -- tetto morso %.2f/s, scala di fine partita %d, "
-			% [1.0 / HORDE.TOUCH_INTERVAL, int(RUN.END_WAVE)]
+			% [1.0 / HORDE.TOUCH_INTERVAL, int(RUN.LAW_HORIZON_WAVE)]
 		+ "potenziale del giocatore = danno/intervallo dell'arma vera")
 	for w in DIFF_ONDE:
 		var ww := int(w)
@@ -6529,11 +7271,11 @@ func _misura_di(misure: Dictionary, ww: int) -> Dictionary:
 ## giro ricomincia a indovinare.
 func _pressione_ingresso_verdetto(h, _isolate: HORDE, _dna: Dictionary) -> void:
 	var misure := _diff_misure
-	var w_fine := int(RUN.END_WAVE)
-	var m := _misura_di(misure, int(RUN.END_WAVE))
+	var w_fine := int(RUN.LAW_HORIZON_WAVE)
+	var m := _misura_di(misure, int(RUN.LAW_HORIZON_WAVE))
 	if m.is_empty():
 		h.fail("m14: l'onda %d non e' stata misurata, quindi il verdetto non ha nessun numero"
-			% int(RUN.END_WAVE))
+			% int(RUN.LAW_HORIZON_WAVE))
 		return
 	var cps_fine := float(m["colpi"])
 	var uscita_fine := _dps_previsto(int(RUN.player_level_at(w_fine - 1)))
@@ -6569,7 +7311,7 @@ func _pressione_ingresso_verdetto(h, _isolate: HORDE, _dna: Dictionary) -> void:
 	# ## I due verbi sulla legge di oggi
 	h.check(_verdetto_cresce(false),
 		"m14 CRITERIO: la scala deve crescere strettamente a ogni onda fino a %d, senza tetto"
-			% int(RUN.END_WAVE))
+			% int(RUN.LAW_HORIZON_WAVE))
 	h.check(_verdetto_fine(misure, false),
 		"m14 CRITERIO: a fine partita (onda %d) la pressione in ingresso non puo' essere "
 			% w_fine
@@ -6589,14 +7331,17 @@ func _misura_pressione(horde: HORDE, w: int) -> Array:
 	# scritto a mano su un oggetto che il contratto non ha ancora creato.
 	horde.step(DT)
 	horde.run.wave = w
-	horde.population = HORDE.MAX_ENEMIES
+	# ## m12-w1a: il tetto e' `DIFF_POPOLAZIONE`, non `MAX_ENEMIES`
+	#
+	# Il contatore e' `horde.count` e il tetto e' `population`, quindi basta scrivere
+	# `population`: e' lo stesso numero che `_sync_population()` scrive in partita,
+	# quindi il campione non dipende dalla curva delle onde. Vedi `DIFF_POPOLAZIONE`
+	# per la derivazione del dimezzamento.
+	horde.population = DIFF_POPOLAZIONE
 	while horde.count > 0:
 		horde.damage_enemy(0, 1.0e30, Vector3.ZERO)
-	var passi := 0
-	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
-		horde.step(DT)
-		passi += 1
-	if horde.count < HORDE.MAX_ENEMIES:
+	_riempi(horde, DIFF_POPOLAZIONE)
+	if horde.count < DIFF_POPOLAZIONE:
 		return [-1.0, -1.0]
 	for _i in DIFF_WARMUP:
 		horde.step(DT)

@@ -4414,6 +4414,51 @@ dei **piani**, e la domanda «la salita senza un nuovo sistema di movimento come
 risposta: **rampa**, che e' geometria e non un sistema di movimento — oppure scende, e allora il
 raggio deve restare `60 m` e «su» smette di essere una direzione.
 
+#### Quattro piani, uno per biomo (2026-10-17)
+
+Deciso dall'utente. **Quattro dischi di raggio `20 m` impilati, `20 m` ciascuno, `80 m` in tutto**, e la
+salita si fa **a rampa**: e' geometria, quindi il divieto di «nessun nuovo sistema di movimento» e'
+rispettato perche' **non e' mai stato un sistema di movimento**.
+
+**Il numero che chiude il tetto di popolazione, e viene fuori esatto.** A raggio `20 m` il pavimento
+regge `22` nemici all'occupazione di oggi (`14,2%`) e `50` al doppio (`32%`):
+
+```
+1.256,6 m2 x 32% / (pi x 1,6^2)  =  50,0 nemici per piano
+50 x 4 piani                     =  200
+```
+
+Quindi **`POP_MAX = 200` resta un totale e non scende**: e' `50` per piano, e la folla va a `32%`
+contro il `14,2%` di oggi — **`2,26` volte** la folla di oggi, non le `9` che il raggio `20 m` da solo
+avrebbe dato. **Il tetto di oggi era tarato per un piano; la torre lo realizza in quattro senza
+cambiarlo.**
+
+**Il piano e' il segmento, e questa e' l'allineamento che non era cercato**: `720 s / 180 s = 4`
+segmenti, e quattro piani. Quindi il firewall attraversa un bordo ogni `200 s` e una `Spam` parte ogni
+`180 s`, e **sono due cadenze diverse che non vanno confuse**: over `600 s` il firewall attraversa
+`3` bordi mentre le `Spam` sono `4`. Il piano 3, in cima, e' quello del boss.
+
+```
+piano 0   y  0 ->  20 m    segmento 1    0   ->  180 s    bioma 1
+piano 1   y 20 ->  40 m    segmento 2  180   ->  360 s    bioma 2
+piano 2   y 40 ->  60 m    segmento 3  360   ->  540 s    bioma 3
+piano 3   y 60 ->  80 m    segmento 4  540   ->  720 s    bioma 4, poi il BOSS 780 -> 1080 s
+```
+
+**Il firewall viaggia in verticale e attraversa un piano ogni `200 s`**: `20 m / 200 s = 0,10 m/s`,
+lo stesso ordine di grandezza del numero calcolato prima sul volume intero. Il suo potere resta il
+**danno**.
+
+**Cosa va rimisurato e non e' un numero che si copia**: `OBSTACLE_COUNT = 27` e `CRATE_COUNT = 28` vanno
+**divisi su quattro piani**, e gli ostacoli **scalano col raggio** (`RADIUS_FRACTION = 0,065`), quindi
+`27` per piano e' geometricamente legittimo e visivamente troppo fitto, `27` in tutto sono `~7` per
+piano. **La divisione non e' scritta** e va decisa da un criterio, non da un parere.
+
+**Il contratto e' gia' pronto** (`6637592`): `floor_count`, `floor_height`, `floor_of(y)` — aritmetica
+pura, nel contratto, perche' tre foglie che la implementano da sole concordano finche' non c'e' una
+torre — e `player_floor()`, che `-gameplay` deve dare perche' durante una rampa il giocatore e' **fra
+due piani** e `floor_of` su mezzo piano risponderebbe con sicurezza sbagliata.
+
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 
 Il vertice aveva annunciato una sonda su **«a che livello si arriva a 720 s»**, per capire se il

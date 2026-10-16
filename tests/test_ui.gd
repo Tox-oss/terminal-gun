@@ -31,6 +31,16 @@ extends SceneTree
 ##      per meta' onda. Il fix e' `step = 0.0` su tutte e tre le barre, e
 ##      qui si verifica su tutte e tre perche' una decisione dichiarata solo in
 ##      un commento decade senza rumore.
+##   7. **m17, il tempo a schermo segue `Run.elapsed_s`**: il criterio e'
+##      **l'avvelenamento**, non «c'e' un numero». Il test scrive `1e9` sul campo
+##      vero di `-orda`, rillega l'HUD e il numero a schermo deve essere
+##      cambiato. Un tetto che dica `00:00` e fermo passerebbe una verifica che
+##      guarda solo il testo, e un HUD che contasse i frame da per se' passerebbe
+##      una verifica che guarda solo il testo: la lettura e' quello che si prova.
+##   8. **m13-w2, il richiamo al restart nomina un tasto vero**: non si confronta
+##      la stringa (il testo e' di questa foglia) ma il **nome del tasto**, che
+##      deve essere quello che `-gameplay` dichiara in `RESTART_KEYS`. E il
+##      richiamo deve comparire col game over e sparire col restart.
 ##
 ## ## m7: la meta' di questa foglia, e che cosa **non** e' sua
 ##
@@ -138,6 +148,31 @@ const HUD_NODE := "Hud"
 ## multiplo di 0.01, altrimenti la verifica passa senza aver mai provato niente.
 const OFF_GRID := 3.3333
 
+## ## m17: il numero con cui si avvelena l'orologio
+##
+## Un milione di secondi, cioe' circa **31 689 anni** di partita: un numero che
+## nessuna partita raggiunge e che quindi non puo' essere quello di partenza
+## dell'HUD ne' un arrotondamento di qualcos'altro. Non e' un numero di gioco e
+## qui dentro non viene dedotto: serve solo a essere **Diverso**, e grande,
+## perche' la verifica sia «il numero a schermo e' cambiato» e non «il numero
+## a schermo e' un numero».
+##
+## Il punto e' che il campo avvelenato e' `Run.elapsed_s`, **quello vero**: se
+## l'HUD contasse i frame o tenesse un orologio proprio, l'avvelenamento non
+## cambierebbe niente a schermo e qui andrebbe rosso. E' la ragione per cui il
+## numero e' volutamente assurdo invece che comodo.
+const POISON_S := 1000000000.0
+
+## ## m13-w2: il nome del dato che dichiara i tasti del restart
+##
+## E' di `-gameplay` (`RESTART_KEYS`, in `src/player/player.gd`) e qui e' una
+## **stringa**, perche' quello che si cerca non e' un campo: e' una costante di
+## uno script, che si legge dal contratto. Il nome compare in due punti di questo
+## file perche' sono due strade diverse di leggere lo stesso dato (istanza e
+## mappa delle costanti); se il nome cambiasse, il test andrebbe rosso invece di
+## confrontare due cose entrambe vuote.
+const RESTART_KEYS_MEMBER := "RESTART_KEYS"
+
 var _h: H = null
 var _ran: bool = false
 ## `-ui`, m6. Il pannello delle carte **mette in pausa l'albero**, e una parte di
@@ -201,6 +236,12 @@ func _run() -> void:
 	# e' il numero a cui l'uscita deve tornare, e lo dichiara il test stesso
 	# invece di un letterale scritto qui dentro.
 	_nodes_at_boot = _count_nodes(root)
+
+	# Prima di tutto la regola che guarda **questo file** (vedi
+	# `_ritorni_morti_si_provano`): e' una porta, quindi va eseguita anche quando
+	# tutto il resto va bene, e va eseguita per prima perche' e' quella che puo'
+	# dire che questo file non meriterebbe di essere eseguito.
+	_ritorni_morti_si_provano(h)
 
 	_hud_alone(h)
 	# Senza tipo: `_open_arena` restituisce un Variant (il risultato di
@@ -289,35 +330,53 @@ func _run() -> void:
 ## di questa foglia. La classe e' di tutte e tre.
 const AUDIO_CLASS := "AudioStreamPlayer3D"
 
-## Quante istanze ObjectDB il leak tiene appese: e' il **minimo** che lo
-## svuotamento deve liberare, non una copia di un risultato. Senza questo
-## criterio l'attesa qui sotto sarebbe una riga che non verifica niente, e
-## l'errore lo vedrebbe solo il motore, che e' esattamente il difetto che
-## questa sezione chiude.
+## ## Perche' qui **non c'e' piu'** un pavimento, e la data in cui si e' saputo
 ##
-## ## Perche' un minimo e non un numero esatto
+## Qui c'era un minimo derivato dalla scena viva, mai scritto a mano:
 ##
-## Il numero che il motore stampa **cresce** quando la partita suona di piu' e
-## non e' fermo. Misurato, due volte, sulla stessa riga di codice:
+##     scaricate >= nodi audio vivi nella scena alla chiusura
 ##
-##   - col morso a intervallo (pochi `hurt` in volo) lo scarico aspetta 5-16
-##     frame e libera due istanze: `1551 -> 1549`, risorse `22 -> 22`;
-##   - col morso sul contatto il giocatore viene morso molto piu' spesso, lo
-##     scarico aspetta 43 frame e libera **quattro** istanze: `1551 -> 1547`,
-##     risorse `22 -> 21`.
+## con la giustificazione «ogni `AudioStreamPlayer3D` vivo tiene al massimo una
+## playback». La giustificazione e' **vera** e pero' **non dice quello che sembra**:
+## un nodo audio che **non sta suonando** non tiene nessuna playback. Dai nodi si
+## ricava quindi un **tetto** sulle playback vive, non un pavimento: ogni nodo puo'
+## valere zero. Un tetto usato come pavimento e' la soglia spostata fino a far
+## passare il numero, ed e' esattamente quello che e' successo.
 ##
-## Quattro invece di due non e' un difetto: e' il rimedio che funziona, e il
-## piu' suona e' il piu' che c'e' da liberare. Un criterio che fissasse `-4`
-## andrebbe rosso il giorno che `-orda` tocca di nuovo il passo di simulazione
-## e i suoni tornano a essere meno: il numero di oggi e' una fotografia, non una
-## specifica.
+## Il 2026-10-15 la sezione e' andata rossa per la prima volta, e il rosso dice il
+## difetto meglio di qualunque commento: `scaricate 2` contro `pavimento 3`. Il
+## pavimento era salito perche' la scena aveva **un nodo audio in piu'** di ieri
+## (3 invece di 2), non perche' fosse rimasto piu' rumore: e un nodo in piu' non
+## puo' far **scendere** le istanze liberate. Il minimo e' salito mentre il numero
+## vero e' sceso di uno: e' la firma di una derivazione capovolta.
 ##
-## Quindi qui si asserisce il **minimo**: almeno due. Che abbia denti: a `-1` e a
-## `0` va rosso, perche' sono i due numeri che vuol dire che il playback e'
-## ancora registrato nel server audio quando il motore esce. Il numero vero
-## viene stampato accanto al minimo, altrimenti «almeno due» nasconderebbe che
-## ne libera quattro e chi legge dopo lo prenderebbe per un due fisso.
-const LEAKED_OBJECTS := 2
+## ## La cosa che non e' misurabile, dichiarata perche' il criterio non se la
+## ## prometta
+##
+## **Quante playback sono vive** non lo si puo' sapere da script: non esiste
+## un'API che enumeri le istanze di `ObjectDB` per classe, `Performance.OBJECT_COUNT`
+## e' un totale senza classe dentro, e la sonda qui sotto e' strutturalmente cieca
+## alle playback (una playback non e' una `Resource` e non e' la proprieta' di un
+## nodo, quindi `_note_resources` non puo' vederla per costruzione). Quindi quale
+## istanza non scende **non e' una domanda a cui questo test risponde**, e il file
+## non ci mette dentro un numero per fingere che risponda.
+##
+## Al suo posto resta quello che si puo' dimostrare: lo scarico deve **muovere** al
+##meno un contatore. E i due numeri veri — quanti nodi audio erano vivi nella scena
+## e quanti **stavano suonando** — restano stampati accanto al numero vero: sono
+## la spiegazione del numero che si muove, non un suo sostituto.
+
+## Quanti nodi audio **stavano suonando** quando la scena e' stata chiusa: letto
+## dalla scena viva in `_note_resources`, mai scritto qui.
+##
+## Non e' il pavimento di nessun criterio e non deve diventarlo: anche questo e' un
+## **tetto** (un nodo che sta suonando puo' non avere ancora una playback
+## registrata, se il miscelatore non e' passato dopo l'ultimo `play()`). Va stampato
+## perche' spiega il numero che si muove, non perche' lo governi.
+func _sounding_at_close() -> int:
+	if _players_sounding_at_close < 0:
+		return -1
+	return _players_sounding_at_close
 
 ## Quanti frame di processo si aspettano prima di dire "il server audio non ha
 ## mescolato". E' un tetto, non un'attesa infinita: se il server non mescolasse
@@ -339,12 +398,13 @@ var _nodes_at_boot: int = -1
 ##
 ##   - sotto `root` non resta **nessun** nodo audio, ne' nessun `Hud`, e il
 ##     numero di nodi e' tornato a quello di avvio;
-##   - e il numero di istanze vive **scende di almeno due**: e' il minimo che il
-##     difetto richiedeva (vedi `LEAKED_OBJECTS`), non una fotografia del
-##     numero di oggi. Il numero vero viene stampato accanto, perche' un
-##     criterio che dicesse solo «almeno due» nasconderebbe che ne libera
-##     quattro quando i suoni sono molti, e chi legge dopo prenderebbe il
-##     minimo per il conteggio.
+##   - e lo scarico **muove** il numero di istanze vive: non un minimo di
+##     istanze, perche' un minimo derivato dalla scena era una derivazione
+##     capovolta (vedi sopra, e la data del rosso che l'ha smascherata), ma il
+##     fatto stesso di cui il difetto e' fatto — non muovere niente. Il numero
+##     vero viene stampato accanto, perche' un criterio che dicesse solo «almeno
+##     una» nasconderebbe quanto ne libera davvero, e chi legge dopo prenderebbe
+##     quella per il conteggio.
 ##
 ## Il secondo punto e' quello con i denti: senza lo svuotamento i numeri non
 ## scendono e qui va rosso.
@@ -362,23 +422,35 @@ func _exit_section(h) -> int:
 	var prima := _live_objects()
 	var scarico := await _drain_audio()
 	var dopo := _live_objects()
+	# Chi e' la risorsa che il conto sopra non libera. Dopo lo scarico, che e'
+	# l'unico momento in cui qualcosa e' stato liberato davvero: prima di questo
+	# punto tutte le risorse della partita sarebbero vive e la riga non
+	# direbbe niente.
+	_report_live_resources()
 	# Quante istanze sono state **liberalte**: e' il numero che il motore
 	# stampa all'uscita, preso col segno giusto. Sottraendo in due passi si
 	# potrebbe scrivere l'asserzione al contrario senza accorgersene.
 	var scesi: int = int(prima[0]) - int(dopo[0])
+	# La sonda deve essere partita: i numeri sulla scena viva sono la
+	# spiegazione del numero che si muove, e senza di loro questa sezione
+	# guarda il totale e non sa di che sta parlando.
+	h.check(_players_at_close >= 0,
+		"la sonda risorse non e' mai partita, quindi i numeri \"nodi audio nella scena\" e \"quanti stavano suonando\" qui sotto sono -1 e il numero di istanze liberate non ha niente su cui appoggiarsi")
 
-	print("test_ui: uscita: nodi sotto root %d (avvio %d), audio %d, scarico audio %d frame"
-		% [_count_nodes(root), _nodes_at_boot, audio, scarico])
-	print("test_ui: uscita: istanze ObjectDB %d -> %d, liberate %d (minimo asserito %d); risorse vive %d -> %d"
-		% [int(prima[0]), int(dopo[0]), scesi, LEAKED_OBJECTS, int(prima[1]), int(dopo[1])])
+	# I tre numeri che non vanno confusi: i primi due sono lo **stesso**
+	# conteggio a due istanti diversi, e nessun nodo e' rientrato.
+	print("test_ui: uscita: sotto root %d nodi (avvio %d), %d nodi \"%s\" sotto root DOPO la chiusura della scena"
+		% [_count_nodes(root), _nodes_at_boot, audio, AUDIO_CLASS])
+	print("test_ui: uscita: dentro la scena PRIMA di liberarla %d nodi \"%s\", dei quali %d stavano suonando (istante diverso dal numero di sopra: e' la stessa classe contata dentro e fuori dalla scena, non un numero che va e viene)"
+		% [_players_at_close, AUDIO_CLASS, _sounding_at_close()])
+	print("test_ui: uscita: istanze ObjectDB %d -> %d, liberate %d; risorse vive %d -> %d; scarico audio %d frame"
+		% [int(prima[0]), int(dopo[0]), scesi, int(prima[1]), int(dopo[1]), scarico])
 
-	# ## Il numero che il leak muove, e perche' un **minimo** e non una
-	# ## uguaglianza
+	# ## Il numero che il leak muove, e perche' qui sotto non c'e' un **minimo**
 	#
-	# Il motore stampa due righe (`N ObjectDB instances`, `M resources`) ma sono
-	# lo stesso evento: il playback tiene il riferimento alla risorsa che sta
-	# suonando, quindi liberare il playback libera anche la risorsa. Ed e' per
-	# questo qui sotto c'e' **una** asserzione e non due.
+	# Il motore stampa due righe (`N ObjectDB instances`, `M resources`) ma il
+	# numero che si muove e' il primo: quello e' l'unico che questo test
+	# asserisce.
 	#
 	# `OBJECT_RESOURCE_COUNT` non e' un secondo criterio: e' stato misurato due
 	# volte sulla stessa riga e **non e' stabile**. Con lo scarico che libera due
@@ -387,17 +459,20 @@ func _exit_section(h) -> int:
 	# appeso in quel momento, quindi asserirci sopra produrrebbe un criterio che
 	# va rosso o verde per il caso, non per il difetto. Va stampato accanto al
 	# numero vero, che e' dove serve: per vedere **che e' sceso** insieme alle
-	# istanze.
+	# istanze. Ed e' anche il conto su cui la sonda delle risorse si confronta, ma
+	# li due non sono lo stesso numero (vedi il doc-comment di `_live_objects`).
 	#
-	# Sulle istanze il criterio e' invece un **minimo**, `LEAKED_OBJECTS`, e non
-	# il numero di oggi: il numero vero cresce col numero di suoni in volo e non
-	# e' fermo (vedi la nota sopra `LEAKED_OBJECTS`). Un minimo ha denti: a 1 e a
-	# 0 istanze liberate va rosso, e quei due numeri sono proprio il difetto.
-	# Fissare il numero vero non avrebbe denti verso il basso e mentirebbe
-	# domani, quando `-orda` tocca di nuovo il passo di simulazione.
-	h.check(scesi >= LEAKED_OBJECTS,
-		"l'uscita deve liberare almeno le %d istanze ObjectDB che il suono teneva appese: ne sono state liberate %d. Se questo numero e' 0 o 1, il playback della partita e' ancora registrato nel server audio quando il motore esce, ed e' quello che fa scrivere al motore `N ObjectDB instances were leaked at exit` e `M resources still in use at exit`. Se il numero e' maggiore del minimo, non e' un difetto: e' piu' suono da liberare, e il minimo resta quello che il difetto richiedeva"
-			% [LEAKED_OBJECTS, scesi])
+	# Sulle istanze **non c'e' piu' un minimo**, e la ragione sta nel blocco sopra:
+	# il minimo che c'era era derivato capovolto (un tetto usato come pavimento)
+	# e il 2026-10-15 e' andato rosso per quello, non per un difetto. Quello che
+	# resta e' la **vita**: lo scarico deve muovere almeno un contatore, perche'
+	# zero e' proprio il difetto — e l'esperimento coi denti tolti e rimessi dice
+	# che senza scarico il numero non si muove affatto (`1551 -> 1551`) e il
+	# motore riscrive le due righe. Un numero che pretende di dire *quante*
+	# playback restano non e' disponibile, e sopra e' scritto perche'.
+	h.check(scesi > 0,
+		"lo scarico audio non ha liberato nessuna istanza ObjectDB (%d -> %d): e' il difetto che questa sezione chiude, perche' e' quello che fa riscrivere al motore `N ObjectDB instances were leaked at exit` e `M resources still in use at exit`. Qui non c'e' un minimo di istanze da confrontare perche' non e' derivabile: i %d nodi \"%s\" della scena (di cui %d stavano suonando) sono un tetto sulle playback vive, non un pavimento, e quale istanza non scende non e' misurabile da script"
+			% [int(prima[0]), int(dopo[0]), _players_at_close, AUDIO_CLASS, _sounding_at_close()])
 	# E lo scarico e' avvenuto: se il tetto di attesa fosse scaduto, il numero
 	# sopra andrebbe rosso ma per un motivo che qui si dice. Sono due fatti, non
 	# uno, e il secondo e' quello che rende leggibile il primo.
@@ -411,12 +486,216 @@ func _exit_section(h) -> int:
 ## Sono **gli stessi due conti** sui quali il motore fonda i due messaggi
 ## all'uscita (`ObjectDB::cleanup()` e `Resource::clear()`): non e' un modo
 ## furbo di contare qualcos'altro, e' il numero che il difetto muove. Non si
-## toccano: si leggono, e il test dichiara quanto devono scendere.
+## toccano: si leggono.
+##
+## ## I due numeri di risorse che si leggono qui non sono confrontabili
+##
+## `OBJECT_RESOURCE_COUNT` conta **ogni** `Resource` viva nel motore. La sonda
+## qui sotto conta **un sottoinsieme**: le sole risorse raggiungibili dalle
+## proprieta' dei nodi di quella scena, al momento della chiusura. Quindi
+## `24 -> 24` e `1 vive su 27 annotate` non sono due risposte contraddittorie a
+## una domanda sola: sono due domande diverse, e il numero grande e' l'unico
+## che puo' muoversi per il motivo di cui sopra. La frase sta qui, una volta: il
+## conto del motore e' il verdetto, il conto della sonda e' il nome.
 func _live_objects() -> Array[int]:
 	return [
 		int(Performance.get_monitor(Performance.OBJECT_COUNT)),
 		int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),
 	]
+
+## --- La risorsa che l'uscita non libera: chi e' --------------------------------
+#
+# `Performance.OBJECT_RESOURCE_COUNT` dice **quante**, non **quale**, e nessuna
+# API di GDScript enumera le risorse vive. Quindi qui si fa il contrario di
+# `OBJECT_COUNT`: si annotano **prima** le risorse che si possono nominare, con
+# un `WeakRef`, e all'uscita si controlla quali sono ancora valide.
+#
+# Il `WeakRef` e' la parte che rende lo strumento onesto: non tiene vivo niente,
+# quindi annotare una risorsa **non puo'** cambiarne la vita, e una risorsa che
+# qui risulta viva e' viva perche' qualcun altro la tiene. Senza questo, la sonda
+# creerebbe il difetto che sta misurando.
+#
+## Dove si annotano: a fine `_upgrade_flow`, con l'ultima scena **ancora viva**,
+# che e' l'unica occasione in cui si possono vedere i suoi campi.
+
+## Le risorse annotate, e dove stavano. Due array paralleli: il riferimento e il
+## nome che lo rende leggibile. Non un dizionario perche' la stessa risorsa puo'
+## stare in piu' campi e in quel caso si vuole vedere **tutti** i posti che la
+## tengono, non il primo trovato.
+var _note_ref: Array = []
+var _note_where: Array[String] = []
+## Quanti nodi audio sono vivi **nella scena al momento della chiusura**, cioe'
+## prima di liberarla. Non e' un numero scritto qui: e' quello che la scena ne
+## aveva. Vale come **tetto** e non come pavimento, per la ragione scritta nel
+## blocco «Perche' qui non c'e' piu' un pavimento».
+var _players_at_close: int = -1
+## Quanti di quei nodi audio **stavano suonando** nello stesso istante. Anche
+## questo e' un tetto (un nodo che suona puo' non avere ancora la playback
+## registrata), quindi va stampato e non asserito.
+var _players_sounding_at_close: int = -1
+
+## Annota ogni `Resource` raggiungibile da `node`, senza tenerla viva.
+##
+## Il filtro e' `PROPERTY_USAGE_SCRIPT_VARIABLE | PROPERTY_USAGE_STORAGE`: senza
+## si raccoliebbe anche `script`, che e' una `Resource` e resta viva per tutto il
+## processo per la cache dei GDScript. Quindi ogni script scoperto viene
+## **saltato e contato**, e il conto e' stampato: uno strumento che nasconde il
+## proprio rumore non e' uno strumento.
+func _note_resources(node: Node) -> void:
+	var script_visti := 0
+	_players_at_close = _count_class(node, AUDIO_CLASS)
+	_players_sounding_at_close = 0
+	var coda: Array[Node] = [node]
+	while not coda.is_empty():
+		var n: Node = coda.pop_back()
+		for child in n.get_children():
+			coda.append(child)
+		# `playing` e' una **proprieta'**, non un metodo, e si legge per nome come
+		# tutto il resto della classe: il file non si lega al tipo. `bool()` su un
+		# valore assente vale `false`, quindi un nodo audio senza `playing` non
+		# falsifica il conto.
+		if n.is_class(AUDIO_CLASS) and bool(n.get("playing")):
+			_players_sounding_at_close += 1
+		for p in n.get_property_list():
+			if (int(p["usage"]) & (PROPERTY_USAGE_SCRIPT_VARIABLE | PROPERTY_USAGE_STORAGE)) == 0:
+				continue
+			var v = n.get(str(p["name"]))
+			if v is Script:
+				script_visti += 1
+				continue
+			if not (v is Resource):
+				continue
+			# Tipo esplicito: `weakref()` restituisce un Variant e `:=` su un
+			# Variant e' un errore in questo progetto (il file si ferma li').
+			#
+			# **Nessuna deduplica, di proposito**: la stessa risorsa in due campi
+			# viene annotata due volte, e le due righe dicono **chi** la tiene,
+			# che e' la domanda che questa sonda fa.
+			var w: WeakRef = weakref(v)
+			_note_ref.append(w)
+			_note_where.append("%s.%s" % [n.get_path(), p["name"]])
+	print("test_ui: sonda risorse: %d annotate, %d script saltati, %d nodi \"%s\" vivi nella scena alla chiusura, dei quali %d stavano suonando (conti dentro la scena: sono un sottoinsieme del totale del motore, vedi `_live_objects`)"
+		% [_note_ref.size(), script_visti, _players_at_close, AUDIO_CLASS, _players_sounding_at_close])
+
+## **Stampa e non asserisce**, e la firma e' `-> void` per questo e non per
+## dimenticanza. Il numero che qui sotto si conta e' un **movimento**, non un
+## **verdetto**, e il perche' e' preciso: il 2026-10-15 la sonda ha dato un
+## **nome** — `AudioStreamWAV`, raggiunta da `SfxLevelUp.stream`, cioe' la
+## proprieta' `.stream` di un `AudioStreamPlayer3D` **dentro la scena** e non una
+## riga di codice: quel nome di nodo e' `NOME_SFX_LEVELUP` in
+## `src/player/player.gd`, e la risorsa la tiene la **cache di import del
+## motore**, quindi non e' di questa foglia e nessuno qui dentro la puo'
+## liberare. Ma restare vivo un **nome** non vuol dire essere **quell'istanza**
+## che `OBJECT_COUNT` non libera: i due conti sono due universi diversi (vedi
+## `_live_objects`), quindi il nome e' una scoperta e non ancora una spiegazione.
+## Per questo la firma e' `-> void` e non `-> int`: un `h.eq(...)` su quel numero
+## metterebbe nel file una soglia che nessuno ha misurata.
+##
+## Le risorse annotate che sono **ancora vive** all'uscita, per nome di classe e
+## per id di istanza.
+##
+## E' la riga che risponde a «cos'e' quella risorsa?». Un id di istanza non si
+## puo' leggere a mano, ma si puo' **ricercare**: chi legge puo' mettere l'id
+## vicino al nome della classe e chiedere il percorso della risorsa. Il numero
+## che interessa pero' e' il confronto con ieri: se sono **zero**, la risorsa che
+## non viene liberata non e' nessuna di quelle della scena, e quindi non e' di
+## questa foglia.
+func _report_live_resources() -> void:
+	var vive := 0
+	for i in _note_ref.size():
+		var w: WeakRef = _note_ref[i]
+		var r = w.get_ref()
+		if r == null:
+			continue
+		vive += 1
+		print("test_ui: risorsa ancora viva all'uscita: %s (era %s) #%d"
+			% [r.get_class(), _note_where[i], (r as Resource).get_instance_id()])
+	print("test_ui: sonda risorse: %d vive all'uscita su %d annotate"
+		% [vive, _note_ref.size()])
+
+## ## m12-w1b: i ritorni morti, e una porta che li cerca da sola
+##
+## Il difetto appena chiuso era una funzione con la **firma di una porta**
+## (`-> int`) e il **comportamento di una sonda**: il numero che restituiva non
+## lo guardava nessuno. Un lettore che vede `-> int` ragiona «qui c'e' un numero
+## che viene controllato», e non e' vero: la promessa e' senza consumatore.
+##
+## Quindi la regola e' questa: **una funzione che non restituisce `void` deve
+## avere un chiamante che si mangia il risultato**. Il chiamante puo' essere
+## un'assegnazione, un `if`, un `print`, un `h.eq`: non puo' essere una riga che
+## chiama e butta via. Il chiamante puo' stare anche in un altro file, e questa
+## porta guarda solo questo: quindi copre le funzioni di qui, e lo dichiara.
+##
+## Il controllo e' meccanico e guarda **questo file riga per riga**, quindi la
+## regola non puo' morire in silenzio come e' morta la promessa. E' la lezione
+## di ieri (`%g` e `%e` in `test_orda.gd`, che restavano una parola in una
+## stringa e non rompevano niente) trasformata in porta invece che in promessa.
+##
+## Il criterio guarda la **forma**, non l'intelletto: segnala una riga che chiama
+## e scarta, che e' la forma esatta del difetto. Una chiamata messa su piu'
+## righe puo' sfuggirci (la prima riga non finisce con `)`), e allora la porta
+## tace: meglio una porta che tace che una che va rossa su un richiamo che
+## comunque non guarda nessun numero.
+##
+## Le funzioni **senza** tipo di ritorno dichiarato non sono coperte: dichiarare
+## `->` e' il primo passo, e una porta che guardasse anche le altre dovrebbe
+## sapere cosa restituiscono.
+
+## Le firme che chiama il **motore** e non questo file: il loro valore di ritorno
+## (`_process` restituisce `bool`) non e' un numero che un chiamante possa
+## mangiare, quindi la regola sopra non le riguarda. Elenco dichiarato, non
+## dedotto: una lista nascosta dentro il criterio e' un numero che nessuno puo'
+## guardare.
+const CHIAMATE_DAL_MOTORE := ["_process"]
+
+func _ritorni_morti_si_provano(h) -> void:
+	var catturati := PackedStringArray()
+	for path in ["res://tests/test_ui.gd"]:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if not h.check(f != null, "test_ui: non si apre %s per controllarci dentro" % path):
+			return
+		var righe := f.get_as_text().split("\n")
+
+		# Primo giro: le firme di questo file che restituiscono qualcosa.
+		var firme: Array[String] = []
+		for riga in righe:
+			var codice := str(riga).split("#")[0].strip_edges()
+			if not codice.begins_with("func "):
+				continue
+			var freccia := codice.find("->")
+			if freccia < 0:
+				continue
+			if codice.substr(freccia + 2).strip_edges().begins_with("void"):
+				continue
+			var parentesi := codice.find("(")
+			if parentesi < 0:
+				continue
+			var nome := codice.substr(5, parentesi - 5).strip_edges()
+			if CHIAMATE_DAL_MOTORE.has(nome):
+				continue
+			firme.append(nome)
+
+		# Secondo giro: il risultato di qualcuna di quelle firme e' mangiato?
+		for n in righe.size():
+			var chiamata := str(righe[n]).split("#")[0].strip_edges()
+			if chiamata.begins_with("await "):
+				chiamata = chiamata.substr(6).strip_edges()
+			for firmata in firme:
+				if not chiamata.begins_with(firmata + "("):
+					continue
+				if not chiamata.ends_with(")"):
+					continue
+				# Le parentesi bilanciate separano `_foo(a)`, che e' la forma
+				# sospetta, da `_foo(a) + b` e da `f(_foo(a))`, che sono chiamate
+				# che qualcuno mangia.
+				if chiamata.count("(") != chiamata.count(")"):
+					continue
+				catturati.append("%s:%d: %s() restituisce qualcosa e questa riga butta via il risultato"
+					% [path, n + 1, firmata])
+	h.eq(catturati.size(), 0,
+		"test_ui: una funzione che non restituisce void deve avere un chiamante che ne mangia il risultato: "
+			+ "una riga che chiama e scarta e' un ritorno morto, cioe' la firma di una porta col comportamento di una sonda. "
+			+ "Le eccezioni sono in CHIAMATE_DAL_MOTORE (le chiama il motore, non questo file). Trovati: " + str(catturati))
 
 ## Aspetta che il server audio **mescoli una volta**.
 ##
@@ -502,6 +781,7 @@ func _hud_alone(h) -> void:
 	_xp_bar(h, hud)
 	_health_bar(h, hud)
 	_wave_counter(h, hud)
+	_clock_alone(h, hud)
 	_game_over_screen(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
@@ -676,6 +956,58 @@ func _game_over_screen(h, hud) -> void:
 	h.check(not hud.game_over_visible(),
 		"tornando in vita la schermata deve sparire: se resta, l'HUD mente per tutta la partita")
 
+## ## m17: il tempo, con l'HUD da solo
+##
+## Qui si verifica **il formato**, cioe' l'unica cosa che questa parte puo'
+## verificare: nella scena vera non c'e' nessun `Run`, quindi l'orologio non
+## avanza e un tempo che non cambia passerebbe. Il numero che viene da `-orda`
+## lo verifica `_clock_from_contract`, che avvelena il campo vero.
+##
+## L'atteso e' **ricalcolato qui** con la formula che `hud.gd` dichiara e non
+## letto dall'HUD: prenderlo dall'HUD sarebbe confrontare l'HUD con se stesso,
+## che e' il difetto di m4 riscritto.
+func _clock_alone(h, hud) -> void:
+	# I cinque casi che si vedono davvero, e i due estremi che non si vedono ma
+	# capitano: il tempo e' un numero che cresce da zero, quindi sotto zero e
+	# sopra un milione di secondi non sono stati del gioco e non devono produrre
+	# una scritta con un segno o un numero che non c'entrano.
+	for caso in [[0.0, "00:00"], [1.0, "00:01"], [59.0, "00:59"], [61.0, "01:01"],
+			[599.0, "09:59"], [3600.0, "60:00"], [-5.0, "00:00"]]:
+		hud.set_clock(caso[0])
+		h.eq(hud.clock_text(), "TIME " + _clock_text_of(caso[0]),
+			"il tempo a schermo con %s secondi deve essere \"%s\": e' \"%s\""
+				% [caso[0], _clock_text_of(caso[0]), hud.clock_text()])
+		h.near(hud.clock_seconds(), maxf(float(caso[0]), 0.0), 0.0001,
+			"i secondi esposti devono essere il numero che e' stato dato, non quello scritto")
+
+	# E i numeri non finiti, che sono i tre casi in cui `clampf` **non** aiuta:
+	# ogni confronto con `NaN` e' falso, quindi un `NaN` passerebbe attraverso
+	# qualunque guardia e arriverebbe a schermo come testo.
+	for raw in NOT_FINITE:
+		hud.set_clock(raw)
+		h.eq(hud.clock_text(), "TIME 00:00",
+			"un tempo non finito (%s) non puo' diventare una scritta: e' \"%s\"" % [raw, hud.clock_text()])
+		h.finite(hud.clock_seconds(), "un tempo non finito (%s) non puo' entrare nell'HUD" % raw)
+
+	# E l'avvelenamento, anche da solo: il numero che il test scrive deve arrivare
+	# a schermo. Qui non dimostra che la lettura sia quella giusta (non c'e' nessun
+	# `Run` sotto), e per quello c'e' `_clock_from_contract`.
+	hud.set_clock(POISON_S)
+	h.eq(hud.clock_text(), "TIME " + _clock_text_of(POISON_S),
+		"un tempo di %s secondi deve arrivare a schermo: e' \"%s\"" % [POISON_S, hud.clock_text()])
+
+## Il tempo che l'HUD **dovrebbe** mostrare, ricalcolato dalla regola dichiarata in
+## `hud.gd`: secondi interi, divisi in minuti e secondi, due cifre ciascuno e il
+## due punti ASCII come separatore.
+##
+## E' una copia della formula e non un dato di gioco: la copia qui e' il punto,
+## perche' il confronto deve poter fallire. Se la regola cambiasse da una parte
+## sola, questa funzione e `hud.gd::_redraw_clock` non combacerebbero piu' e il
+## test andrebbe rosso invece di passare.
+func _clock_text_of(seconds: float) -> String:
+	var total := int(floorf(maxf(seconds, 0.0)))
+	return "%02d:%02d" % [total / 60, total % 60]
+
 ## La barra e' sanata: finita, dentro [0, 1], e il valore **disegnato** dentro il
 ## denominatore del nodo. Il controllo e' sul nodo e non sul ricalcolo perche' il
 ## difetto di cui si parla e' proprio una barra con larghezza negativa: si vede
@@ -694,6 +1026,166 @@ func _assert_bar_sane(h, hud, what: String) -> void:
 	h.check(span > 0.0, "%s: il denominatore della barra non puo' essere zero, altrimenti non si vede" % what)
 	h.check(value <= span + 0.0001,
 		"%s: la barra disegnata (%s) non puo' superare il suo denominatore (%s)" % [what, value, span])
+
+## --- Parte 2-ter: il tempo vero (m17) -------------------------------------------
+#
+# ## Perche' qui il criterio e' l'**avvelenamento** e non «il numero c'e'»
+#
+# L'utente ha scritto «mi manca un timer su schermo». Un HUD che mostra `00:00`
+# fermo **passerebbe** qualunque verifica che guardi solo il testo, e un HUD che
+# conta i frame da per se' pure: i due hanno lo stesso aspetto e la stessa
+# condizione. Quello che distingue il tempo **vero** da un numero messo li' e'
+# che il numero deve cambiare quando cambia la fonte, e l'unico modo di
+# accorgersene e' scrivere nella fonte e rileggere.
+#
+# ## Perche' il campo avvelenato e' `run.elapsed_s` e non un altro
+#
+# `Run` (`src/sim/run.gd`) e' il posto dove `-orda` tiene il tempo di partita:
+# cresce di un `+=` per passo in `advance(delta)` e torna a zero in `restart()`.
+# Il test scrive li', su quell'oggetto vivo, e rilegge l'HUD. Se l'HUD leggesse
+# qualcos'altro — un orologio proprio, il numero di frame, un campo copiato —
+# l'avvelenamento non cambierebbe niente a schermo e qui andrebbe rosso. E'
+# l'unico criterio che distingue «l'HUD mostra il tempo di `-orda`» da
+# «l'HUD mostra un numero».
+#
+# ## Il numero e' messo e **rimesso**
+#
+# L'avvelenamento vale per la verifica e non per il resto del test: `POISON_S`
+# sbloccherebbe il mortar di m17 (`Run.MORTAR_AFTER_S`) e falserebbe qualunque
+# cosa venisse dopo. Quindi il valore di partenza viene **letto** e rimesso, e
+# non sostituito da uno zero scritto qui: il numero vero di quel momento non e'
+# noto a questo file e non deve indovinarlo.
+
+## Il tempo che l'HUD mostra e' quello che l'orda ha contato, e cambia quando
+## l'avveleniamo.
+func _clock_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var horde = game.get("horde")
+	if not h.check(horde is Object and is_instance_valid(horde),
+			"avvio %d: il contratto non espone un'orda valida: l'HUD non ha un orologio da leggere" % round_no):
+		return
+	# ## La porta che l'HUD legge, verificata **prima** di avvelenare
+	#
+	# Il campo da avvelenare e' la sorgente (`Run.elapsed_s`), e l'HUD lo legge
+	# dalla porta dichiarata `horde.elapsed_s()` (`M2_SURFACE`, riga che scrive
+	# `-orda`). Senza quel metodo l'avvelenamento non avrebbe niente su cui
+	# propagarsi, quindi il numero a schermo non cambierebbe e il confronto
+	# sarebbe quello di un HUD che legge il posto sbagliato invece che quello di
+	# un HUD che ha perso la porta. La porta si verifica quindi **prima**, e il
+	# messaggio dice chi la deve scrivere.
+	if not h.check((horde as Object).has_method("elapsed_s"),
+			"avvio %d: l'orda non espone \"elapsed_s()\": e' la porta dichiarata che l'HUD usa per il tempo (M2_SURFACE in src/core/contracts.gd) e la scrive -orda. Senza di essa l'HUD non ha un orologio da mostrare e questa verifica non puo' dimostrare che il numero a schermo venga dal tempo di -orda" % round_no):
+		return
+	# Il campo da avvelenare e' la sorgente e questo test la scrive per poterla
+	# muovere: e' un'operazione di test, non un percorso di lettura della
+	# partita, ed e' dichiarata come le altre scritture che questo file fa su
+	# oggetti altrui (`progression.xp`, `horde.wave`, `player.invuln`).
+	var run = (horde as Object).get("run")
+	if not h.check(run is Object and is_instance_valid(run),
+			"avvio %d: l'orda non espone \"run\": l'orologio di -orda non e' raggiungibile e questa verifica non ha nulla da avvelenare" % round_no):
+		return
+	var raw = (run as Object).get("elapsed_s")
+	if not h.check(typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT,
+			"avvio %d: la partita di -orda non espone \"elapsed_s\": il tempo a schermo e' un numero che questa verifica non puo' piu' controllare" % round_no):
+		return
+	var partenza := float(raw)
+
+	hud.refresh()
+	h.near(hud.clock_seconds(), partenza, 0.0001,
+		"avvio %d: il tempo esposto deve essere quello di -orda (%.3f s), non un numero proprio" % [round_no, partenza])
+	var testo_prima: String = hud.clock_text()
+	h.eq(testo_prima, "TIME " + _clock_text_of(partenza),
+		"avvio %d: la scritta del tempo deve essere quella che il numero di -orda produce" % round_no)
+
+	# ## L'avvelenamento
+	(run as Object).set("elapsed_s", POISON_S)
+	if not h.check((run as Object).get("elapsed_s") == POISON_S,
+			"avvio %d: non si puo' scrivere \"elapsed_s\" sulla partita di -orda: questa verifica non puo' provare che l'HUD legga il tempo vero" % round_no):
+		return
+	hud.refresh()
+
+	# Il numero esposto, prima ancora della scritta: e' il campo che il test
+	# confronta, ed e' quello che rende la verifica leggibile.
+	h.near(hud.clock_seconds(), POISON_S, 0.0001,
+		"avvio %d: dopo l'avvelenamento il tempo esposto deve essere %.0f s, quello scritto su Run.elapsed_s: se l'HUD tenesse un contatore proprio il numero non cambierebbe" % [round_no, POISON_S])
+	# E la scritta, che e' il criterio con cui si vede. Il confronto e' con
+	# `_clock_text_of`, ricalcolato qui, non con una stringa scritta a mano.
+	h.check(hud.clock_text() != testo_prima,
+		"avvio %d: avendo avvelenato il tempo di -orda il numero a schermo deve cambiare, e la scritta e' rimasta \"%s\": l'HUD non sta leggendo Run.elapsed_s" % [round_no, testo_prima])
+	h.eq(hud.clock_text(), "TIME " + _clock_text_of(POISON_S),
+		"avvio %d: la scritta del tempo dopo l'avvelenamento dev'essere quella che %.0f secondi producono, e' \"%s\"" % [round_no, POISON_S, hud.clock_text()])
+
+	# E si rimette com'era: il numero di partenza e' **riletto**, non indovinato.
+	(run as Object).set("elapsed_s", partenza)
+	hud.refresh()
+	h.eq(hud.clock_text(), testo_prima,
+		"avvio %d: rimesso a posto il tempo di -orda la scritta deve tornare quella di prima" % round_no)
+
+	print("test_ui: m17, avvio %d: tempo %.3f -> %.0f -> %.3f s, scritta \"%s\" -> \"%s\""
+		% [round_no, partenza, POISON_S, partenza, testo_prima, _clock_text_of(POISON_S)])
+
+## --- Parte 2-quater: il richiamo al restart (m13-w2) ----------------------------
+
+## Il richiamo al restart nomina **un tasto vero**, e sparisce col restart.
+##
+## Il confronto non e' sulla stringa: il testo e' di questa foglia e l'utente
+## puo' volerlo diverso domani. Il confronto e' sul **nome del tasto**, che deve
+## essere quello che `-gameplay` dichiara in `RESTART_KEYS` — e questo e' il punto
+## che chiude il difetto: un HUD che scrivesse `R` mentre il gioco ascolta solo
+## `Enter` passerebbe qualunque verifica sulla stringa, e qui va rosso.
+##
+## Il nome atteso e' ricalcolato con `OS.get_keycode_string` sul tasto che il
+## giocatore **dichiara adesso**: se `-gameplay` cambia la lista, l'atteso cambia
+## con lei e non c'e' nessuna lettera scritta qui dentro da tenere allineata.
+func _restart_hint_names_a_real_key(h, player, hud, round_no: int) -> void:
+	var keys := _restart_keys(player)
+	if not h.check(keys.size() > 0,
+			"avvio %d: il giocatore non dichiara i tasti del restart: l'HUD non puo' nominare un tasto vero e questa verifica non ha nulla da confrontare" % round_no):
+		return
+	# Il primo tasto della lista e' quello che l'HUD mostra: quale dei tasti
+	# dichiarati si nomini a schermo e' una scelta di layout di -ui, quindi non
+	# e' un criterio. **Quali sono** non e' una scelta di -ui, ed e' quello che
+	# qui viene confrontato.
+	var atteso := OS.get_keycode_string(int(keys[0]))
+	if not h.check(atteso != "",
+			"avvio %d: il tasto %d dichiarato dal giocatore non ha un nome che si possa scrivere a schermo" % [round_no, int(keys[0])]):
+		return
+	if not h.check(hud.restart_key_name() == atteso,
+			"avvio %d: il richiamo al restart nomina \"%s\" e il gioco ascolta \"%s\": un HUD che promette un tasto che il gioco non ascolta e' il difetto che questa verifica cerca (i tasti dichiarati sono %s)" % [round_no, hud.restart_key_name(), atteso, str(keys)]):
+		return
+	# La scritta deve contenere quel nome e non essere vuota: la schermata di game
+	# over senza «come si riparte» e' esattamente la lamentela dell'utente.
+	h.check(hud.restart_hint_text().strip_edges() != "",
+		"avvio %d: a schermo di game over il richiamo al restart e' vuoto: \"%s\"" % [round_no, hud.restart_hint_text()])
+	h.check(hud.restart_hint_text().contains(atteso),
+		"avvio %d: il richiamo al restart deve nominare il tasto \"%s\": e' \"%s\"" % [round_no, atteso, hud.restart_hint_text()])
+	# E deve essere **visibile**: una Label che c'e' dentro un pannello nascosto
+	# soddisferebbe le due righe di sopra e non direbbe niente al giocatore.
+	h.check(hud.restart_hint_visible(),
+		"avvio %d: col game over a schermo anche il richiamo al restart deve vedersi" % round_no)
+
+## I tasti che il giocatore dichiara, presi da lui.
+##
+## Prima `get()` sull'istanza, che in Godot 4 risolve anche le costanti di uno
+## script; poi la mappa delle costanti dello script, che e' la strada esplicita.
+## Sono le stesse due di `hud.gd::_restart_keys_from`: il test non ne scrive una
+## terza, perche' tre strade verso lo stesso dato sono tre posti in cui una delle
+## due puo' smettere di funzionare.
+func _restart_keys(player) -> Array:
+	if player == null or not is_instance_valid(player):
+		return []
+	var raw = (player as Object).get(RESTART_KEYS_MEMBER)
+	if raw is Array and not (raw as Array).is_empty():
+		return raw as Array
+	var scr = (player as Object).get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return []
+	var map = scr.call("get_script_constant_map")
+	if not (map is Dictionary):
+		return []
+	var alt = (map as Dictionary).get(RESTART_KEYS_MEMBER)
+	if alt is Array and not (alt as Array).is_empty():
+		return alt as Array
+	return []
 
 ## La barra dell'onda ha la stessa forma di guardia: finita, dentro [0, 1], e il
 ## valore disegnato dentro il suo massimo, che e' 1.
@@ -755,6 +1247,12 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 
 	_xp_from_contract(h, game, hud, round_no)
 	_wave_from_contract(h, game, hud, round_no)
+	# m17: il tempo che arriva davvero da `-orda`. Va **prima** di
+	# `_health_from_contract` e `_death_from_contract` perche' quelle due
+	# ammazzano il giocatore e fanno il restart, e il restart azzera l'orologio:
+	# qui il numero di partenza e' quello che si vede all'avvio, che e' lo stato
+	# in cui un orologio fermo a `00:00` si distingue da un numero scritto dentro.
+	_clock_from_contract(h, game, hud, round_no)
 	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
@@ -1226,6 +1724,9 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 	_tick(arena, hud)
 	h.check(hud.game_over_visible(),
 		"avvio %d: il player a 0 HP deve mostrare la schermata di game over" % round_no)
+	# m13-w2: la schermata deve anche dire **come si riparte**, e il tasto che dice
+	# e' quello che il gioco ascolta davvero.
+	_restart_hint_names_a_real_key(h, player, hud, round_no)
 	h.check(hud.health_ratio() <= 0.001,
 		"avvio %d: a 0 HP anche la barra della vita deve essere vuota" % round_no)
 
@@ -1243,6 +1744,11 @@ func _death_from_contract(h, arena, hud, round_no: int) -> void:
 		"avvio %d: dopo il restart il giocatore dev'essere in piedi: hp e' %.2f" % [round_no, _player_number(player, "hp")])
 	h.check(not hud.game_over_visible(),
 		"avvio %d: tornato in vita il giocatore, la schermata di game over deve sparire" % round_no)
+	# E il richiamo al restart sparisce **con** la schermata: e' dentro
+	# `GameOver`, e un richiamo che resta a schermo in partita e' un secondo HUD
+	# che dice una cosa che non vale.
+	h.check(not hud.restart_hint_visible(),
+		"avvio %d: dopo il restart il richiamo al restart non deve restare a schermo" % round_no)
 
 # --- Parte 3: il pannello delle scelte (m6) -------------------------------------
 #
@@ -1528,7 +2034,12 @@ func _upgrade_flow(h, game: Node) -> void:
 
 	# E il pannello torna a funzionare dopo il restart: uno che funziona solo al
 	# primo livello e' un pannello che una partita lunga non usa mai.
-	_kill_until(h, prog, horde, weapon, 2)
+	# Il numero di uccisioni **si stampa**: `_kill_until` restituisce un `int` e
+	# un chiamante che butta via il risultato e' un ritorno morto (vedi
+	# `_ritorni_morti_si_provano`), quindi anche qui il numero esce accanto alla
+	# frase che lo usa invece di andare in un buco.
+	print("test_ui: m6, uccisioni fino al livello dopo il restart: %d"
+		% _kill_until(h, prog, horde, weapon, 2))
 	_tick(arena, hud)
 	h.check(hud.upgrade_panel_visible(),
 		"dopo il restart il pannello deve aprirsi di nuovo al livello successivo")
@@ -1545,11 +2056,20 @@ func _upgrade_flow(h, game: Node) -> void:
 	# all'uscita con l'albero fermo si sale di un altro livello e **non** si
 	# sceglie niente. Il pannello aperto e' lo stato da cui l'HUD esce, ed e'
 	# l'unico in cui la pausa e' ancora di qualcuno.
-	_kill_until(h, prog, horde, weapon, 4)
+	# Stesso accordo di sopra: il numero di uccisioni che tiene aperto il pannello
+	# viene stampato, non scartato.
+	print("test_ui: m6, uccisioni per restare col pannello aperto: %d"
+		% _kill_until(h, prog, horde, weapon, 4))
 	_tick(arena, hud)
 	h.check(hud.upgrade_panel_visible(),
 		"precondizione: senza scegliere niente il pannello resta aperto")
 	h.check(paused, "precondizione: il pannello aperto tiene l'albero in pausa")
+
+	# La sonda sulle risorse parte da qui: e' l'ultimo momento in cui la scena
+	# e' viva e i suoi campi si possono leggere. Non annota niente e non tiene
+	# vivo niente (vedi `_note_resources`), quindi metterla qui non cambia il
+	# numero che la sezione d'uscita confronta.
+	_note_resources(arena)
 
 	# ## La pausa restituita all'uscita
 	#

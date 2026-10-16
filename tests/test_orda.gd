@@ -345,6 +345,17 @@ func _run() -> void:
 	# `_scena_vera` perche' lavora sull'orda isolata: la scena vera registra sul
 	# contratto l'orda del gioco, e qui si deve parlare con l'altra.
 	_m17_orologio(h, horde)
+	_sez("difficolta")
+	# ## m14: STA **prima** di `_scena_vera`, e perche' e' un ordine e non una
+	# scelta
+	#
+	# `_scena_vera` registra sul contratto l'orda e il giocatore **veri**, quindi
+	# questa sezione deve poter rimettere a posto il contratto prima (`_ripristina`
+	# lo fa) e deve poter rimettere a posto l'orda isolata, perche' `_scena_vera`
+	# dopo misura la **sua** orda, non questa. E la sezione che chiude sta
+	# aprendo la scena vera per leggere l'arma vera: due aperture, ma in due
+	# punti separati del file, e ognuna finisce con `_chiudi` + `_ripristina`.
+	_difficolta(h, horde)
 	_sez("scena_vera")
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
@@ -2262,11 +2273,32 @@ func _passo_vera(horda, giocatore, delta: float) -> void:
 ## scena vera, appena liberata, lascerebbe il contratto con `horde` e tre API
 ## che non portano piu' da nessuna parte: un test che viene dopo leggerebbe un
 ## numero e lo chiamerebbe «l'orda».
+##
+## ## `player` torna a com'era, e perche' questa riga era quella che mancava
+##
+## `_chiudi()` libera l'arena **e il suo giocatore dentro**, ma `Game.player`
+## resta appeso a un oggetto morto: lo tiene `src/core/contracts.gd`, che nessuno
+## svuota alla `free()`. Ogni `step()` successivo lo passerebbe a
+## `horde.gd::_player_hp()`, e li' `is Node` su un'istanza liberata **non
+## restituisce `false`** — spacca la funzione e lascia tornare il valore di prima.
+## Il sintomo che ne era venuto fuori era la misura della pressione **negativa**:
+## non una legge sbagliata, uno strumento che leggeva un giocatore fantasma.
+##
+## Prima di m14 questa riga non c'era perche' `_scena_vera` era **l'ultima**
+## sezione del file: nessuno passava un passo dopo di lei, quindi il riferimento
+## appeso non arrivava da nessuna parte. Basta una sezione che apra la scena
+## vera **e poi torni a misurare** e il difetto compare.
 func _ripristina(h, isolate: HORDE) -> void:
 	var game := _game()
 	if game == null or isolate == null:
 		return
 	game.horde = isolate
+	# ## Il giocatore che c'era **prima** di aprire la scena, non `null` alla
+	# cieca: `_apri_arena` lo cattura in `_giocatore_precedente`, quindi se un
+	# giorno qualcuno mettesse un giocatore finto sul contratto, qui verrebbe
+	# rimesso e non perso. Per ora e' `null` e resta `null`, ma la strada e' gia'
+	# quella giusta: **non** si scrive un valore noto a mano.
+	game.player = _giocatore_precedente
 	game.register_impl("nearest_enemy", isolate.nearest_enemy_index)
 	game.register_impl("damage_enemy", isolate.damage_enemy)
 	game.register_impl("random_spawn_point", isolate.random_spawn_point)
@@ -2329,6 +2361,15 @@ func _cerca_mesh(nodo: Node, out: Array[MeshInstance3D]) -> void:
 ## risolve i suoi script **prima** che l'autoload `Game` sia fra le costanti
 ## globali di GDScript, e `player.gd` usa l'identificatore nudo `Game`
 ## (piano 5.3, la trappola).
+## Il giocatore che il contratto aveva **prima** di aprire la scena, catturato da
+## `_apri_arena` e rimesso da `_ripristina`.
+##
+## Serve perche' `_chiudi()` libera l'arena e il suo giocatore dentro, ma
+## `Game.player` resta appeso all'oggetto morto: `_ripristina` rimette questo
+## valore invece di scrivere `null` alla cieca, cosi' la riga resta vera anche se
+## un giorno il contratto avra' un giocatore prima della scena.
+var _giocatore_precedente: Node3D = null
+
 func _apri_arena(h):
 	if not h.check(ResourceLoader.exists(ARENA_SCENE), "manca %s" % ARENA_SCENE):
 		return null
@@ -2347,6 +2388,14 @@ func _apri_arena(h):
 	# `MultiMesh`. Un nodo staccato prima dell'albero non ha mai `_ready()`, e
 	# il suo costo e' zero davvero invece di zero solo per i frame.
 	_stacca_render(arena)
+	# **Prima** di `add_child`: e' l'istante in cui la scena vera non e' ancora
+	# nell'albero, quindi il contratto e' ancora quello di prima e il giocatore da
+	# rimettere e' davvero quello di prima. Dopo `add_child` sarebbe gia' quello
+	# nuovo, e la riga di ripristino non rimetterebbe niente.
+	var game := _game()
+	if game != null:
+		var vecchio = game.get("player")
+		_giocatore_precedente = vecchio as Node3D if is_instance_valid(vecchio) else null
 	root.add_child(arena)
 	return arena as Node3D
 
@@ -5915,3 +5964,674 @@ func _pesi(w: PackedFloat32Array) -> String:
 	for k in w.size():
 		testo += " %s %.1f" % [ENEMY.KIND_NAMES[k], w[k]]
 	return testo
+
+# --- 18. m14: LA DIFFICOLTA'. Il criterio che nel progetto non c'era -------------
+#
+# ## Il difetto, e perche' la risposta «alzo `HP_SCALE_MAX`» era sbagliata
+#
+# L'utente ha scritto: «sono al livello 61 e con i potenziamenti di danno, rateo
+# e gittata posso stare fermo al centro e cancellare tutto allo spawn». Non era una
+# percezione: `src/sim/run.gd` aveva `HP_SCALE_STEP = 0,25` con `HP_SCALE_MAX = 4,0`,
+# quindi la vita smetteva di crescere **all'onda 13** e la popolazione era gia'
+# ferma dall'onda 8. Il giocatore non aveva tetto, e i suoi potenziamenti sono
+# **moltiplicativi**.
+#
+# Alzare il tetto e' la risposta che si da' per abitudine, ed e' sbagliata per un
+# motivo che questa sezione misura: **il danno del morso non cresceva mai**.
+# `enemy.gd::touch_damage_of(kind)` e' la tabella delle specie, identica a ogni
+# onda, e `horde.gd::TOUCH_INTERVAL` limita la cadenza dei morsi. Quindi il danno
+# al secondo che l'orda porta al giocatore era
+# `(1/0,15) x 1,6 = 10,67` hp/s, **una costante**: nessun numero messo sulla vita
+# poteva renderlo piu' grande. Il tetto che m14 chiude e' questo.
+#
+# ## I due numeri del criterio, e perche' sono in **hp/s**
+#
+# In ingresso e in uscita devono avere la stessa unita', altrimenti il confronto
+# non e' un confronto. Quindi:
+#
+#   - **pressione in uscita** = danno al secondo che il giocatore fa con l'arma
+#     vera e con una dotazione di potenziamenti **dichiarata** (`DIFF_DOTAZIONE`),
+#     letta dai campi di `weapon_base` dopo che i potenziamenti veri sono stati
+#     applicati uno per uno;
+#   - **pressione in ingresso** = danno al secondo che l'orda **riesce a far
+#     arrivare** in una finestra di regime, a pieno, misurata sul contratto.
+#
+# Sul lato del giocatore si usa il **potenziale** dell'arma (`danno / intervallo`,
+# cioe' il massimo che puo' fare se ogni colpo trova un corpo): e' il numero
+# **piu' generoso** che si puo' dichiarare, e quindi un criterio che passa con
+# quello passa a maggior ragione nel gioco, dove i colpi che mancano un bersaglio
+# non fanno danno.
+#
+# ## Perche' il criterio ha due verbi
+#
+#   1. **cresce**: la scala dell'onda `w` e' **strettamente** maggiore di quella
+#      dell'onda `w - 1`, per ogni `w` fino a `END_WAVE`. E' il tetto che m14
+#      toglie, scritto come criterio invece che tolto come numero: nessuno puo'
+#      reintrodurlo senza che la porta vada rossa.
+#   2. **non e' inferiore a fine partita**: all'onda `END_WAVE` la pressione in
+#      ingresso non e' minore di quella in uscita.
+#
+# Il primo da solo passerebbe con una scala che cresce di `+0,01` a onda: e' il
+# secondo che ha il difetto. E il secondo da solo passerebbe con una scala
+# enorme gia' dall'onda 1, che romperebbe il criterio n. 4 della milestone 1.
+#
+# ## I denti: lo stesso criterio applicato alla legge di **prima**
+#
+# La legge storica e' scritta qui dentro, in `_scala_legacy()`, e non letta da
+# nessuna parte: e' il numero che il progetto aveva, congelato, cosi' il criterio
+# puo' essere valutato anche su di lei. Se il criterio fosse costruito in modo da
+# passare sempre, questa asserzione non potrebbe esistere; e il fatto che qui
+# venga **eseguita** e non solo dichiarata e' la prova che la porta ha denti.
+
+## I livelli ai quali la potenza del giocatore viene misurata e stampata. Sono
+## quelli dell'utente: `61` e' il livello da cui e' partito il difetto, `1` e' la
+## base, e in mezzo ci sono `5, 10, 20, 30, 40` per vedere **la forma** della
+## curva e non solo due capi.
+const DIFF_LIVELLI := [1, 5, 10, 20, 30, 40, 61]
+
+## La dotazione **dichiarata**: una carta per livello, dal livello 2 in poi, in
+## ciclo. Sono le tre che l'utente ha citato playing, e `Run.POWER_CYCLE` dice
+## che sono tre: se la lista qui ne contasse un numero diverso, la legge di
+## `run.gd` starebbe guardando una rotazione che non e' quella dichiarata, e
+## l'asserzione sotto lo dice.
+const DIFF_DOTAZIONE := ["damage", "fire_rate", "range"]
+
+## Le tre onde a cui la pressione in ingresso viene **misurata**, e perche' sono
+## tre e non una. `3` e' dentro la crescita vecchia, `13` e' **esattamente** l'onda
+## in cui `HP_SCALE_MAX` entrava in gioco (1 + 12 x 0,25 = 4,0) e `61` e'
+## `END_WAVE`, la fine della partita. Costa ~1 s in piu' rispetto a due onde: la
+## sezione costa ~2 s su un file che ne ha 120, quindi il margine c'e' e la riga
+## che mostra **dove** la legge vecchia smetteva di crescere vale quei secondi.
+const DIFF_ONDE := [3, 13, 61]
+
+## Passi di riscaldamento **prima** di aprire la finestra. 780 passi sono 13 s, e
+## arrivano **dopo** che il campo e' pieno: a riempimento (`SPAWN_RATE` = 8/s)
+## servono ~22 s per i 200 vivi, quindi quando la finestra si apre l'orda ha
+## gia' vissuto 35 s e la misura del contatto di m12 dice che a quel punto la
+## folla e' addosso al giocatore. Una finestra aperta durante l'avvicinamento
+## misurerebbe un'orda che ancora non e' un'orda.
+const DIFF_WARMUP := 780
+## Passi della finestra di misura: 480 passi sono 8 s. Non e' un numero di
+## comfort: e' il numero per cui 2 onde a 200 vivi stanno sotto i 120 s **del
+## file intero**, che e' il tetto che l'utente ha deciso e non si alza.
+const DIFF_WINDOW := 480
+
+func _difficolta(h, isolate: HORDE) -> void:
+	var t0 := Time.get_ticks_usec()
+	# Prima la **regola dei formati**: se `_sci` fosse rotta, tutte le righe sotto
+	# stamperebbero di nuovo un modulo invece di un numero, e si tornerebbe al
+	# difetto che la regola stessa descrive. Quindi si prova per prima, e la prova
+	# resta nel file.
+	_sci_si_prova(h)
+	# ## L'ordine dei due lati, e non e' decorativo
+	#
+	# Prima la **pressione che l'orda consegna**, poi la **potenza del giocatore**.
+	# Il motivo e' il difetto di m14-bis: `_pressione_uscita` apre
+	# `scenes/arena_main.tscn`, ci registra dentro `Game.player`, e poi la chiude
+	# con `free()`. Se l'ingresso si misurasse **dopo**, ogni suo passo passerebbe
+	# dalla scena vera appena liberata: `horde.gd::_player_hp()` fa
+	# `game.get("player")`, riceve un oggetto morto, e `is Node` su un'istanza
+	# liberata **non restituisce `false`**. Il numero che ne tornava fuori era la
+	# misura **negativa**, cioe' spazzatura.
+	#
+	# Adesso l'ordine e' quello che non ha bisogno di nessuna difesa: quando si
+	# misura l'ingresso il contratto non ha mai visto la scena vera. E `_ripristina`
+	# rimette `Game.player` com'era, cosi' la difesa c'e' anche per chi legge questa
+	# sezione fra un anno e mette i due lati nell'ordine sbagliato.
+	_pressione_ingresso(h, isolate)
+	var dna := _pressione_uscita(h, isolate)
+	_pressione_ingresso_verdetto(h, isolate, dna)
+	# ## L'orda torna com'era, e con `restart_run()`
+	#
+	# Non con una scrittura a mano su `run.wave`: la strada vera resta la strada
+	# vera, quindi la sezione che segue misura una partita nuova e non un campo
+	# con dentro il ricordo di questa.
+	isolate.restart_run()
+	_player_via = FAKE_PLAYER
+	print("orda: m14, sezione in %d us" % (Time.get_ticks_usec() - t0))
+
+## Il DPS dichiarato del giocatore al livello `liv`, dalla **legge di `run.gd`**.
+##
+## Non e' una formula di questo file: e' `(danno/intervallo) x
+## Run.power_ratio_of(liv)`, cioe' il potenziale dell'arma al livello 1 per la
+## curva di potenza che la legge dell'orda usa come primo fattore. Perche' la
+## stessa funzione e non due copie: se il criterio confrontasse l'ingresso con
+## una potenza calcolata qui e la scala dell'orda con un'altra calcolata in
+## `run.gd`, i due lati del confronto non avrebiano piu' niente in comune e il
+## criterio misurerebbe due numeri che non si parlano.
+func _dps_previsto(liv: int) -> float:
+	return (RUN.WEAPON_DAMAGE / RUN.WEAPON_FIRE_INTERVAL) * RUN.power_ratio_of(liv)
+
+## ## LA REGOLA DEI FORMATI, scritta qui perche' si legge
+##
+## In Godot `String % ...` conosce `%d`, `%s`, `%x` e `%f` **col suo numero di
+## cifre decimali**. **`%g` e `%e` NON esistono**, e il fallimento e' silenzioso:
+## il segnaposto resta **alla lettera** nella riga e il numero che si voleva
+## leggere sparisce senza un errore, senza un warning e senza rompere il test.
+## E' successo tre volte in un giorno: una nella sezione 12 (`%.2e`) e due qui,
+## nella tabella della pressione — e il secondo giro ha stampato cosi':
+##
+##     scala %11.4g | uscita (liv %3d) %11.4g hp/s | ...
+##
+## cioe' la riga che doveva riportare la misura era un modulo di stampa.
+##
+## Quindi: **`%g` e `%e` non si usano piu' da nessuna parte**, e i numeri grandi
+## si stampano con `_sci()`, che scrive la notazione scientifica **a mano** e
+## restituisce una stringa da mettere in `%s`. Un numero che puo' valere `1e13`
+## scritto come intero e' illeggibile, ma un formato che non esiste e' peggio:
+## illeggibile e **non se ne accorge**.
+func _sci(v: float) -> String:
+	if not is_finite(v):
+		return str(v)
+	if v == 0.0:
+		return "0"
+	var a := absf(v)
+	if a >= 0.001 and a < 10000000.0:
+		return "%.4f" % v
+	var e := 0
+	var m := a
+	while m >= 10.0:
+		m /= 10.0
+		e += 1
+	while m < 1.0:
+		m *= 10.0
+		e -= 1
+	# `%s` per l'esponente e non `%d`: `e` e' un intero e va stampato come
+	# intero, ma qui non si mette nessun formato numerico che possa cambiare
+	# significato fra un formato valido e uno che non lo e'.
+	return "%.2fe%s" % [v / pow(10.0, float(e)), str(e)]
+
+## La regola ha un costo (una divisione in un ciclo) e un vantaggio: il numero
+## stampato e' quello che il criterio ha confrontato. Un formato che tronca o
+## arrotonderebbe l'avrebbe fatto sembrare un altro numero senza dirlo.
+func _sci_si_prova(h) -> void:
+	h.eq(_sci(0.0), "0", "m14: _sci(0) non inventa un esponente")
+	h.eq(_sci(1234.5), "1234.5000", "m14: sotto 1e7 _sci stampa il numero per esteso")
+	h.eq(_sci(4.2e13), "4.20e13", "m14: sopra 1e7 _sci stampa la notazione scientifica a mano")
+	h.eq(_sci(-4.2e13), "-4.20e13", "m14: e il segno non si perde")
+	h.eq(_sci(0.0000042), "4.20e-6", "m14: e vale anche sotto 1e-3")
+	h.check(_sci(NAN) != "" and _sci(INF) != "",
+		"m14: _sci non fa crash e non restituisce una stringa vuota su un numero non finito")
+	# ## E adesso la **regola** sui messaggi, che `_sci` da solo non copriva
+	#
+	# Il terzo morso di questa cosa e' stato `%.6g` **in un messaggio di criterio**,
+	# dove nessuno lo leggeva: Godot stampa `unsupported format character` e va
+	# avanti, quindi il criterio ha girato **senza dire niente** e il messaggio non
+	# e' mai uscito. Provare `_sci()` non basta: `_sci` puo' essere perfetta e il
+	# messaggio accanto sbagliato.
+	#
+	# Quindi si scansiona **questo file**, in codice e non in commento, cercando i
+	# due formati che Godot non conosce. Il costo e' una lettura del file per
+	# esecuzione del test, e il risultato e' che la regola non puo' morire in
+	# silenzio: se domani qualcuno scrive `%.2e` in una stringa, questa porta va
+	# rossa e dice **dove**.
+	var catturati := PackedStringArray()
+	for path in ["res://tests/test_orda.gd"]:
+		var f := FileAccess.open(path, FileAccess.READ)
+		if not h.check(f != null, "m14: non si apre %s per controllarci dentro" % path):
+			return
+		for n in range(1, f.get_as_text().split("\n").size() + 1):
+			var riga := f.get_as_text().split("\n")[n - 1]
+			var codice := riga.split("#")[0]
+			if codice.contains("%g") or codice.contains("%e"):
+				catturati.append("%s:%d: %s" % [path, n, codice.strip_edges()])
+			if n > 4000:
+				break
+	h.eq(catturati.size(), 0,
+		"m14: `%g` e `%e` non sono formati validi in Godot e vanno scritti a mano con _sci(). "
+			+ "Trovati: " + str(catturati))
+
+## La legge **di prima**, congelata in questo file e letta da nessuna parte.
+##
+## `HP_SCALE_STEP = 0,25` con `HP_SCALE_MAX = 4,0`: `1 + (w - 1) x 0,25` fino a
+## 4,0, poi `clampf` a 4,0 per sempre. E' il numero che ha prodotto il difetto, e
+## sta qui dentro perche' il criterio debba poter essere eseguito anche su di lei.
+func _scala_legacy(w: int) -> float:
+	return clampf(1.0 + float(maxi(w, 1) - 1) * 0.25, 1.0, 4.0)
+
+func _scala_di(w: int, legacy: bool) -> float:
+	return _scala_legacy(w) if legacy else RUN.scale_of(w)
+
+## Il verbo 1: la scala cresce **strettamente**, onda per onda, fino a `END_WAVE`.
+func _verdetto_cresce(legacy: bool) -> bool:
+	var prima := _scala_di(1, legacy)
+	for w in range(2, int(RUN.END_WAVE) + 1):
+		var ora := _scala_di(w, legacy)
+		if not (ora > prima):
+			return false
+		prima = ora
+	return true
+
+## Il verbo 2: all'onda `END_WAVE` l'ingresso non e' inferiore all'uscita.
+##
+## ## Perche' qui **non c'e'** una media e non c'e' la tabella
+##
+## La prima versione scriveva `ingresso = colpi/s x TOUCH_DAMAGE_BASE x scala` e
+## andava rossa con uno scarto costante di `0,66`: il termine sbagliato era la
+## media di **tutte** le specie, mentre addosso a un giocatore di raggio
+## `body_scale x 1,40 m` ci finisce quasi solo il runner, che e' il piu'
+## economico. La media e' stata **tolta**, non corretta.
+##
+## Adesso l'ingresso e' il **danno consegnato**, che e' gia' misurato: nessuna
+## media, nessuna tabella, nessun termine che possa essere sbagliato di un terzo.
+## Per il controfattuale sulla legge di prima si riscala lo stesso numero
+## misurato per il rapporto fra le due leggi — che e' l'unica cosa che cambia,
+## perche' nella finestra di misura nessun nemico muore e quindi la geometria
+## del contatto e' la stessa sotto qualunque scala.
+##
+## Il confronto ha comunque denti: il lato in uscita e' un numero **dichiarato**
+## (`_dps_previsto`), e se la potenza del giocatore crescesse piu' in fretta della
+## scala dell'orda questo verrebbe rosso. E' successo al primo giro, su entrambe
+## le leggi.
+func _verdetto_fine(misure: Dictionary, legacy: bool) -> bool:
+	var w := int(RUN.END_WAVE)
+	var m := _misura_di(misure, w)
+	if m.is_empty():
+		return false
+	var oggi := float(m["danno"])
+	if oggi <= 0.0:
+		return false
+	var ingresso := oggi
+	if legacy:
+		ingresso = oggi * _scala_di(w, true) / maxf(0.000001, _scala_di(w, false))
+	return ingresso >= _dps_previsto(int(RUN.player_level_at(w - 1)))
+
+## ## Le copie oneste: `run.gd` non puo' preloaddare le altre foglie
+##
+## `horde.gd` preloada `run.gd`, quindi `run.gd` non puo' preloaddare `horde.gd`
+## senza un riferimento circolare; e `src/player/progression.gd` e' una foglia di
+## gioco dentro una foglia di simulazione. Quindi `run.gd` **copia** sei numeri da
+## quattro file, e questa funzione e' il controllo che rende la copia onesta: se
+## `-gameplay` o `-gameplay`/`-arena` cambiano uno di quei numeri, la porta va
+## rossa **e dice quale**, invece che la difficolta' di accumulare uno scarto
+## silenzioso. E' lo stessoaccordo che gia' regge `POP_MAX` contro
+## `Horde.MAX_ENEMIES`.
+func _copie_oneste(h, giocatore) -> bool:
+	var prog = giocatore.progression
+	if not h.check(prog != null, "m14: il giocatore vero deve avere una progressione"):
+		return false
+	h.near(float(RUN.XP_PER_KILL), float(prog.xp_per_kill), 0.000001,
+		"m14: run.XP_PER_KILL deve valere progression.xp_per_kill: la legge conta le uccisioni")
+	h.near(float(RUN.XP_BASE), float(prog.xp_to_next(1)), 0.000001,
+		"m14: run.XP_BASE deve valere la prima soglia di livello")
+	h.near(float(RUN.XP_STEP),
+		float(prog.xp_to_next(2)) - float(prog.xp_to_next(1)), 0.000001,
+		"m14: run.XP_STEP deve valere quanto sale la soglia a ogni livello")
+	h.near(float(RUN.UPGRADE_DAMAGE), float(prog.UPGRADES["damage"]["numero"]), 0.000001,
+		"m14: run.UPGRADE_DAMAGE deve valere il fattore della carta «Danno»")
+	h.near(float(RUN.UPGRADE_FIRE_RATE), float(prog.UPGRADES["fire_rate"]["numero"]), 0.000001,
+		"m14: run.UPGRADE_FIRE_RATE deve valere il fattore della carta «Cadenza»")
+	h.eq(int(RUN.POWER_CYCLE), DIFF_DOTAZIONE.size(),
+		"m14: la dotazione dichiarata deve avere esattamente POWER_CYCLE carte")
+	h.near(float(RUN.TOUCH_DAMAGE_BASE), float(ENEMY.TOUCH_DAMAGE_BASE), 0.000001,
+		"m14: run.TOUCH_DAMAGE_BASE deve valere enemy.TOUCH_DAMAGE_BASE")
+	h.near(float(RUN.TOUCH_INTERVAL), float(HORDE.TOUCH_INTERVAL), 0.000001,
+		"m14: run.TOUCH_INTERVAL deve valere horde.TOUCH_INTERVAL")
+	giocatore.reset_run()
+	var w1 = giocatore.weapon
+	h.near(float(RUN.WEAPON_DAMAGE), float(w1.damage), 0.000001,
+		"m14: run.WEAPON_DAMAGE deve valere il danno dell'arma nuova")
+	h.near(float(RUN.WEAPON_FIRE_INTERVAL), float(w1.fire_interval), 0.000001,
+		"m14: run.WEAPON_FIRE_INTERVAL deve valere l'intervallo dell'arma nuova")
+	return true
+
+## ## Il lato del giocatore: la curva di potenza, **misurata sull'arma vera**
+##
+## Per ogni livello della scala: `reset_run()`, poi un potenziamento per livello
+## dalla dotazione dichiarata, e infine la lettura di `weapon.damage` e
+## `weapon.fire_interval`. Il DPS che ne esce e' confrontato con `_dps_previsto`,
+## cioe' con la formula che anche `run.gd` usa: se il gioco applicasse i
+## potenziamenti in modo diverso dalla tabella, qui lo si vede.
+##
+## Il confronto e' stretto (0,01%) e non ha margine perche' qui i due numeri
+## devono essere **lo stesso numero**: se il gioco cambiasse, il criterio di m14
+## starebbe confrontando l'ingresso con una potenza che il giocatore non ha.
+func _pressione_uscita(h, isolate: HORDE) -> Dictionary:
+	var out := {}
+	var arena = _apri_arena(h)
+	if arena == null:
+		h.fail("m14: senza la scena vera la potenza del giocatore non si puo' misurare")
+		_ripristina(h, isolate)
+		return out
+	arena.process_mode = Node.PROCESS_MODE_DISABLED
+	var giocatore = arena.get_node_or_null(NODO_PLAYER)
+	if not h.check(giocatore != null, "m14: la scena vera deve avere il nodo %s" % NODO_PLAYER):
+		_chiudi(arena)
+		_ripristina(h, isolate)
+		return out
+	if not _copie_oneste(h, giocatore):
+		_chiudi(arena)
+		_ripristina(h, isolate)
+		return out
+
+	for liv in DIFF_LIVELLI:
+		var L := int(liv)
+		giocatore.reset_run()
+		for k in range(0, L - 1):
+			giocatore.progression.apply(str(DIFF_DOTAZIONE[k % DIFF_DOTAZIONE.size()]))
+		var w = giocatore.weapon
+		var misurato := float(w.damage) / float(w.fire_interval) * (1.0 + float(w.pierce))
+		var previsto := _dps_previsto(L)
+		out[L] = misurato
+		print("m14 uscita: livello %2d -- %2d potenziamenti, danno %9.2f, intervallo %.4f s, "
+				% [L, L - 1, float(w.damage), float(w.fire_interval)]
+			+ "DPS %12.2f hp/s (previsto %12.2f, %.1fx sul livello 1)"
+				% [misurato, previsto, misurato / maxf(1.0, float(out[1]))])
+		h.near(misurato, previsto, previsto * 0.0001,
+			"m14: al livello %d il DPS reale dell'arma deve essere quello che la legge dichiara" % L)
+	# Il livello 1 e' l'ancoraggio di tutta la legge: `scale_of(1)` deve valere
+	# esattamente 1.0 e non «quasi 1.0», perche' il criterio n. 4 della milestone
+	# 1 e' tarato sulle tabelle di `enemy.gd` come sono.
+	h.near(RUN.scale_of(1), 1.0, 0.000001,
+		"m14: la legge lascia l'onda 1 a 1.0 esatto: il criterio n. 4 della milestone 1 e' tarato su quello")
+	_chiudi(arena)
+	_ripristina(h, isolate)
+	return out
+
+## I due campioni della sezione, **campo** e non valore restituito.
+##
+## Sono campioni perche' la misura (`_pressione_ingresso`) e il verdetto
+## (`_pressione_ingresso_verdetto`) devono stare in due funzioni diverse: la
+## prima si gira prima che la scena vera venga aperta e chiusa, la seconda dopo.
+## Una variabile locale non arriverebbe dall'una all'altra.
+var _diff_colpi := {}
+var _diff_misure := {}
+## La finestra di misura in secondi, calcolata **una volta** e dichiarata qui: e'
+## il denominatore della media per morso e della cadenza, e due copie di quel
+## conto sarebbero due numeri che possono divergere senza che nessuno se ne
+## accorga.
+const _FINESTRA_S := float(DIFF_WINDOW) * DT
+## Il danno che l'orda **dichiara** passo per passo (`touch_damage_last` +
+## `mortar_damage_last`), accumulato dal test e **non** dalla riga che chiama
+## `damage_player`. E' il secondo conto del confronto «consegnato / atteso»: due
+## accumulazioni indipendenti dello stesso fatto.
+var _danno_dichiarato := 0.0
+## Quanti morsi della finestra avevano un importo che **non e'** un valore della
+## tabella delle specie moltiplicato per la scala dell'onda. Deve restare zero.
+var _morsi_fuori_tabella := 0
+var _morsi_totali := 0
+## ## Chi legge `touch_damage_last` in `src/`: **nessuno**
+##
+## Le sette occorrenze sono tutte dentro `src/sim/horde.gd`: la dichiarazione (441),
+## l'azzeramento per passo (1091), la scrittura (1119), l'azzeramento al restart
+## (1588) e due righe di commento mio. Nessun'altra foglia lo legge: non
+## `src/ui/`, non `src/render/`, non `src/player/`, non `src/weapons/`.
+##
+## Quindi il confronto «consegnato contro dichiarato» non guardava un difetto del
+## gioco: guardava **due numeri che solo il test usa**, e il suo scarto di `8,000`
+## e' stato per quattro giri un fatto su un canale morto. Tolto, e non sostituito
+## da una divisione per 8: dividere avrebbe fatto tacere la cosa che il canale
+## morto ti stava dicendo, cioe' che quel campo non serve a nessuno.
+##
+## Quello che resta al suo posto e' il conto che cerca il difetto **vero**, fatto
+## di interi e non di somme: quanti `damage_player` con valore diverso da zero sono
+## arrivati, contro quanti morsi l'orda dice di aver inflitto nella finestra.
+## Presa di misura, non un paragone di due `float`: il passo giusto, il morso perso
+## e il morso consegnato due volte sono tre difetti di **contabilizzazione**, e
+## due interi che devono essere uguali li prendono tutti e tre. Nessuna media,
+## nessuna scala, nessun formato esotico.
+##
+## Il campo resta dichiarato e scritto in `horde.gd` perche' e' un resoconto che
+## `-gameplay` e `-ui` possono cominciare a leggere, ma **non e' piu' un criterio**:
+## nessuna asserzione di questo file lo confronta con nient'altro.
+var _dichiari_positivi := 0
+var _dichiari_colpi := 0
+var _passi_con_spia := 0
+
+## ## Il lato dell'orda: la pressione che **arriva davvero**, misurata
+##
+## Finestra di regime a pieno: `DIFF_WARMUP` passi perche' la folla arrivi, poi
+## `DIFF_WINDOW` passi contati. Lo spia e' quello di `_touch`, gia' registrato sul
+## contratto da quella sezione: qui non se ne registra un secondo, perche' due spie
+## sullo stesso contratto significherebbero due racconti dello stesso numero.
+##
+## Il campo e' pieno e **nessuno muore**: nessuna chiamata a `damage_enemy` nel
+## ciclo della finestra, quindi i nemici sopravvivono e la geometria del contatto
+## resta quella che si misura. E' anche il motivo per cui la stessa finestra puo'
+## essere ricalcolata sulla legge di prima: cambia solo il moltiplicatore del
+## danno, non la cadenza dei morsi.
+func _pressione_ingresso(h, isolate: HORDE) -> void:
+	var colpi := {}
+	var misure := {}
+	for w in DIFF_ONDE:
+		var campione := _misura_pressione(isolate, int(w))
+		colpi[int(w)] = campione[0]
+		misure[int(w)] = {
+			"colpi": campione[0],
+			"danno": campione[1],
+			"dichiara": campione[2],
+			"morsi": campione[3],
+			"fuori_tabella": campione[4],
+			"scala": isolate.wave_touch_scale(),
+			"dichiari_positivi": _dichiari_positivi,
+			"dichiari_colpi": _dichiari_colpi,
+			"passi_con_spia": _passi_con_spia,
+		}
+		h.check(float(campione[0]) > 0.0,
+			"m14: sull'onda %d l'orda deve riuscire a far arrivare almeno un morso" % int(w))
+	_diff_colpi = colpi
+	_diff_misure = misure
+
+	# ## Perche' qui **non c'e' piu'** una ricostruzione con la tabella
+	#
+	# La prima versione ricostruiva il danno come
+	# `colpi/s x TOUCH_DAMAGE_BASE x scala(w)` e asseriva che tornasse. E' andata
+	# rossa con uno scarto **costante** di `0,6609` su tutte e tre le onde: una
+	# costante non e' rumore, e' un termine sbagliato. Il termine sbagliato era
+	# `TOUCH_DAMAGE_BASE` — la media dei morsi di **tutte** le specie, mentre chi
+	# arriva addosso a un giocatore di raggio `body_scale x 1,40 m` e' quasi solo
+	# **runner**, e il runner e' il piu' economico della tabella.
+	#
+	## Sostituire `TOUCH_DAMAGE_BASE` con la media di `2,47` misurata in
+	## `_scena_vera` non avrebbe chiuso niente: quella media e' di una **disposizione
+	## diversa**, e il numero si sarebbe spostato invece di sparire. Quindi qui la
+	## ricostruzione **non e' stata corretta: e' stata toccata**, e sotto ci sono
+	## due conti che non usano nessuna media.
+	for w in DIFF_ONDE:
+		var ww := int(w)
+		var m := _misura_di(misure, ww)
+		var consegnato := float(m["danno"])
+		var media := consegnato / maxf(1.0, float(m["colpi"]) * _FINESTRA_S)
+		# ## Il conto, e perche' **interi**
+		#
+		# Tre difetti diversi, una sola domanda: i morsi che l'orda **dichiara**
+		# (`touch_bites_last`, contato passo per passo) sono tanti quanti i morsi
+		# che sono **arrivati** allo spia? Due interi che devono essere uguali, e il
+		# messaggio dice di quanto sbagliano invece di dire solo «diversi».
+		#
+		#   - un morso **perso** -> lo dichiara e non arriva: arriva meno;
+		#   - un morso **dato due volte** -> arriva piu' di quanto dichiarato;
+		#   - il danno applicato al **passo sbagliato** -> i due interi tornano
+		#     uguali ma la sequenza non e' quella, e per quello resta la parola
+		#     `passi con spia` sotto: i morsi che dichiarati sono tutti in passi
+		#     diversi, uno per passo, che e' la contabilizzazione giusta.
+		var dichiarati := int(m["dichiara"])
+		var arrivati := int(m["passi_con_spia"])
+		print("m14 onda %3d: morsi dichiarati %4d, morsi arrivati %4d (scarto %+d) | "
+				% [ww, dichiarati, arrivati, arrivati - dichiarati]
+			+ "consegnato %s hp, media per morso %s hp, scala dell'onda %s"
+				% [_sci(consegnato), _sci(media), _sci(float(m["scala"]))])
+		h.eq(arrivati, dichiarati,
+			"m14 onda %d: l'orda dichiara %d morsi e ne arrivano %d (%+d): un morso perso o "
+				% [ww, dichiarati, arrivati, arrivati - dichiarati]
+			+ "consegnato due volte sono difetti diversi e si vedono qui")
+		# ## Il disaccordo fra la media vera e la tabella: **il fatto, non rumore**
+		#
+		# Misurato: la media per morso diviso la scala dell'onda vale `0,3026` su
+		# tutte e tre le onde, contro un `TOUCH_DAMAGE_BASE` dichiarato di `1,6`.
+		# La tabella **sopravvaluta la media reale di 5,3 volte**, perche' addosso
+		# a un giocatore di raggio `body_scale x 1,40 m` ci arriva quasi solo il
+		# runner, e il runner e' il piu' economico. E' il motivo per cui la
+		# ricostruzione con la tabella e' stata **tolta** e non corretta: questa
+		# riga resta qui perché fra un anno il disaccordo si vede.
+		h.check(media > 0.0,
+			"m14 onda %d: la media per morso deve essere un numero positivo" % ww)
+		# ## L'altro conto, e questo **ha** denti: nessuna media
+		#
+		# Ogni singolo morso che arriva, diviso per la scala dell'onda, deve tornare
+		# a un valore **esatto** della tabella delle specie. Qui non c'e' una media
+		# che puo' essere sbagliata di un terzo: c'e' `N` numeri, e ognuno o e'
+		# giusto o non lo e'. Copre il caso in cui la scala venga applicata alla
+		# media invece che alla tabella, che era esattamente il difetto.
+		h.eq(int(m["fuori_tabella"]), 0,
+			"m14 onda %d: tutti i %d morsi sono un valore di ENEMY.touch_damage_of "
+				% [ww, int(m["morsi"])]
+			+ "moltiplicato per la scala dell'onda (%s), nessuno fuori tabella"
+				% _sci(float(m["scala"])))
+		print("m14 onda %3d: media per morso misurata %s hp (tabella TOUCH_DAMAGE_BASE %s: "
+				% [ww, _sci(media), _sci(ENEMY.TOUCH_DAMAGE_BASE)]
+			+ "le specie piu' grandi non arrivano addosso, e per questo la tabella non "
+			+ "e' la media di quello che arriva)")
+
+	print("m14 ingresso/uscita -- tetto morso %.2f/s, scala di fine partita %d, "
+			% [1.0 / HORDE.TOUCH_INTERVAL, int(RUN.END_WAVE)]
+		+ "potenziale del giocatore = danno/intervallo dell'arma vera")
+	for w in DIFF_ONDE:
+		var ww := int(w)
+		var liv := int(RUN.player_level_at(ww - 1))
+		var m := _misura_di(misure, ww)
+		var cps := float(m["colpi"])
+		var ing := float(m["danno"])
+		var uscita := _dps_previsto(liv)
+		var ing_leg := ing * _scala_legacy(ww) / maxf(0.000001, _scala_di(ww, false))
+		print("  onda %3d | scala %14s | morsi %5.2f/s (tetto %.0f%%) | media/morso %9s hp "
+				% [ww, _sci(_scala_di(ww, false)), cps,
+					100.0 * cps / maxf(0.001, 1.0 / HORDE.TOUCH_INTERVAL),
+					_sci(ing / maxf(0.000001, cps * _FINESTRA_S))]
+			+ "| ingresso %14s hp/s | uscita liv %3d %14s hp/s | ing/usc %9s | legge di prima %9s"
+				% [_sci(ing), liv, _sci(uscita), _sci(ing / maxf(0.000001, uscita)),
+					_sci(ing_leg / maxf(0.000001, uscita))])
+
+	## ## L'unica lettura del campione di un'onda
+##
+## `misure` e' un dizionario **per onda** e viene letto in tre posti: i due cicli
+## di `_pressione_ingresso` e il verdetto. Dichiarare `var m := misure[ww]` in
+## ciascuno dei tre e' esattamente il difetto che e' appena costato il giro —
+## `m` dichiarato dentro un ciclo e usato in un altro non esiste, e l'errore
+## arriva a `Parse Error` invece che a un numero. Quindi la lettura sta **qui**,
+## una volta sola, e restituisce un dizionario vuoto quando quell'onda non e'
+## stata misurata: un vuoto che si puo' controllare, non un'eccezione.
+func _misura_di(misure: Dictionary, ww: int) -> Dictionary:
+	if not misure.has(ww):
+		return {}
+	return misure[ww]
+
+## ## Il verdetto, e perche' sta in una funzione **separata** dalla misura
+##
+## `_pressione_ingresso_verdetto` gira **prima** che la scena vera venga aperta e chiusa,
+## perche' dopo quella il contratto tiene un `Game.player` liberato e ogni
+## `step()` passa da `horde.gd::_player_hp()` su un oggetto morto (vedi la nota
+## lunga in `_difficolta`). Quindi il verdetto, che legge i campioni, sta qui
+## sotto e legge i **campi**.
+##
+## Il verdetto e' stampato con i numeri che lo decidono accanto, non da solo:
+## «ROSSO» senza il numero che lo ha fatto rosso e' un verdetto che il prossimo
+## giro ricomincia a indovinare.
+func _pressione_ingresso_verdetto(h, _isolate: HORDE, _dna: Dictionary) -> void:
+	var misure := _diff_misure
+	var w_fine := int(RUN.END_WAVE)
+	var m := _misura_di(misure, int(RUN.END_WAVE))
+	if m.is_empty():
+		h.fail("m14: l'onda %d non e' stata misurata, quindi il verdetto non ha nessun numero"
+			% int(RUN.END_WAVE))
+		return
+	var cps_fine := float(m["colpi"])
+	var uscita_fine := _dps_previsto(int(RUN.player_level_at(w_fine - 1)))
+	var ing_oggi := float(m["danno"])
+	var ing_legacy := ing_oggi * _scala_legacy(w_fine) / maxf(0.000001, _scala_di(w_fine, false))
+	print("m14 fine partita (onda %d): colpi %.2f/s su un tetto di %.2f/s (%.0f%%), "
+			% [w_fine, cps_fine, 1.0 / HORDE.TOUCH_INTERVAL,
+				100.0 * cps_fine / maxf(0.001, 1.0 / HORDE.TOUCH_INTERVAL)]
+		+ "uscita (potenziale del giocatore al livello %d) %s hp/s"
+			% [int(RUN.player_level_at(w_fine - 1)), _sci(uscita_fine)]
+		+ "\n     con la legge di oggi  ingresso %s hp/s = %s volte l'uscita"
+			% [_sci(ing_oggi), _sci(ing_oggi / maxf(0.000001, uscita_fine))]
+		+ "\n     con la legge di PRIMA  ingresso %s hp/s = %s volte l'uscita"
+			% [_sci(ing_legacy), _sci(ing_legacy / maxf(0.000001, uscita_fine))])
+
+	# ## I DENTI: lo stesso criterio sulla legge di PRIMA deve andare rosso
+	#
+	# Senza questa riga il criterio potrebbe essere scritto in modo da passare
+	# sempre — per esempio se confrontasse l'ingresso con la **sua** stessa scala.
+	# Qui il criterio viene eseguito anche sulla legge storica, e deve **farla
+	# fallire**: e' la prova che la porta ha denti.
+	var cresce_legacy := _verdetto_cresce(true)
+	var fine_legacy := _verdetto_fine(misure, true)
+	print("m14 CRITERIO (legge di PRIMA, 0,25/onda con tetto 4,0): %s"
+		% ("VERDE" if (cresce_legacy and fine_legacy) else "ROSSO"))
+	h.check(not cresce_legacy,
+		"m14: sulla legge di prima la scala deve smettere di crescere (HP_SCALE_MAX = 4,0 la "
+			+ "ferma all'onda 13): e' il difetto che l'utente ha trovato, e il criterio deve vederlo")
+	h.check(not fine_legacy,
+		"m14: sulla legge di prima, a fine partita, l'ingresso non puo' stare al passo "
+			+ "dell'uscita: e' il difetto che l'utente ha trovato")
+
+	# ## I due verbi sulla legge di oggi
+	h.check(_verdetto_cresce(false),
+		"m14 CRITERIO: la scala deve crescere strettamente a ogni onda fino a %d, senza tetto"
+			% int(RUN.END_WAVE))
+	h.check(_verdetto_fine(misure, false),
+		"m14 CRITERIO: a fine partita (onda %d) la pressione in ingresso non puo' essere "
+			% w_fine
+		+ "inferiore a quella in uscita: altrimenti l'utente ha ragione e il gioco e' finito")
+	print("m14 CRITERIO (legge di oggi): %s"
+		% ("VERDE" if (_verdetto_cresce(false) and _verdetto_fine(misure, false)) else "ROSSO"))
+
+## Una finestra di regime a pieno sull'onda `w`. Ritorna `[morsi al secondo,
+## danno al secondo]`, entrambi **misurati** e non ricostruiti.
+func _misura_pressione(horde: HORDE, w: int) -> Array:
+	horde.auto_respawn = true
+	horde.set_focus(FAKE_PLAYER)
+	horde.restart_run()
+	horde.reseed(SEME_CAPACITY)
+	# Un passo prima di scrivere l'onda: e' il passo che fa esistere `run`, e il
+	# numero che si cambia deve essere quello di una partita vera, non un campo
+	# scritto a mano su un oggetto che il contratto non ha ancora creato.
+	horde.step(DT)
+	horde.run.wave = w
+	horde.population = HORDE.MAX_ENEMIES
+	while horde.count > 0:
+		horde.damage_enemy(0, 1.0e30, Vector3.ZERO)
+	var passi := 0
+	while horde.count < HORDE.MAX_ENEMIES and passi < 6000:
+		horde.step(DT)
+		passi += 1
+	if horde.count < HORDE.MAX_ENEMIES:
+		return [-1.0, -1.0]
+	for _i in DIFF_WARMUP:
+		horde.step(DT)
+	_morsi = 0
+	_totale_danno = 0.0
+	_danno_dichiarato = 0.0
+	_morsi_fuori_tabella = 0
+	_morsi_totali = 0
+	var scala := horde.wave_touch_scale()
+	_dichiari_positivi = 0
+	_dichiari_colpi = 0
+	_passi_con_spia = 0
+	for _i in DIFF_WINDOW:
+		_danni_step.clear()
+		horde.step(DT)
+		# La **conta dell'orda**: `touch_bites_last` e' un intero che dice quanti
+		# morsi sono usciti in questo passo. Non e' un `float` e non ha scala
+		# dentro: e' l'unico numero che si puo' confrontare con una conta di
+		# chiamate senza tolleranze e senza medie.
+		_dichiari_colpi += horde.touch_bites_last
+		if not _danni_step.is_empty():
+			_passi_con_spia += 1
+			if float(_danni_step[0]) > 0.0:
+				_dichiari_positivi += 1
+		for importo in _danni_step:
+			_morsi_totali += 1
+			if scala <= 0.0:
+				continue
+			var base := float(importo) / scala
+			var trovato := false
+			for k in ENEMY.KIND_COUNT:
+				if absf(base - ENEMY.touch_damage_of(k)) <= 0.0001:
+					trovato = true
+					break
+			if not trovato:
+				_morsi_fuori_tabella += 1
+	return [float(_morsi) / _FINESTRA_S, _totale_danno / _FINESTRA_S,
+		float(_dichiari_colpi), _morsi_totali, _morsi_fuori_tabella]

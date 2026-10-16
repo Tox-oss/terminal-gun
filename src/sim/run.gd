@@ -43,15 +43,124 @@ const WAVE_GROWTH := 30
 ## all'infinito, e a non mettere un numero che nessuno puo' davvero ammazzare.
 const WAVE_MAX := 900
 
-## Moltiplicatore di vita dell'onda 1: 1.0 esatto, cioe' le tabelle di
-## `src/sim/enemy.gd` come sono. Il criterio n. 4 della milestone 1 e' tarato su
-## quei numeri e non puo' cambiare.
+# --- m14: LA LEGGE DI SCALA, e i tre soffitti che chiude -----------------------
+#
+# ## Il difetto che l'utente ha trovato giocando (2026-10-15), detto come l'ha detto
+#
+#     «sono al livello 61 e con i potenziamenti di danno, rateo e gittata posso
+#      stare fermo al centro e cancellare tutto allo spawn»
+#
+# Non era una percezione: qui sotto c'era scritto `HP_SCALE_STEP = 0,25` con
+# `HP_SCALE_MAX = 4,0`, cioe' **la vita smetteva di crescere all'onda 13**
+# (1 + 12 x 0,25 = 4,0) e da li' in poi erano `4,0x` **per sempre**. La
+# popolazione era gia' ferma dall'onda 8 (`POP_SATURATION`). Il giocatore invece
+# non aveva tetto: `src/player/progression.gd` gli dava un potenziamento a ogni
+# livello, e i fattori sono **moltiplicativi**. Quindi dall'onda 13 la
+# difficolta' era **costante per costruzione** e il livello 61 ne era la
+# conseguenza, non la causa.
+#
+# ## Il terzo soffitto: quello che **nessuno aveva scritto**
+#
+# E' il punto piu' importante di questa sezione, perche' spiega perche' la
+# prima volta che l'abbiamo toccato il difetto e' **tornato identico**: alzare (o
+# togliere) il tetto sulla vita **non basta**.
+#
+# Il danno che l'orda consegna al giocatore e' `enemy.gd::touch_damage_of(kind)`:
+# la tabella delle specie, **identica a ogni onda**. Quindi anche con la vita
+# illimitata il danno al secondo che l'orda porta resta
+#
+#     (1 / horde.TOUCH_INTERVAL) x TOUCH_DAMAGE_BASE = (1/0,15) x 1,6 = 10,67 hp/s
+#
+# cioe' una **costante**. Il criterio di m14 — «alla fine della partita la
+# pressione in ingresso non e' inferiore a quella in uscita» — sarebbe stato
+# **impossibile per qualunque numero messo sulla vita**. Il soffitto vero era
+# questo: **l'orda non aveva un secondo canale di difficolta'**.
+#
+# Percio' da qui la scala e' **una sola legge** e vale per **due** numeri: la vita
+# (`hp_scale_of`) e il morso (`touch_scale_of`). Se crescessero con due leggi
+# diverse, la piu' lenta dei due riportarebbe il difetto senza che nessuno lo
+# vedesse: e' la ragione per cui `scale_of()` e' l'unica funzione che calcola.
+
+## Moltiplicatore dell'onda 1: 1.0 esatto, cioe' le tabelle di `src/sim/enemy.gd`
+## come sono. Il criterio n. 4 della milestone 1 e' tarato su quei numeri e non
+## puo' cambiare, e `scale_of(1)` vale esattamente questo: **non un tetto, una
+## base**.
 const HP_SCALE_BASE := 1.0
-## Quanto cresce la vita a ogni onda.
-const HP_SCALE_STEP := 0.25
-## Tetto del moltiplicatore: oltre, un'onda non diventa piu' difficile, solo
-## piu' lunga, e una partita non ha fine.
-const HP_SCALE_MAX := 4.0
+
+## ## L'onda a cui finisce la partita, e la soglia del criterio
+##
+## Non e' un numero di design: e' il numero che l'utente ha citato («sono al
+## livello 61») e la wave su cui il criterio di m14 si chiude. Tutto quello che
+## segue e' ancorato a qui, quindi cambiarlo cambia la difficolta' **in modo
+## dichiarato** invece che di nascosto.
+const END_WAVE := 61
+
+## ## I cinque numeri che la legge **copia** da altre foglie, e perche' sono onesti
+##
+## `run.gd` non puo' fare `preload` di `src/player/progression.gd` ne' di
+## `src/sim/horde.gd`: il secondo perche' `horde.gd` preloada `run.gd` e il primo
+## perche' e' una foglia di gioco dentro una foglia di simulazione. Quindi qui
+## sotto ci sono le **copie** dei numeri da cui la legge dipende, e ognuna porta
+## il nome del posto da cui viene. La copia e' onesta perche'
+## `tests/test_orda.gd::_difficolta` **asserisce che siano uguali a quelle**:
+## come `POP_MAX` contro `Horde.MAX_ENEMIES`, che e' il controllo che rende una
+## copia accettabile invece che pericolosa. Se `-gameplay` cambia una di queste
+## cifre, la porta va rossa **e dice quale**.
+
+## `progression.gd::XP_PER_KILL`.
+const XP_PER_KILL := 3.0
+## `progression.gd::XP_BASE`.
+const XP_BASE := 8.0
+## `progression.gd::XP_STEP`.
+const XP_STEP := 6.0
+## `progression.gd::UPGRADES["damage"]["numero"]`.
+const UPGRADE_DAMAGE := 1.25
+## `progression.gd::UPGRADES["fire_rate"]["numero"]`, che e' un fattore
+## **sull'intervallo** fra due colpi (`inversa: true`): la cadenza cresce di
+## `1/0,85`.
+const UPGRADE_FIRE_RATE := 0.85
+## `weapon_base.gd::DAMAGE` al livello 1, prima di qualunque potenziamento.
+const WEAPON_DAMAGE := 10.0
+## `weapon_base.gd::FIRE_INTERVAL` al livello 1.
+const WEAPON_FIRE_INTERVAL := 0.35
+## `enemy.gd::TOUCH_DAMAGE_BASE`: il morso del runner, a ogni onda, per sempre.
+const TOUCH_DAMAGE_BASE := 1.6
+## `horde.gd::TOUCH_INTERVAL`: il tetto di cadenza dei morsi, l'unico capace di
+## limitare il danno al secondo che l'orda consegna.
+const TOUCH_INTERVAL := 0.15
+
+## ## La dotazione dichiarata del giocatore: **tre carte, in ciclo**
+##
+## Il criterio di m14 confronta due numeri in hp/s, quindi il lato del giocatore
+## deve essere **dichiarato**, non ottimistico: qui si dichiara la rotazione
+## `[danno, cadenza, gittata]`, una carta per livello a partire dal livello 2, che
+## e' esattamente la rotazione che l'utente ha citato playing («i potenziamenti
+## di danno rateo e gittata»).
+##
+## La **gittata** non compare nel conto perche' `range` allunga
+## `weapon.projectile_life` e non la cadenza ne' il danno: contarla sarebbe
+## inventare potenza. Quindi su `POWER_CYCLE` carte, `POWER_CYCLE - 1` fanno
+## danno al secondo e una no.
+const POWER_CYCLE := 3
+
+## ## La correzione dichiarata, e **da dove viene il numero**
+##
+## Con la legge `scale_of()` cosi' com'e', il rapporto fra la pressione che l'orda
+## consegna e quella che il giocatore produce resterebbe **costante**, e sotto 1:
+## all'onda 1 il giocatore fa `WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL = 28,57` hp/s
+## e l'orda ne puo' consegnare al massimo `10,67`. Serve quindi che la scala
+## dell'orda cresca **oltre** la curva del giocatore, e di quanto e' **contato**:
+##
+##     necessario = (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL)
+##                / ((1 / TOUCH_INTERVAL) * TOUCH_DAMAGE_BASE)   =  2,679
+##
+## e poi `necessario * CATCHUP_SAFETY`, distribuito **linearmente** su
+## `END_WAVE - 1` onde. `CATCHUP_SAFETY` e' il margine dichiarato: `1 /
+## TOUCH_INTERVAL` e' una cadenza **massima** teorica, e nessun giocatore che si
+## muove la raggiunge mai, quindi il confronto va fatto con un margine e non sul
+## carta. E' l'unico numero qui sotto che non sia derivato, ed e' dichiarato come
+## tale perche' un numero che non si sa da dove viene e' il difetto di partenza.
+const CATCHUP_SAFETY := 4.0
 
 # --- LA CURVA DELLA POPOLAZIONE (milestone 4) --------------------------------
 #
@@ -227,8 +336,123 @@ static func wave_size(w: int) -> int:
 ## Quanta vita in piu' hanno i nemici dell'onda `w` rispetto alle tabelle di
 ## `src/sim/enemy.gd`. Sull'onda 1 e' esattamente 1.0.
 static func hp_scale_of(w: int) -> float:
-	return clampf(HP_SCALE_BASE + float(maxi(w, 1) - 1) * HP_SCALE_STEP,
-		HP_SCALE_BASE, HP_SCALE_MAX)
+	return scale_of(w)
+
+## Quante volte piu' fa male **un morso** sull'onda `w`.
+##
+## ## Perche' questa funzione esiste ed e' la parte che chiude il difetto
+##
+## Fino a m13 il morso era `enemy.gd::touch_damage_of(kind)`, cioe' la tabella
+## delle specie: **uguale a ogni onda**. Quindi il danno al secondo che l'orda
+## porta al giocatore era una costante, e la difficolta' non poteva crescere per
+## nessun valore della vita. `tests/test_orda.gd::_difficolta` lo misura e lo
+## chiama «pressione in ingresso»: senza questa funzione quel numero non
+## esisterebbe e il criterio sarebbe irraggiungibile.
+static func touch_scale_of(w: int) -> float:
+	return scale_of(w)
+
+## **La legge, e l'unica.** La scala dell'onda `w` e':
+##
+##     scala(w) = curva_di_potenza(livello_a_cui_si_era_all'inizio_di_w) x recupero(w)
+##
+##cioe' due fattori, e sono due perche' ciascuno copre un difetto diverso:
+##
+##   - **la curva di potenza** segue il giocatore. I potenziamenti sono
+##     moltiplicativi e non hanno tetto, quindi la crescita della potenza del
+##     giocatore e' **esponenziale nel livello** e il livello cresce con le
+##     uccisioni, cioe' con l'onda (`player_level_at`). Una legge lineare in `w`
+##     — quella di prima — non puo' stare al passo con una curva esponenziale:
+##     e' il motivo per cui il numero giusto non si trova alzando un tetto.
+##   - **il recupero** e' l'unico fattore che non viene dal giocatore, e copre il
+##     divario di partenza fra quello che il giocatore fa e quello che l'orda puo'
+##     consegnare (vedi `CATCHUP_SAFETY`).
+##
+## ## Perche' il livello e' quello di **inizio** onda e non quello di fine
+##
+## Perche' e' il livello con cui quell'onda e' stata impostata: il giocatore sale
+## di livello **durante** l'onda, e il giudizio di m14 e' fra la scala che
+## l'orda dichiara e la potenza che aveva quando l'onda e' cominciata. Con il
+## livello di fine onda la scala inseguirebbe il giocatore con un'onda di ritardo
+## e il divario si aprirebbe proprio dove il criterio guarda.
+##
+## ## Perche' non c'e' un tetto qui
+##
+## Non perche' «non serve»: un tetto qui sarebbe di nuovo lo stesso difetto con
+## un altro numero. Il tetto che c'era era `HP_SCALE_MAX` e l'ha scelto il caso
+## invece della legge; adesso non c'e' niente da scegliere, c'e' solo la legge da
+## capire. `tests/test_orda.gd` asserisce che la scala **cresca strettamente** a
+## ogni onda fino a `END_WAVE`: e' il criterio che oggi mancava, e senza di lui
+## il tetto si potrebbe reintrodurre in un pomeriggio di qualcun altro.
+static func scale_of(w: int) -> float:
+	var n := maxi(w, 1)
+	var potenza := power_ratio_of(player_level_at(n - 1))
+	return HP_SCALE_BASE * potenza * catchup_of(n)
+
+## ## La curva di potenza: quanti potenziamenti ha preso il giocatore
+##
+## `at_level - 1` carte, cioe' uno per livello **dal livello 2 in poi** (il
+## livello 1 e' quello di partenza e non ha scelto niente). Le carte girano in
+## `POWER_CYCLE`: una di danno, una di cadenza, una di gittata. Solo le prime due
+## contano, perche' la gittata non cambia danno ne' cadenza.
+##
+## Il risultato e' **un moltiplicatore di danno al secondo**, non di vita: e' il
+## numero con cui la scala dell'orda e' confrontabile, e percio' e' l'unico che
+## va messo in paragone con la pressione in uscita.
+static func power_ratio_of(at_level: int) -> float:
+	var prese := float(maxi(at_level - 1, 0))
+	var cicli := floori(prese / float(POWER_CYCLE))
+	var resto := prese - float(cicli) * float(POWER_CYCLE)
+	# `resto` e' 0, 1 o 2. I due `+1` sono la carta di danno e quella di cadenza
+	# dentro il ciclo non ancora finito.
+	var n_danno := float(cicli) + (1.0 if resto >= 0.5 else 0.0)
+	var n_cadenza := float(cicli) + (1.0 if resto >= 1.5 else 0.0)
+	return pow(UPGRADE_DAMAGE, n_danno) / pow(UPGRADE_FIRE_RATE, n_cadenza)
+
+## Il recupero di `CATCHUP_SAFETY`, lineare in `w` e valido **1,0 all'onda 1**.
+##
+## Il `maxi(..., 1)` nel denominatore e' perche' `END_WAVE` e' dichiarato e puo'
+## essere portato a 2 da qualcuno: senza, la divisione per zero renderebbe tutta
+## la legge `INF` e il difetto si ripresenterebbe come un crash invece che come
+## una difficolta' sbagliata.
+static func catchup_of(w: int) -> float:
+	var n := float(maxi(w, 1) - 1)
+	var tetto := (1.0 / TOUCH_INTERVAL) * TOUCH_DAMAGE_BASE
+	var necessario := (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL) / maxf(tetto, 0.000001)
+	return 1.0 + necessario * CATCHUP_SAFETY * n / float(maxi(END_WAVE - 1, 1))
+
+## Quante uccisioni chiude l'onda `w` in tutto, dalla prima all'ultima: il
+## **numeratore** del livello del giocatore. Statico perche' e' una domanda sulla
+## tabella, non uno stato in corso.
+static func uccisioni_fino_a(w: int) -> int:
+	var tot := 0
+	for i in range(1, maxi(w, 0) + 1):
+		tot += wave_size(i)
+	return tot
+
+## A che livello e' il giocatore **finita** l'onda `w`.
+##
+## ## Il ponte fra le due metà del criterio
+##
+## Il criterio di m14 confronta due numeri che vivono su due assi diversi: la
+## scala dell'orda e' un indice di **onda**, la potenza del giocatore e' una
+## funzione del **livello**. Il ponte e' questo: `XP_PER_KILL` per uccisione e
+## soglie `XP_BASE + XP_STEP x (livello - 1)`, cioe' esattamente le curve di
+## `src/player/progression.gd`.
+##
+## `player_level_at(0)` vale 1, e quindi `scale_of(1)` non moltiplica per nessuna
+## potenza: e' il motivo per cui l'onda 1 resta a `1.0` esatto come chiede il
+## criterio n. 4 della milestone 1.
+static func player_level_at(w: int) -> int:
+	var xp_tot := XP_PER_KILL * float(uccisioni_fino_a(maxi(w, 0)))
+	var livello := 1
+	var speso := 0.0
+	while true:
+		var soglia := XP_BASE + XP_STEP * float(livello - 1)
+		if speso + soglia > xp_tot:
+			break
+		speso += soglia
+		livello += 1
+	return livello
 
 ## Quanti nemici vivi **contemporaneamente** sull'onda `w`.
 ##
@@ -255,8 +479,33 @@ func spawn_rate() -> float:
 	return SPAWN_RATE
 
 ## Il moltiplicatore di vita dell'onda in corso.
+##
+## ## La cache, e perche' `scale_of(w)` va calcolata una volta sola
+##
+## `scale_of` chiama `player_level_at`, che chiama `uccisioni_fino_a`, che chiama
+## `wave_size` in un ciclo: sono poche decine di operazioni, ma `hp_scale()` viene
+## chiamata **una volta per nemico che nasce** (`horde.gd::_apply_spawn`). Non e'
+## un costo che si vede, e' un costo che cresce con la difficolta' che stiamo per
+## mettere: `scale_of(61)` chiama `wave_size` sessantuno volte. La cache e' due
+## numeri e una domanda, e la parola chiave e' `static` perche' `player_level_at`
+## resta una domanda sulla tabella e non uno stato.
+var _scala_onda: int = -1
+var _scala_valore: float = 1.0
+
 func hp_scale() -> float:
-	return hp_scale_of(wave)
+	return touch_scale()
+
+## ## Perche' i due metodi sono lo stesso numero
+##
+## Vita e morso crescono con **una** legge: se il morso crescesse piu' piano
+## della vita, la difficolta' che il giocatore sente sarebbe quella del morso e
+## il tetto che m14 chiude tornerebbe, spostato di una riga. Il criterio di
+## `tests/test_orda.gd::_difficolta` confronta i due numeri e fallirebbe.
+func touch_scale() -> float:
+	if _scala_onda != wave:
+		_scala_onda = wave
+		_scala_valore = scale_of(wave)
+	return _scala_valore
 
 ## **La barra wave**, in interi: quanti nemici restano da ammazzare. Non puo'
 ## scendere sotto zero. Quando le uccisioni sorpassano il bersaglio l'onda e'

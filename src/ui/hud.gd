@@ -171,6 +171,91 @@ extends CanvasLayer
 ##    chiede che nessun numero di danno sia scritto a mano in due posti: qui non ce
 ##    n'e' nessuno, e questo file non ne aggiunge.
 
+## ## m17: il tempo a schermo, e perche' qui **non** c'e' un secondo orologio
+##
+## L'utente ha giocato e ha scritto «mi manca un timer su schermo». L'orologio
+## **esiste gia'**: `Run.elapsed_s` (`src/sim/run.gd`), cresciuto di un `+=` per
+## passo in `advance(delta)` e azzerato in `restart()`.
+##
+## Quindi qui dentro non c'e' nessun contatore di frame, nessun `Time.get_ticks`
+## e nessun accumulatore: un secondo orologio sarebbe una **seconda fonte del
+## tempo**, che e' il difetto che questo progetto ha gia' chiuso altrove (e che
+## per questo il canale `mortar_telegraph_s` viene riletto dal contratto a ogni
+## refresh invece di messo in un campo). Il numero che arriva a schermo e' quello
+## che `-orda` ha contato, letto ogni frame come gli altri tre.
+##
+## ## Il criterio che ha i denti, e perche' non basta «c'e' un numero»
+##
+## Un tetto che dica `00:00` e fermo passerebbe qualsiasi verifica che guardi
+## solo il testo. La verifica che morde e' **l'avvelenamento**: il test scrive
+## `elapsed_s = 1e9` sul campo vero di `-orda`, rillega l'HUD, e il numero a
+## schermo deve essere cambiato. Se non cambia, l'HUD sta leggendo qualcos'altro
+## (o un numero proprio), ed e' esattamente il difetto che la clonazione del
+## tempo produrrebbe.
+##
+## ## Il percorso di lettura, e perche' una strada sola
+##
+## `Run` e' un `RefCounted`: esiste solo dentro l'orda, e l'unica strada che
+## `M2_SURFACE` dichiara per arrivarci **non arriva a lui**. `horde.run_state()` e'
+## la porta dichiarata accanto (`src/core/contracts.gd:247`) ed e' quella dello
+## **stato**: `src/sim/horde.gd:1421` restituisce `RUN_PLAYING if run == null else
+## run.state`, cioe' una String, non l'oggetto che tiene `elapsed_s`.
+##
+## Il percorso che c'era — `horde.run` e poi `elapsed_s` dentro — **e' stato
+## tolto**: funzionava, ed e' proprio per questo che il difetto era invisibile.
+## Un percorso che funziona e non e' dichiarato non e' tollerato: se domani
+## qualcuno cambia la superficie e lascia quello, nessuna porta se ne accorge e il
+## criterio continua a passare sulla strada sbagliata.
+##
+## Quindi qui dentro c'e' `horde.elapsed_s()` e nient'altro, e la riga che serve
+## nella superficie di `src/core/contracts.gd` — accanto alle altre di
+## `terminal-gun-orda` — e':
+##
+##     {"owner": "terminal-gun-orda", "prop": "horde", "member": "elapsed_s", "kind": "method"}
+##
+## `method` e non `field` perche' `Run.elapsed_s` e' gia' un campo: se l'orda lo
+## specchiasse come fa con `wave`, servirebbe un altro `_sync_*` che potrebbe
+## dimenticarsi di chiamarsi. Un metodo che restituisce `run.elapsed_s` non puo'
+## mentire, perche' non ha nessuno stato suo da tenere allineato.
+##
+## **Finche' quel metodo non esiste l'HUD non indovina**: tiene `00:00` e lo dice
+## una volta sola con un `push_warning`. E il test avvelena `Run.elapsed_s` e va
+## rosso, dicendo che la porta non c'e': e' il posto giusto per quella risposta,
+## perche' la riga mancante e' dichiarata e non nascosta.
+##
+## ## Perche' il testo non e' un numero ma `mm:ss`
+##
+## Il numero **intero** di secondi e' la grandezza vera, e `clock_text()` la
+## restituisce per la verifica; la scritta e' `mm:ss` perche' e' cosi' che si
+## legge un tempo di partita. La divisione per 60 e il resto sono aritmetica di
+## **formato**, non una soglia di gioco: qui dentro non c'e' nessun numero che
+## dica quando la partita e' finita o quando un nemico deve nascere.
+##
+## ## Solo ASCII, e anche il separatore
+##
+## I due punti di `mm:ss` sono **due punti ASCII**. Un separatore tipografico
+## qui dentro sembrerebbe una scelta di stile e produrrebbe spazzatura nella
+## console di Windows e nel pipe di `OS.execute`, proprio dove il messaggio di un
+## fallimento deve essere leggibile.
+##
+## ## m13-w2: il richiamo al restart, e perche' il nome del tasto **non** e' mio
+##
+## L'utente: «dopo il game over non esiste un modo per restartare dal gioco».
+## Il tasto che funziona e' di `-gameplay` (`RESTART_KEYS` in `src/player/
+## player.gd`, che `_unhandled_input` confronta con `physical_keycode`).
+##
+## Qui dentro quindi **non c'e' nessuna `R` scritta a mano**: il nome viene da
+## `OS.get_keycode_string()` applicato al primo tasto che `-gameplay` dichiara,
+## letto dal contratto. Un testo che nomina un tasto giusto mentre il gioco
+## ascolta un altro e' l'unico difetto possibile qui, ed e' l'unico che questa
+## scelta rende impossibile per costruzione invece che per verifica.
+##
+## Il nome del tasto e' l'unica cosa che `-ui` prende da `-gameplay` per iscritto,
+## ed e' un **nome**, non un numero: quindi la copia che mente non esiste.
+## Quando non si puo' leggere niente la scritta mette `UNKNOWN_KEY_NAME`, che non
+## e' un tasto e si vede: meglio una scritta che non puo' essere premuta che una
+## che promette un tasto che il gioco non ascolta.
+##
 ## ## Stringhe a schermo
 ##
 ## Solo ASCII: l'HUD viene letto anche nei log di `--headless`, e la console di
@@ -187,6 +272,39 @@ const WAVE_FIRST := 1
 ## su cui dividere. Non e' il valore con cui si disegna: e' il tetto sotto il
 ## quale si smette di dividere.
 const XP_MIN_SPAN := 0.0001
+## ## m17: come si scrive il tempo a schermo
+##
+## `mm:ss` con il separatore **ASCII**: sono due punti, non un separatore
+## tipografico. Solo cifre e due punti, quindi la scritta passa dalla console di
+## Windows e dal pipe di `OS.execute` senza diventare spazzatura.
+##
+## ## m13-w2: come si scrive il richiamo al restart
+##
+## Una sola chiave: `%s` e' il nome del tasto che `-gameplay` dichiara. Il testo
+## e' di questa foglia, il **tasto** e' di `-gameplay`.
+const CLOCK_FORMAT := "%02d:%02d"
+const CLOCK_LABEL := "TIME"
+const RESTART_HINT_FORMAT := "PRESS %s TO RESTART"
+## Quello che la scritta mette quando i tasti di `-gameplay` non si possono
+## leggere. **Non e' un tasto** e si vede: un `?` a schermo e' un rumore, una
+## `R` sbagliata e' una promessa che il gioco non mantiene.
+const UNKNOWN_KEY_NAME := "?"
+## Il nome del campo che tiene i tasti del restart. E' di `-gameplay`
+## (`src/player/player.gd::RESTART_KEYS`) e qui e' **una stringa**, non un tipo:
+## il tipo del dato che si cerca lo dice `typeof()`, e la stringa rende il
+## fallback su `get_script_constant_map()` leggibile.
+const RESTART_KEYS_MEMBER := "RESTART_KEYS"
+## Il metodo che il vertice dichiara sull'orda per l'orologio di `-orda`. Se
+## `-orda` lo espone, e' la strada che vince su `horde.run.elapsed_s`.
+const ELAPSED_METHOD := "elapsed_s"
+## Il campo che l'orologio di `-orda` usa dentro `Run`.
+##
+## **Non viene letto qui**: esiste solo per essere **citato** nel messaggio
+## d'errore, cosi' chi legge il `push_warning` sa quale campo della sorgente
+## era il primo lettore di questa foglia. Il percorso che lo attraversava e'
+## stato tolto (vedi la sezione in testa al file): nominare un nome in un
+## messaggio non e' un percorso.
+const ELAPSED_FIELD := "elapsed_s"
 
 # --- Numeri di m1. Firme e campi invariati: li chiama tests/test_arena.gd -----
 var health: float = DEFAULT_MAX_HEALTH
@@ -222,6 +340,20 @@ var game_over: bool = false
 ## schermata compare, non riletta ogni frame: dopo la morte l'onda non conta
 ## piu' niente e un ricalco darebbe un testo diverso dal momento in cui e' morto.
 var wave_at_death: int = WAVE_FIRST
+## ## m17: i secondi di partita, di `-orda` (`Run.elapsed_s`)
+##
+## Un campo **solo di lettura dal contratto**: nessun chiamante lo scrive a mano,
+## e' `set_clock()` che lo mette, e `set_clock()` lo chiama `refresh()` con il
+## numero che `-orda` ha contato. Se qualcuno lo scrivesse a mano, il test
+## dell'avvelenamento andrebbe rosso: e' il numero che deve venire da `-orda`.
+var clock_s: float = 0.0
+## ## m13-w2: il nome del tasto che rimette in piedi la partita
+##
+## Derivato da `RESTART_KEYS` di `-gameplay`, non scritto qui. Il valore di
+## riserva e' `UNKNOWN_KEY_NAME` e non una lettera: il primo frame precede il
+## primo `refresh()`, e in quel mezzo frame la scritta non deve promettere un
+## tasto che nessuno ha ancora detto.
+var _restart_key: String = UNKNOWN_KEY_NAME
 
 var _health: ProgressBar = null
 var _health_text: Label = null
@@ -235,6 +367,12 @@ var _wave: Label = null
 var _wave_bar: ProgressBar = null
 var _game_over_panel: Control = null
 var _game_over_text: Label = null
+## m17: il tempo di partita.
+var _clock: Label = null
+## m13-w2: il richiamo al restart. Sta dentro `GameOver`, quindi sparisce con
+## la schermata: un richiamo che resta a schermo in partita e' un altro HUD
+## che dice una cosa che non vale.
+var _restart_hint: Label = null
 
 # --- Il pannello delle scelte (m6) ---------------------------------------------
 ## Il pannello e le carte. I `Button` sono in un array **perche' il numero di
@@ -260,6 +398,12 @@ var _paused_by_panel: bool = false
 var _contract_node: Node = null
 var _warned_no_xp: bool = false
 var _warned_no_wave: bool = false
+## Avviso una volta sola se l'orologio di `-orda` non si legge. Stessa regola di
+## `_warned_no_wave`: meglio una riga di rumore che un orologio fermo a `00:00`
+## senza che nessuno lo noti.
+var _warned_no_clock: bool = false
+## Avviso una volta sola se i tasti del restart di `-gameplay` non si leggono.
+var _warned_no_restart_key: bool = false
 ## Avviso una volta sola se `offer_label`/`offer_effect` non ci sono ancora: e'
 ## la superficie che il vertice ha dichiarato in `src/core/contracts.gd` e che
 ## `-gameplay` scrive. Senza quei due metodi le carte mostrano il loro indice e
@@ -287,6 +431,9 @@ func _ready() -> void:
 	_wave_bar = get_node_or_null("Root/WaveBar") as ProgressBar
 	_game_over_panel = get_node_or_null("Root/GameOver") as Control
 	_game_over_text = get_node_or_null("Root/GameOver/GameOverText") as Label
+	# m17 e m13-w2: il tempo di partita e il richiamo al restart.
+	_clock = get_node_or_null("Root/Clock") as Label
+	_restart_hint = get_node_or_null("Root/GameOver/RestartHint") as Label
 	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
 	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
 	_collect_cards()
@@ -381,6 +528,17 @@ func set_game_over(p_over: bool) -> void:
 	game_over = p_over
 	redraw()
 
+## I secondi di partita. Non finito e non negativo: un tempo di partita e' un
+## numero che cresce da zero, e un `NaN` qui dentro diventerebbe una scritta che
+## non ha una forma.
+##
+## Il chiamante vero e' `refresh()`, che legge `Run.elapsed_s` di `-orda`: questo
+## metodo esiste per il test e per un chiamante che ha il numero e non il
+## contratto, ed e' dichiarato perche' ogni altro numero dell'HUD ha la sua porta.
+func set_clock(p_seconds: float) -> void:
+	clock_s = maxf(_finite_or_zero(p_seconds), 0.0)
+	redraw()
+
 ## 0.0 a 1.0, sempre. Anche con vite a zero o negative.
 func health_ratio() -> float:
 	return clampf(health / maxf(health_max, 0.0001), 0.0, 1.0)
@@ -455,6 +613,41 @@ func xp_text() -> String:
 func wave_text() -> String:
 	return _wave.text if _wave != null else ""
 
+## Il tempo di partita **come e' scritto a schermo**, letto dalla Label e non
+## ricalcolato qui dentro: se il formato cambiasse, il confronto del test
+## cambierebbe con lui invece di verificare una formula che non e' quella che
+## si vede.
+func clock_text() -> String:
+	return _clock.text if _clock != null else ""
+
+## Il tempo di partita in secondi, non come stringa: e' il numero che il piano
+## chiede di poter confrontare (e che il test avvelena su `Run.elapsed_s`).
+func clock_seconds() -> float:
+	return clock_s
+
+## ## m13-w2: la superficie del richiamo al restart, per il test
+##
+## Tre letture e tre fatti distinti: **il nome** che l'HUD ha derivato, **la
+## scritta** che ne ha fatto, e **se si vede**. Il test confronta il nome con
+## quello che `-gameplay` dichiara, e non la scritta: il testo e' di questa
+## foglia, il tasto e' dell'altra.
+
+## Il nome del tasto che l'HUD sta dicendo, derivato da `RESTART_KEYS`.
+func restart_key_name() -> String:
+	return _restart_key
+
+## Il richiamo al restart, letto dalla Label.
+func restart_hint_text() -> String:
+	return _restart_hint.text if _restart_hint != null else ""
+
+## Il richiamo si **vede** adesso? Letto dal nodo, come `game_over_visible`: se
+## il flag dice una cosa e il nodo un'altra, l'HUD e' rotto e il test deve
+## accorgersene. E' la domanda che copre «il richiamo sparisce al restart»:
+## senza, il richiamo potrebbe restare a schermo in partita e nessuno se ne
+## accorgerebbe.
+func restart_hint_visible() -> bool:
+	return _restart_hint != null and _restart_hint.is_visible_in_tree()
+
 ## Il numero d'onda come intero, non come stringa: e' il numero che il piano
 ## chiede (`wave 1` al riavvio) ed e' quello che un confronto puo' fare.
 func wave_number() -> int:
@@ -495,6 +688,8 @@ func refresh() -> void:
 		return
 	_refresh_xp(game)
 	_refresh_wave(game)
+	_refresh_clock(game)
+	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
 
 ## XP e soglia del livello da `Game.player.progression`, che e' di -gameplay.
@@ -589,6 +784,130 @@ func _refresh_round(horde: Object) -> void:
 	if over == round_over:
 		return
 	round_over = over
+	redraw()
+
+# --- m17: il tempo, letto da -orda ------------------------------------------------
+#
+# Nessun orologio qui dentro. `Run.elapsed_s` e' gia' stato, cresce di un `+=`
+# per passo in `advance(delta)` e torna a zero in `restart()`; quello che segue
+# e' una lettura come le altre tre, non un conteggio di frame.
+
+## Il tempo di partita che l'orda espone, o `-1.0` se non si puo' sapere.
+##
+## `-1.0` e non `NAN`: un `NAN` qui dentro si propaga, e `-1.0` e' un numero che
+## un confronto puo' fare. Il tempo non puo' essere negativo, quindi il segno e'
+## un segnale e non un valore possibile.
+##
+## ## Una strada sola, e perche' (`horde.run` **non** c'e' piu')
+##
+## Era `horde.run.elapsed_s`, cioe' il campo `run` dell'orda e poi il campo
+## dell'oggetto che ci sta dentro. Funzionava, e per questo il test passava: e'
+## esattamente il difetto che `M2_SURFACE` esiste per trovare, cioe' un percorso
+## **che funziona e non e' dichiarato**. Se domani qualcuno cambia la superficie e
+## lascia quello, nessuna porta se ne accorge e il criterio continua a passare
+## sulla strada sbagliata.
+##
+## La porta dichiarata che c'era gia' vicino — `horde.run_state()` — **non
+## basta**, e il motivo e' misurabile: `src/sim/horde.gd:1421` restituisce
+## `RUN_PLAYING if run == null else run.state`, cioe' una **String**
+## (`"playing"` / `"game_over"`), non l'oggetto `Run`. E' la porta dichiarata
+## per lo **stato** della partita, non per l'oggetto che tiene il tempo.
+##
+## Quindi qui sotto c'e' `horde.elapsed_s()` e basta: e' la riga che il vertice
+## aggiunge a `M2_SURFACE` e che `-orda` implementa. Finche' quel metodo non
+## esiste l'HUD **non indovina** e dice una volta sola che non ha un orologio:
+## meglio un `00:00` che si dichiara rumoroso che un numero letto da una porta
+## che nessuno ha dichiarato.
+func _elapsed_s_from(horde: Object) -> float:
+	if not horde.has_method(ELAPSED_METHOD):
+		return -1.0
+	var raw = horde.call(ELAPSED_METHOD)
+	if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
+		return float(raw)
+	return -1.0
+
+## Il tempo di partita sullo schermo. Rilegge il contratto come gli altri tre
+## numeri, quindi `_process` la chiama ogni frame e il numero e' quello che
+## `-orda` ha contato in **questo** istante.
+##
+## Senza orda non c'e' niente da leggere e niente da dire: silenzio, non un
+## avviso. L'avviso c'e' solo quando l'orda c'e' e non espone l'orologio, che e'
+## il caso in cui un `00:00` fermo starebbe facendosi passare per un orologio.
+func _refresh_clock(game: Node) -> void:
+	var horde = game.get("horde")
+	if not (horde is Object) or not is_instance_valid(horde):
+		return
+	var seconds := _elapsed_s_from(horde as Object)
+	if seconds < 0.0:
+		if not _warned_no_clock:
+			_warned_no_clock = true
+			push_warning("hud: l'orda non espone \"%s()\" (di -orda): il tempo resta a 00:00. "
+				% ELAPSED_METHOD
+				+ "La riga e' in M2_SURFACE di src/core/contracts.gd e la scrive -orda; la strada che c'era prima (horde.run.%s) e' stata tolta perche' non e' dichiarata." % ELAPSED_FIELD)
+		return
+	if seconds == clock_s:
+		return
+	set_clock(seconds)
+
+# --- m13-w2: il richiamo al restart, letto da -gameplay --------------------------
+
+## Il nome del tasto che rimette in piedi la partita, derivato da quello che
+## `-gameplay` dichiara. Stringa vuota se non si puo' sapere.
+func _key_name_of(player: Object) -> String:
+	var keys := _restart_keys_from(player)
+	for k in keys:
+		if typeof(k) != TYPE_INT and typeof(k) != TYPE_FLOAT:
+			continue
+		# `get_keycode_string` prende un `Key`, che e' un intero con dentro i
+		# bit speciali: passare l'intero grezzo e' la strada che regge senza
+		# dover sapere come il motore li impacchetta.
+		var nome := OS.get_keycode_string(int(k))
+		if nome != "":
+			return nome
+	return ""
+
+## I tasti che `-gameplay` dichiara, presi **da lui**.
+##
+## Prima `get()` sull'istanza, che in Godot 4 risolve anche le costanti di uno
+## script; poi la mappa delle costanti dello script, che e' la strada esplicita e
+## non dipende da come `get()` risolve le costanti. Sono due strade verso **lo
+## stesso** dato e non un secondo dato: se una delle due smettesse di funzionare
+## la scritta mostrerebbe `UNKNOWN_KEY_NAME` e il test andrebbe rosso.
+func _restart_keys_from(player: Object) -> Array:
+	var raw = player.get(RESTART_KEYS_MEMBER)
+	if raw is Array and not (raw as Array).is_empty():
+		return raw as Array
+	var scr = player.get_script()
+	if scr == null or not scr.has_method("get_script_constant_map"):
+		return []
+	var map = scr.call("get_script_constant_map")
+	if not (map is Dictionary):
+		return []
+	var alt = (map as Dictionary).get(RESTART_KEYS_MEMBER)
+	if alt is Array and not (alt as Array).is_empty():
+		return alt as Array
+	return []
+
+## Il richiamo al restart, ricalcolato quando il nome del tasto cambia.
+##
+## Una volta sola per valore, non a ogni frame: il nome non cambia durante la
+## partita e riscriverlo ogni frame sarebbe una Label che cambia testo senza che
+## nessuno l'abbia chiamata.
+func _refresh_restart_hint(game: Node) -> void:
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return
+	var nome := _key_name_of(player as Object)
+	if nome == "":
+		if not _warned_no_restart_key:
+			_warned_no_restart_key = true
+			push_warning("hud: il giocatore non espone \"%s\" (costante di -gameplay, src/player/player.gd): "
+				% RESTART_KEYS_MEMBER
+				+ "il richiamo al restart non puo' nominare un tasto vero e mostra \"%s\"" % UNKNOWN_KEY_NAME)
+		return
+	if nome == _restart_key:
+		return
+	_restart_key = nome
 	redraw()
 
 # --- Il pannello delle scelte (m6) ---------------------------------------------
@@ -846,6 +1165,7 @@ func redraw() -> void:
 		_enemies.text = "ENEMIES %d" % enemies
 	_redraw_xp()
 	_redraw_wave()
+	_redraw_clock()
 	_redraw_game_over()
 
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
@@ -874,6 +1194,24 @@ func _redraw_wave() -> void:
 	if _wave_bar != null:
 		_wave_bar.max_value = 1.0
 		_wave_bar.value = wave_ratio()
+
+## Il tempo di partita e il richiamo al restart.
+##
+## `clock_s` e' gia' finito e non negativo (lo mette `set_clock`), quindi qui la
+## guardia non serve: quello che serve e' **un solo posto** in cui il tempo viene
+## trasformato in testo. Due posti sarebbero due formati che possono divergere,
+## e il test che confronta la Label con la sua formula prenderebbe per giusto
+## uno solo dei due.
+func _redraw_clock() -> void:
+	if _clock != null:
+		var total := maxi(int(floorf(clock_s)), 0)
+		# Due righe e non una: la formattazione dentro una lista dentro una
+		# formattazione si legge male, e il posto dove il tempo diventa testo
+		# deve essere una riga che si puo' copiare senza pensarci.
+		var tempo := CLOCK_FORMAT % [total / 60, total % 60]
+		_clock.text = "%s %s" % [CLOCK_LABEL, tempo]
+	if _restart_hint != null:
+		_restart_hint.text = RESTART_HINT_FORMAT % _restart_key
 
 func _redraw_game_over() -> void:
 	var over := is_game_over()

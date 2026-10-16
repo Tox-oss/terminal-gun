@@ -211,14 +211,49 @@ func reset() -> void:
 		pool.reset()
 
 ## Un passo di gioco: cooldown, eventuale colpo, e il volo dei proiettili.
+##
+## ## m13-w3: il fuoco finisce con il giocatore
+##
+## Qui c'era `if cooldown <= 0.0: _try_fire()` e nient'altro, cioe' il difetto che
+## l'utente ha visto giocando: a `game_over` la pausa la mette `-orda`
+## (`horde.step` ritorna subito), ma il **cooldown e' un numero del
+## giocatore** e l'albero continua a girare — quindi l'arma spara per sempre
+## sopra una partita finita, e ogni colpo fa un "bonk" su un nemico immobile.
+##
+## Il clock gira **sempre**, anche da morto: e' quello che fa partire il primo
+## colpo **subito** quando la condizione di morte torna falsa, e non un
+## `fire_interval` dopo. E il pool gira **sempre**, quindi i proiettili gia' in
+## volo finiscono il loro percorso invece di restare fermi a meta' aria per
+## sempre: quello che si ferma e' il fuoco, non il mondo.
 func step(delta: float) -> void:
 	cooldown -= delta
 	_sfx_gap -= delta
-	if cooldown <= 0.0:
+	if cooldown <= 0.0 and not _morto():
 		_try_fire()
 	_chiudi_bonk_scaduti(delta)
 	if pool != null:
 		pool.step(delta)
+
+## Il giocatore e' morto? La domanda e' **`player.is_dead()`, riletta a ogni
+## passo**, e non un flag memorizzato al momento della morte.
+##
+## La differenza e' un difetto intero: un flag latchato («una volta morto, non
+## sparo piu'») passa la stessa finestra di 600 passi di un test che guarda solo
+## il contatore, e resta spento **per sempre** anche quando la condizione di
+## morte non e' piu' vera — cioe' al restart, e al primo colpo di una partita
+## nuova che non spara. `tests/test_gameplay.gd::_fuoco_dopo_morte` avvola la
+## condizione di morte e pretende che il contatore torni a crescere: e' il dente.
+##
+## `has_method` invece di un tipo: `player.gd` e questo file non si preloaded a
+## vicenda e nessuno dei due deve il tipo dell'altro (piano §5, regola 3). Un
+## giocatore finto — o un'arma usata da sola — non ha `is_dead()`, e allora non
+## e' morto: il portatore del difetto e' il giocatore vero, che ce l'ha.
+func _morto() -> bool:
+	if player == null or not is_instance_valid(player):
+		return false
+	if not player.has_method("is_dead"):
+		return false
+	return bool(player.call("is_dead"))
 
 ## La spinta auto: mira al nemico più vicino entro `acquire_radius`. Se non
 ## c'è nessuno nel raggio non spara: meglio una pausa che spazzare il vuoto.

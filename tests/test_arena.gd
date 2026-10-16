@@ -852,18 +852,53 @@ func _criterion_3(h, arena: Node3D, game: Node) -> void:
 		r.refresh()
 	var bare_nodes := _count_nodes(arena)
 
-	# E il pieno, **raggiunto durante la partita**.
-	var drive := _drive_to_full_arena(h, horde)
+	# E il pieno, **raggiunto durante la partita**. Il giocatore entra come
+	# parametro perche' l'impalcatura che lo tiene vivo sta **dentro** il ciclo
+	# che guida la partita: fuori dal ciclo nessuno la chiamerebbe, e il ciclo
+	# finirebbe in game_over (vedi la sezione di `_drive_to_full_arena`).
+	#
+	# Il nodo e' quello della scena, `arena.get_node_or_null("Player")`, e non un
+	# `get_node` relativo: e' la strada che questo file usa gia' in cinque punti, e
+	# `_wiring` ha gia' accertato che `Game.player` **e'** questo nodo, quindi
+	# l'indirizzo che l'orda raggiunge per il contratto e quello che l'impalcatura
+	# rimette in piedi: non due giocatori, uno solo.
+	var player = arena.get_node_or_null("Player")
+	h.check(player != null,
+		"criterio n. 3: la scena deve avere il nodo Player: e' il giocatore che l'impalcatura tiene vivo mentre la partita viene guidata. Senza di lei il ciclo non ha niente da rimettere in piedi e la partita finisce in game_over prima di arrivare al numero del criterio")
+	var drive := _drive_to_full_arena(h, horde, player)
 	for r in renderers:
 		r.refresh()
 	var live: int = horde.count
+	# I numeri dell'impalcatura stanno **nella riga dei numeri della guida**, non in
+	# una stampa a parte: `onda`, `passi` e `uccisioni` dicono quanto ha costato
+	# arrivare, e senza accanto `hp ripristinati`, `hp_persi` e `hp_azzerrati` il
+	# lettore non puo' dire quanto di quel viaggio lo abbia fatto la legge del morso
+	# e quanto l'impalcatura. Il numero in vite e' **derivato** dagli stessi hp
+	# (hp persi diviso la vita massima, letta dal giocatore), non asserito: e' una
+	# misura, e una misura non si asserisce.
+	var vite := _vita_massima_di(player)
+	var vite_scritta := "?" if vite <= 0.0 else "%.1f" % vite
+	var vite_perse := (float(drive["hp_persi"]) / vite) if vite > 0.0 else 0.0
+	# ## Il morso peggiore, **dichiarato saturato quando lo e'**
+	#
+	# La differenza fra due letture di `hp` non puo' scendere sotto zero: la barra
+	# arriva a zero e l'eccadenza va persa, quindi oltre `max_hp` il numero non e'
+	# piu' una misura e' solo il tetto della barra. Scrivere %.1f come se fosse il
+	# morso vero prometterebbe una realta' che non c'e' (la scala di -orda non ha
+	# tetto), quindi quando il numero e' arrivato al soffitto la riga lo **dichiara**
+	# e accanto mette il conto degli interi, che non ha soffitto.
+	var morso := float(drive["hp_morso"])
+	var morso_scritto := "morso peggiore letto %.1f hp in un passo (%.2f vite in un passo)" % [morso, (morso / vite) if vite > 0.0 else 0.0]
+	if vite > 0.0 and morso >= vite - 0.0001:
+		morso_scritto = "morso peggiore letto >= %.1f hp in un passo, numero SATURATO dalla barra (la differenza fra due letture non scende sotto zero: il morso vero puo' essere maggiore e questo numero non lo sa)" % vite
+	var impalcatura := "impalcatura: hp ripristinati %d volte su %d passi guardati, hp persi realmente %.1f su %s = %.2f vite, passi in cui il morso ha azzerato la barra %d su %d (un passo cosi' e' un passo in cui quel morso da solo avrebbe ucciso, e l'intero non ha soffitto); %s; l'invulnerabilita' scende di DT a ogni passo come nel ciclo vero, altrimenti la barra non scenderebbe affatto e i tre numeri qui sarebbero tre zeri" % [int(drive["hp_ripristinati"]), int(drive["hp_passi"]), float(drive["hp_persi"]), vite_scritta, vite_perse, int(drive["hp_azzerrati"]), int(drive["hp_passi"]), morso_scritto]
 	if live == ENEMY_TARGET:
-		print("test_arena: i 200 nemici vivi sono arrivati all'onda %d, dopo %d passi di simulazione (%.2f s di partita) e %d uccisioni: curva %s"
+		print("test_arena: i 200 nemici vivi sono arrivati all'onda %d, dopo %d passi di simulazione (%.2f s di partita) e %d uccisioni; %s; curva %s"
 			% [horde.wave, int(drive["steps"]), float(drive["steps"]) * DT,
-				int(drive["kills"]), str(drive["curve"])])
+				int(drive["kills"]), impalcatura, str(drive["curve"])])
 	else:
-		print("test_arena: i %d nemici vivi NON sono arrivati: %s (curva %s)"
-			% [ENEMY_TARGET, str(drive["reason"]), str(drive["curve"])])
+		print("test_arena: i %d nemici vivi NON sono arrivati: %s; %s; curva %s"
+			% [ENEMY_TARGET, str(drive["reason"]), impalcatura, str(drive["curve"])])
 
 	# Il numero e' quello **raggiunto**, e il motivo del fallimento porta con se'
 	# dove la partita si e' fermata: un "200 non raggiunti" senza altro dice che il
@@ -1041,10 +1076,50 @@ class FakeHorde extends Node:
 ## lascia che l'arena si riempia da sola, che e' quello che vede il giocatore a
 ## meta' onda.
 ##
+## ## L'IMPALCATURA: il criterio misura i nodi a 200 vivi, non la sopravvivenza
+##
+## Il ciclo qui sotto attraversa piu' ondate, e su ognuna la legge di oggi e' piu'
+## dura della precedente: quindi questo ciclo **non e' piu' una simulazione
+## neutra**, e' il primo test che mette la legge sotto pressione per piu' ondate
+## di fila. La conseguenza e' che **non si puo' piu' assumere che il giocatore
+## sopravviva a un ciclo con il giocatore fermo e senza colpi**: un giocatore
+## passivo non ci arriverebbe, e il numero di quanto questo ciclo ha dovuto
+## ricostruire dice quanto. Percio' l'impalcatura tiene vivo il giocatore a ogni
+## passo (`_passo_a_vita_piena`) e **dice** in tre numeri cosa e' successo: quante
+## volte ha dovuto rimetterlo in piedi (`hp_ripristinati`), quanta vita la legge
+## del morso ne ha tolto davvero in tutto (`hp_persi`, somma dei passi) e **quanti
+## passi il morso ha azzerato la barra** (`hp_azzerrati`). Non e' una soglia e
+## non e' un'asserzione: sono misure, e stanno stampate accanto a `onda`, `passi`
+## e `uccisioni` perche' il lettore non debba ricostruirle.
+##
+## ## Il terzo numero e' l'intero, e perche' non puo' essere un float
+##
+## `hp_azzerrati` conta i passi in cui la barra e' finita a zero: un passo cosi'
+## e' un passo in cui **quel morso da solo avrebbe ucciso**, e la domanda e' una
+## domanda si' o no, non una domanda di quanto. La differenza fra due letture di
+## `hp` non puo' rispondere: la barra arriva a zero e **l'eccedenza va persa**,
+## quindi un morso da tre vite si legge come un morso da una vita e il numero
+## satura al massimo della barra. Un numero saturato scritto come una misura e'
+## peggio di nessun numero: promette una realta' che non ha (il tetto non c'e',
+## la scala del morso cresce con l'onda), quindi accanto va **dichiarato** come
+## saturato, e accanto va il conto degli interi, che non ha soffitto e quindi
+## cresce col pericolo.
+##
+## Il giocatore arriva come parametro e non si va a cercare qui dentro: chi
+## chiama ce l'ha gia' in mano (`_criterion_3`, che ha `arena`), e una foglia che
+## cerca fra le altre foglie e' la dipendenza circolare che questo progetto non
+## scrive due volte. Il percorso del nodo e' `arena.get_node_or_null("Player")`,
+## lo stesso di `_wiring`, che accerta che `Game.player` **e'** quel nodo: quindi
+## l'indirizzo che l'orda raggiunge per il contratto e quello che l'impalcatura
+## rimette in piedi.
+##
 ## Restituisce solo numeri **misurati**: `steps` (passi di `step()`), `kills`
 ## (uccisioni), `curve` (quanti vivi e quanta quota a ogni onda attraversata),
-## `reason` (perche' non e' arrivata, se non e' arrivata).
-func _drive_to_full_arena(h, horde) -> Dictionary:
+## `hp_ripristinati`, `hp_persi`, `hp_azzerrati`, `hp_morso` (il passo peggiore
+## **letto**, e puo' essere saturo: vedi sopra), `hp_passi` (i passi guardati,
+## denominatore di `hp_azzerrati`), `reason` (perche' non e' arrivata, se non e'
+## arrivata).
+func _drive_to_full_arena(h, horde, player) -> Dictionary:
 	var steps := 0
 	var kills := 0
 	var work := 0
@@ -1052,6 +1127,17 @@ func _drive_to_full_arena(h, horde) -> Dictionary:
 	var last_wave: int = horde.wave
 	var curve: Array[String] = []
 	var reason := ""
+	# Le misure dell'impalcatura, in una mappa che `_passo_a_vita_piena` scrive
+	# passo per passo: una mappa passa per riferimento, quindi il chiamante non ha
+	# da riportare nulla e i due rami sotto non hanno due copie della stessa
+	# aritmetica da tenere allineate.
+	var misura := {
+		"ripristinati": 0,
+		"persi": 0.0,
+		"azzerrati": 0,
+		"morso": 0.0,
+		"passi": 0,
+	}
 
 	while work < DRIVE_MAX_WORK and horde.count < ENEMY_TARGET:
 		if horde.is_game_over():
@@ -1065,7 +1151,7 @@ func _drive_to_full_arena(h, horde) -> Dictionary:
 		#    l'orda si e' fermata prima di arrivarci.
 		if horde.population >= ENEMY_TARGET:
 			var last: int = horde.count
-			horde.step(DT)
+			_passo_a_vita_piena(horde, player, misura)
 			steps += 1
 			work += 1
 			if horde.count <= last:
@@ -1083,7 +1169,7 @@ func _drive_to_full_arena(h, horde) -> Dictionary:
 		#    giocatore con l'arma. Uccide tutto quello che c'e' e lascia che il
 		#    passo successivo rimetta sul campo il credito di spawn di -orda.
 		kills += _kill_all_quiet(horde)
-		horde.step(DT)
+		_passo_a_vita_piena(horde, player, misura)
 		steps += 1
 		work += 1
 
@@ -1105,8 +1191,97 @@ func _drive_to_full_arena(h, horde) -> Dictionary:
 		"steps": steps,
 		"kills": kills,
 		"curve": curve,
+		"hp_ripristinati": int(misura["ripristinati"]),
+		"hp_persi": float(misura["persi"]),
+		"hp_azzerrati": int(misura["azzerrati"]),
+		"hp_morso": float(misura["morso"]),
+		"hp_passi": int(misura["passi"]),
 		"reason": reason,
 	}
+
+## ## Un passo di simulazione con la vita rimessa su, e le misure di quel passo
+##
+## `misura` e' la mappa che il ciclo apre e che questa funzione **scrive** (le
+## mappe passano per riferimento): `passi` (quanti passi sono stati guardati),
+## `ripristinati` (quanti hanno avuto bisogno della vita rimessa su), `persi` (quanta
+## vita e' andata in tutto), `azzerrati` (quanti di quei passi hanno **finito la
+## barra a zero**: quel morso da solo avrebbe ucciso) e `morso` (il passo peggiore
+## **letto**, che puo' essere saturo dalla barra: vedi la sezione sopra).
+##
+## Se non c'e' un giocatore da tenere in piedi la funzione **non scrive niente**:
+## "non lo so" non e' "non ha perso niente", e una somma che contasse come zero un
+## passo che nessuno ha guardato racconterebbe una misura che non e' stata fatta.
+##
+## Tre cose in questa funzione, e tutte e tre sono l'impalcatura:
+##
+##   1. **La vita si rimette su**, al valore che aveva all'inizio del passo. Non si
+##      scrive `player.hp` a mano per far passare una soglia: si rimette su quello
+##      che c'era, e i numeri che tornano fuori sono quello che la legge del morso
+##      ha fatto davvero. La scrittura diretta e' la strada che questo file usa gia'
+##      per rimettere in piedi il giocatore dopo una sezione (`player.hp = max_hp`
+##      in m13), e `heal()` non serve: dopo un morso che ha portato a zero `heal()`
+##      ritorna zero per contratto ("rianimare un morto e' un bug"), e il passo
+##      successivo leggerebbe `game_over` e la partita si fermerebbe lo stesso.
+##   2. **L'intero e' quello che non satura.** `dopo <= 0.0` e' la domanda si' o no
+##      al passo, ed e' l'unica forma in cui questo file puo' dire **quanto** e'
+##      forte il morso oltre la soglia della barra. Non si prova a misurare il
+##      morso vero per un'altra via: con la sola barra del giocatore, oltre la
+##      soglia non c'e' niente da guardare, e un numero che prometterebbe di
+##      guardarlo sarebbe un numero inventato.
+##   3. **`invuln` scende di `DT`.** Nel ciclo vero scende in `player.step()`, che
+##      qui non gira: senza questa riga il giocatore tenuto vivo diventa
+##      **irraggiungibile** dal passo in cui ha morso, `take_damage` respinta da
+##      `is_invulnerable()`, e la legge che questa sezione vuole mettere sotto
+##      pressione verrebbe silenziata proprio dal rimedio, e i tre numeri sopra
+##      sarebbero tre zeri. Non si chiama `player.step()` perche' quello muove il
+##      giocatore e spara, e qui il tempo che avanza e' quello dell'orda.
+##   4. **Il passo e' uno solo**, come prima: l'impalcatura guarda e rimette su,
+##      non aggiunge simulazione.
+func _passo_a_vita_piena(horde, player, misura: Dictionary) -> void:
+	var prima := _vita_di(player)
+	horde.step(DT)
+	if player != null and is_instance_valid(player):
+		var invuln: Variant = player.get("invuln")
+		if typeof(invuln) == TYPE_FLOAT or typeof(invuln) == TYPE_INT:
+			player.set("invuln", maxf(float(invuln) - DT, 0.0))
+	var dopo := _vita_di(player)
+	if prima < 0.0 or dopo < 0.0:
+		return
+	misura["passi"] = int(misura["passi"]) + 1
+	if dopo >= prima:
+		return
+	if dopo <= 0.0:
+		misura["azzerrati"] = int(misura["azzerrati"]) + 1
+	misura["ripristinati"] = int(misura["ripristinati"]) + 1
+	var perso := prima - dopo
+	misura["persi"] = float(misura["persi"]) + perso
+	misura["morso"] = maxf(float(misura["morso"]), perso)
+	player.set("hp", prima)
+
+## La vita del giocatore, o `-1.0` se non c'e' un giocatore con quel campo.
+## `-1.0` e non `0.0` perche' "non lo so" e "e' morto" sono due fatti diversi: e' la
+## stessa forma di `horde._player_hp()`, che e' la lettura che l'orda stessa fa per
+## dichiarare la partita finita, quindi qui non si introduce un secondo modo di
+## capire la vita.
+func _vita_di(player) -> float:
+	if player == null or not is_instance_valid(player):
+		return -1.0
+	var v: Variant = player.get("hp")
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return -1.0
+
+## La vita **massima** del giocatore: il denominatore dei due numeri in vite. Non e'
+## un numero scritto qui, e non e' una costante di questa sezione: e' il dato con
+## cui il giocatore divide la propria barra, e se un potenziamento cambiasse la
+## vita massima i due numeri in vite resterebbero quello che sono.
+func _vita_massima_di(player) -> float:
+	if player == null or not is_instance_valid(player):
+		return -1.0
+	var v: Variant = player.get("max_hp")
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return -1.0
 
 ## Gli invarianti che il vertice ha dichiarato per questa milestone (piano 1.4,
 ## criterio n. 3), controllati **mentre** la partita viene guidata:
@@ -3800,12 +3975,23 @@ const SHOT_SCRIPT := "res://src/render/mortar_shot_renderer.gd"
 ##     46  la scena di prima di m15 (misurato da questo test il 2026-10-15)
 ##  + 1  `MortarShot`: il colpo che cade (uno, qualunque sia il numero di colpi)
 ##  + 2  `EnemiesBig` e `EnemiesBoss`: i due modelli in piu' dell'orda
-##  = 49
+##  + 2  i due `Label` della HUD che `-ui` ha aggiunto in m13-w2, che non sono
+##       spazzatura ma sono **la richiesta dell'utente**: `Root/Clock`, il timer
+##       di partita (l'utente non vedeva quanto durava), e
+##       `Root/GameOver/RestartHint`, il richiamo del tasto di restart (che non
+##       trovava). Misurati da `test_ui`: 27 nodi di HUD, erano 25.
+##  = 51  (27 di HUD + 24 di `-gameplay`)
 ##
 ## Il tetto e' 120 e la regola che conta non e' il totale: e' che **un colpo in volo
 ## e' un nodo** e che **un nemico non e' un nodo**. Le due cose sono asserite
 ## separate, sotto, e il totale e' il numero che le somma.
-const NODI_ATTESI := 49
+##
+## Perche' i due `Label` sono dentro questa somma e non sono una cifra da alzare: se
+## sparissero dalla HUD il totale tornerebbe 49 e **questo messaggio continuerebbe
+## a nominarli** — ed e' quello il lavoro del criterio, non il numero. Un numero
+## assoluto che si alza per far passare il test non dice nulla; una lista di voci
+## che ognuno puo' controllare dice sempre a cosa serve il nodo che manca.
+const NODI_ATTESI := 51
 
 ## Tolleranza del confronto fra la posizione **disegnata** e quella **del canale**.
 ## `mortar_shot_at(i)` mette `x` e `y` del mondo dentro una `Transform3D` a 32
@@ -3937,7 +4123,7 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 		"m15: nessun colpo in volo, nessun corpo disegnato (la sezione ne aveva trovati %d e li ha svuotati pilotando il peso a 0.0)" % trovati_m15)
 	var nodi_vuoto := _count_nodes(arena)
 	h.eq(nodi_vuoto, NODI_ATTESI,
-		"m15: la scena deve avere %d nodi a vuoto (46 di prima di m15, piu' 1 per il colpo e 2 per i due modelli in piu' dell'orda): sono %d"
+		"m15: la scena deve avere %d nodi a vuoto (46 di prima di m15, piu' 1 per il colpo, piu' 2 per i due modelli in piu' dell'orda, piu' 2 per i due Label della HUD di -ui — il timer di partita Root/Clock e il richiamo del tasto di restart Root/GameOver/RestartHint, che l'utente aveva chiesto e che senza di loro non sarebbero piu' sullo schermo): sono %d"
 			% [NODI_ATTESI, nodi_vuoto])
 
 	# ## LA VOLA: lo stesso pilotaggio di m13, sullo stesso canale
@@ -4188,7 +4374,7 @@ func _m15_colpo(h, arena: Node3D, game: Node) -> void:
 
 	print("test_arena: m15 colpo: %d in volo -> %d istanze, caduta disegnata %.6f s contro mortar_telegraph_s %.6f s, scarto %.6f s = %.3f x DT (DT %.6f s), lancio a %.4f m e un passo dopo a %.4f m, caduti in %d passi"
 		% [in_volo, in_volo, caduta_disegnata, telegrrafo, errore, errore / DT, DT, h0, h1, caduti])
-	print("test_arena: m15 colpo, nodi: %d a vuoto contro %d con %d colpi in volo, tetto %d: il colpo costa UN nodo qualunque sia il numero di colpi (la scena e' a 46 nodi di prima di m15, piu' 1 per il colpo e 2 per i due modelli dell'orda)"
+	print("test_arena: m15 colpo, nodi: %d a vuoto contro %d con %d colpi in volo, tetto %d: il colpo costa UN nodo qualunque sia il numero di colpi (la scena e' a 46 nodi di prima di m15, piu' 1 per il colpo, piu' 2 per i due modelli dell'orda, piu' 2 per i due Label della HUD — timer di partita e richiamo del restart — che si vedono a schermo e quindi si contano come tutto il resto)"
 		% [nodi_vuoto, nodi_pieno, in_volo, NODE_BUDGET])
 	_ripristina(h, spawner, peso_dichiarato, horde, player, pop_dichiarata, pos_dichiarata, vita_dichiarata)
 	print("test_arena: m15 colpo, sezione in %d ms" % (Time.get_ticks_msec() - t0))

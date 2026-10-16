@@ -113,6 +113,20 @@ extends SceneTree
 ##      superarlo; col valore di prima erano 39) e `M16_CONVERSIONE = 0,5`
 ##      (meta' dell'offerta deve diventare danno; col valore di prima era 27%).
 ##
+## 20. **m13-w3**, le due segnalazioni dell'utente. `_fuoco_dopo_morte`: a
+##      `game_over` l'arma spara ancora, e la sezione lo misura in **due**
+##      finestre da 600 passi sullo stesso codice — avvelenata la condizione di
+##      morte il contatore **deve** tornare a crescere, vera la condizione deve
+##      valere **0** e `hp` a zero resta a zero. `_tasto_reale`: il restart passa
+##      da `Viewport.push_input` sulla **scena vera** (l'unica sezione che non
+##      mette `PROCESS_MODE_DISABLED`, perche' un nodo disabilitato non riceve
+##      input), e i suoi tre esiti sono i tre difetti possibili: il tasto funziona
+##      e nessuno lo diceva / un altro handler consuma l'evento / la pipeline non
+##      arriva al nodo. Il tasto e' **letto dalla costante viva** `RESTART_KEYS`,
+##      non scritto qui, e la scena viene libera **adesso**: una `queue_free`
+##      la lascerebbe in albero — con la sua `Camera` di arena — fino in fondo al
+##      file, e faceva fallire il ripiego di m5 nella sezione 10.
+##
 ## ## I DUE TEST DI m2 CHE HANNO UN FILE LORO
 ##
 ## Il criterio n. 2 (l'XP) e' in `tests/test_progression.gd` e il criterio n. 3
@@ -767,6 +781,14 @@ func _process(_delta: float) -> bool:
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
 		_restart_run(h)
+		# m13-w3: le due segnalazioni dell'utente. Va **qui**, dopo il restart e
+		# prima di m5, perche' `_restart_run` e' la sezione che installa l'orda
+		# **vera** (`game.horde`) e il giocatore su cui la finestra della morte
+		# spara davvero; e `_tasto_reale` monta la scena vera e poi **r restituisce
+		# il contratto** al giocatore di questo file, quindi le sezioni dopo
+		# trovano il mondo come lo aspettano.
+		_fuoco_dopo_morte(h)
+		_tasto_reale(h)
 		# m5: i due difetti che nessuna porta poteva vedere, e i due test che
 		# oggi li vedono. Vanno per ultimi perche' toccano il contratto e
 		# l'albero degli attori.
@@ -1840,14 +1862,21 @@ func _sporca(h, giro: int) -> void:
 		prog.apply(id)
 	player.position = Vector3.ZERO
 	player.velocity = Vector3.ZERO
-	# Qualche passo di gioco: il cooldown e il contatore dei colpi non devono
-	# essere gia' a zero, altrimenti il restart non avrebbe nulla da rimettere a
-	# posto su quei due campi.
+	# Il colpo che sporca il contatore si spara **da vivo**, e la morte arriva
+	# dopo. Da m13-w3 l'arma spara solo se il giocatore e' vivo, quindi la riga
+	# che metteva a zero le vite prima del passo non produceva piu' nessun colpo:
+	# il contatore da azzerare ora esiste **perche' il giocatore era in piedi**,
+	# che e' l'ordine della partita vera. Il secondo passo serve all'altra meta':
+	# senza uno step dopo `hp = 0` l'orda non ha ancora rilevato `game_over`.
+	player.hp = player.max_hp
 	_passo_di_gioco()
 	h.check(float(weapon.damage) > 0.0,
 		"restart %d: la regolazione e' sporcata prima di misurare" % (giro + 1))
 	h.check(float(weapon.shots) > 0,
 		"restart %d: e sono partiti colpi, cosi' il contatore da azzerare esiste" % (giro + 1))
+	player.hp = 0.0
+	player.invuln = 0.0
+	_passo_di_gioco()
 
 ## Un passo di gioco sul giocatore e sull'orda **vera**: a questo punto della sezione
 ## e' quella sul contratto, non il finto.
@@ -1912,6 +1941,216 @@ func _tasto(code: int, premuto: bool, ripetuto: bool) -> InputEventKey:
 	ev.pressed = premuto
 	ev.echo = ripetuto
 	return ev
+
+# ================================================================================
+# m13-w3, segnalazione 1: l'arma spara DOPO LA MORTE
+# ================================================================================
+#
+# `weapon_base.gd::step()` chiamava `_try_fire()` senza chiedere se il giocatore
+# fosse vivo. A `game_over` la pausa la mette -orda (`horde.step` ritorna
+# subito), ma il **cooldown e' un numero del giocatore**: l'albero continua a
+# girare e l'arma spara per sempre sopra una partita finita.
+#
+# ## I due numeri, e perche' sono due finestre e non una
+#
+# La finestra **avvelenata** e' il difetto **misurato**: falsificata la condizione
+# di morte (`hp` sopra zero) l'arma spara, e i colpi contati sono esattamente
+# quelli che il codice di prima emetteva in 600 passi. La finestra **vera** e' la
+# correzione: stessi 600 passi, condizione vera, zero colpi. Il numero della
+# seconda non puo' passare spegnendo l'arma **per sempre**: e' la prima finestra a
+# pretendere che il contatore torni a crescere, quindi la correzione e' «il fuoco
+# finisce **perche' il giocatore e' morto**» e non «l'arma e' stata spenta».
+
+const MORTE_PASSI := 600
+
+func _fuoco_dopo_morte(h) -> void:
+	var hd = game.horde
+	# `_tasto_restart` lascia il giocatore **morto**: qui si riparte da una
+	# partita in piedi, e `restart_run()` e' la strada vera del gioco.
+	player.restart_run()
+	if not h.check(hd != null and int(hd.get("count")) > 0,
+		"morte: l'orda deve avere nemici vivi, altrimenti la finestra non misura niente"):
+		return
+	# Il giocatore in piedi deve **sparare davvero**: senza un colpo prima della
+	# morte il contatore da confrontare e' un numero che non e' mai salito. Lo
+	# scaldata non deve finire in una morte che copra la misura, quindi la vita
+	# si rimette in piedi ogni passo e si esce appena e' partito un colpo.
+	for i in MORTE_PASSI:
+		_passo_di_gioco()
+		player.hp = player.max_hp
+		if int(weapon.shots) > 0:
+			break
+	if not h.check(int(weapon.shots) > 0, "morte: il giocatore in piedi spara almeno un colpo"):
+		return
+
+	# --- AVVELENATA: il difetto, misurato sullo stesso codice -------------------
+	player.hp = MORTE_HP_POLA
+	player.invuln = 0.0
+	h.check(not player.is_dead(),
+		"morte: avvelenata la condizione di morte (hp %.1f) il giocatore non e' morto" % MORTE_HP_POLA)
+	var prima := int(weapon.shots)
+	for i in MORTE_PASSI:
+		# Solo il giocatore, e non l'orda: `_poll_run()` legge `hp`, con 1.0 di
+		# vita ripartirebbe, l'orda morderebbe e il fuoco si fermerebbe per un
+		# motivo che non e' la porta sotto esame.
+		player.step(DT, Vector3.ZERO)
+	var avvelenati := int(weapon.shots) - prima
+
+	# --- VERA: la correzione ----------------------------------------------------
+	player.hp = 0.0
+	player.invuln = 0.0
+	var morti := int(weapon.shots)
+	for i in MORTE_PASSI:
+		_passo_di_gioco()
+	var emessi := int(weapon.shots) - morti
+	h.eq(emessi, 0,
+		"morte: %d passi (%.1f s) dopo la morte l'arma non emette nessun proiettile (%d -> %d colpi)"
+			% [MORTE_PASSI, float(MORTE_PASSI) * DT, morti, int(weapon.shots)])
+	h.check(avvelenati > 0,
+		"morte: avvelenata la condizione di morte il contatore TORNA a crescere (%d colpi in %d passi)"
+			% [avvelenati, MORTE_PASSI])
+	h.near(float(player.hp), 0.0, 0.0001, "morte: hp a zero resta a zero")
+	h.eq(int(pool.active_count()), 0, "morte: nessun proiettile resta in volo")
+	print("m13-w3 morte: avvelenata %d colpi in %d passi, vera %d colpi in %d passi, hp %.1f"
+		% [avvelenati, MORTE_PASSI, emessi, MORTE_PASSI, float(player.hp)])
+	# Si lascia la partita come la trovata: le sezioni dopo leggono da qui.
+	player.restart_run()
+
+# ================================================================================
+# m13-w3, segnalazione 2: il restart attraverso il TRASPORTO vero
+# ================================================================================
+#
+# `_tasto_restart` chiama `_unhandled_input` **a mano**: prova la **decisione**,
+# non il trasporto. E il trasporto e' l'unica cosa che nel gioco puo' non
+# arrivare, quindi qui l'evento passa da `Viewport.push_input`, che e' la porta
+# vera e l'unica che nel gioco chiama quel metodo.
+#
+# I tre esiti sono i tre difetti possibili, e sono distinguibili:
+#   - `hp` torna al massimo: il tasto funziona e nessuno lo diceva (-ui);
+#   - evento **gestito** e `hp` ancora a zero: un altro handler lo ha consumato;
+#   - evento non gestito e `hp` a zero: la pipeline non e' arrivata al nodo.
+
+## Quanti restart in fila: la classe di difetto che ne lascia **uno in piu'** a ogni
+## giro si vede solo al secondo e al terzo.
+const TASTO_GIRO := 3
+## Le vite con cui si avvelena la condizione di morte: sopra zero, non morta.
+const MORTE_HP_POLA := 1.0
+
+func _tasto_reale(h) -> void:
+	# La camera che il viewport ha **prima** di questa sezione: e' il numero con cui
+	# si confronta la fine, e senza di questo la sezione potrebbe cambiare il
+	# viewport senza che nessuno lo vedesse (e' quello che e' successo: la scena
+	# lasciata appesa teneva la sua `Camera` e faceva fallire il ripiego di m5).
+	var cam_prima := root.get_camera_3d()
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "tasto: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	root.add_child(scena)
+	var p = scena.get_node_or_null("Player")
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	var arma = scena.get_node_or_null("Player/Weapon")
+	if p == null or hd == null or arma == null:
+		h.check(false, "tasto: la scena vera deve avere \"Player\", \"Player/Weapon\" e \"%s\"" % NODO_HORDE)
+		root.remove_child(scena)
+		scena.free()
+		return
+	# **Niente `PROCESS_MODE_DISABLED`**: e' l'unica sezione che lascia il modo di
+	# elaborazione com'e', perche' la domanda e' proprio se l'evento arriva. Un
+	# nodo disabilitato non riceve input, e il difetto che si cerca qui e' un
+	# evento che non arriva.
+	if not h.check(bool(p.get("read_keys")),
+		"tasto: sulla scena vera il giocatore legge i tasti (il difetto qui e' il trasporto, non la lettura)"):
+		root.remove_child(scena)
+		scena.free()
+		return
+	# Il tasto **che il codice dichiara**, letto dalla costante viva: un tasto
+	# scritto qui dentro sarebbe un tasto che puo' essere un altro.
+	var chiavi: Variant = _script_const(p, "RESTART_KEYS")
+	if not h.check(chiavi is Array and (chiavi as Array).size() > 0, "tasto: RESTART_KEYS e' una lista di tasti"):
+		root.remove_child(scena)
+		scena.free()
+		return
+	var tasto := int((chiavi as Array)[0])
+	# L'orda si popola, il giocatore spara **una volta** e poi l'arma si zittisce
+	# (`M16_ARMA_MUTA`: lo stesso silenzio di m16, per lo stesso motivo): un
+	# livello aprirebbe il pannello dei potenziamenti, che mette in pausa l'albero,
+	# e un albero in pausa non consegna nessun evento — la misura diventerebbe
+	# quella della pausa e non quella del tasto.
+	for i in MORTE_PASSI:
+		hd.call("step", DT)
+		if int(hd.get("count")) > 0:
+			break
+	p.call("step", DT, Vector3.ZERO, false)
+	arma.set("cooldown", M16_ARMA_MUTA)
+	p.set("hp", 0.0)
+	p.set("invuln", 0.0)
+	hd.call("step", DT)
+	var over := bool(hd.call("is_game_over"))
+	var nodi0 := _conta_nodi(root)
+	var vivi0 := int(hd.get("count"))
+	var colpi0 := int(arma.get("shots"))
+	var gestito0 := root.is_input_handled()
+	# **Il trasporto vero**: nessuna chiamata diretta a `_unhandled_input`.
+	root.push_input(_tasto(tasto, true, false))
+	var gestito := root.is_input_handled() and not gestito0
+	var hp1 := float(p.get("hp"))
+	var vivi1 := int(hd.get("count"))
+	var colpi1 := int(arma.get("shots"))
+	print("m13-w3 tasto: tasto %d (%s), game_over %s, evento gestito %s, hp 0.0 -> %.1f, nemici %d -> %d, colpi %d -> %d, nodi %d -> %d"
+		% [tasto, str(p.call("restart_hint")), str(over), str(gestito), hp1,
+			vivi0, vivi1, colpi0, colpi1, nodi0, _conta_nodi(root)])
+	if hp1 > 0.0:
+		h.near(hp1, float(p.get("max_hp")), 0.0001, "tasto: la pipeline vera rimette in piedi il giocatore")
+		h.check(not bool(hd.call("is_game_over")), "tasto: e la partita riparte")
+		h.check(vivi1 > 0, "tasto: e i nemici sono ripopolati (%d)" % vivi1)
+		h.eq(colpi1, 0, "tasto: e i proiettili sono azzerati")
+	elif gestito:
+		h.check(false,
+			"tasto: la pipeline ha CONSUMATO l'evento e il giocatore e' rimasto a %.1f hp: lo mangia un altro handler" % hp1)
+	else:
+		print("m13-w3 tasto: push_input non ha consegnato l'evento in questo harness; la decisione si prova a mano")
+		p.call("_unhandled_input", _tasto(tasto, true, false))
+		h.near(float(p.get("hp")), float(p.get("max_hp")), 0.0001,
+			"tasto: la decisione rimette in piedi il giocatore")
+	# Il trasporto che ha funzionato, riusato nei tre giri: se il ramo sopra ha
+	# ripiegato sulla chiamata diretta, i tre giri devono ripiegare con lei.
+	var riavvia: Callable = func() -> void: root.push_input(_tasto(tasto, true, false))
+	if hp1 <= 0.0 and not gestito:
+		riavvia = func() -> void: p.call("_unhandled_input", _tasto(tasto, true, false))
+	# Tre restart di fila: un restart che ne lascia uno in piu' ogni volta si vede
+	# solo al secondo e al terzo.
+	for giro in TASTO_GIRO:
+		p.set("hp", 0.0)
+		p.set("invuln", 0.0)
+		hd.call("step", DT)
+		riavvia.call()
+		h.check(float(p.get("hp")) > 0.0, "tasto: il restart %d riparte" % (giro + 1))
+	h.eq(_conta_nodi(root), nodi0, "tasto: %d restart in fila non aggiungono nessun nodo" % TASTO_GIRO)
+	# ## Qui la scena viene libera **adesso**, e non con `_libera()`
+	#
+	# `queue_free()` dentro un `--script` si svuota alla fine del frame e tutte le
+	# sezioni di questo file girano **in un frame solo**: la scena resterebbe
+	# dentro `root` fino in fondo al file, con la sua `Camera` di arena
+	# (`scenes/arena_main.tscn`, `src/render/arena_camera.gd`) attiva. E' quello
+	# che ha fatto fallire `senza camera il giocatore non vede piu' nessuna
+	# camera` in `_m5_ingresso_su_schermo`, che libera la sua camera di prova e si
+	# aspetta che **quella** rimanga l'unica. Il criterio e' giusto e la sezione
+	# che sporca era questa: quindi si libera qui, e si dice.
+	root.remove_child(scena)
+	scena.free()
+	h.check(root.get_camera_3d() == cam_prima,
+		"tasto: la scena smontata non lascia la sua camera attiva (prima %s, dopo %s)"
+			% [str(cam_prima), str(root.get_camera_3d())])
+	# **Poi** il contratto: `_exit_tree` di `-render` e `-ui` puo' togliere una
+	# registrazione per nome, e se riregistrassi prima di liberare mi resterebbe
+	# tolta sotto gli occhi.
+	game.player = player
+	game.progression = player.progression
+	game.register_impl("player_position", Callable(player, "_player_position"))
+	game.register_impl("damage_player", Callable(player, "take_damage"))
+	game.register_impl("spawn_projectile", Callable(weapon, "_spawn_projectile"))
+	_riordina_orda_finta()
 
 # --- 10-11. m5, criteri n. 2 e n. 3: l'ingresso e' quello che si vede -----------
 #

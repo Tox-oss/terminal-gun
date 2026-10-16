@@ -938,6 +938,21 @@ func _pesi_effettivi() -> PackedFloat32Array:
 func _hp_scale() -> float:
 	return 1.0 if run == null else run.hp_scale()
 
+## ## m14: la scala del **morso**, e perche' non e' quella della vita
+##
+## Fino a m13 il danno di un morso era `E.touch_damage_of(kinds[i])`, cioe' la
+## tabella delle specie: **uguale a ogni onda**. Il tetto di `TOUCH_INTERVAL`
+## limitava la cadenza, ma non il danno, quindi il danno al secondo che l'orda
+## porta al giocatore era una costante e la difficolta' non poteva crescere per
+## nessun valore della vita. E' il secondo canale, e senza di questo il criterio
+## di m14 sarebbe irraggiungibile.
+##
+## Il valore viene da `Run.touch_scale_of(w)`, cioe' dalla **stessa** legge della
+## vita: due leggi diverse lascerebbero che la piu' lenta dei due governi, e il
+## difetto tornerebbe spostato di una riga senza che nessuno se ne accorga.
+func _touch_scale() -> float:
+	return 1.0 if run == null else run.touch_scale()
+
 func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	transforms[i] = pos
 	velocities[i] = Vector3.ZERO
@@ -1094,7 +1109,12 @@ func _apply_bites(delta: float) -> void:
 		# il rientro comincia qui: questo nemico non ripete fino a che non
 		# esce dalla portata (`enemy.gd` lo riarma in un passo)
 		bite_latch[i] |= E.BITE_SPENT
-		var danno := E.touch_damage_of(kinds[i])
+		# m14: il morso scala con l'onda. Il danno **per morso** resta quello
+		# della tabella delle specie, quindi `touch_damage_last` continua a essere
+		# confrontabile con `E.touch_damage_of(kind)` per un fattore noto e unico:
+		# e' quello che permette a `tests/test_orda.gd` di misurare la pressione
+		# in ingresso come `touch_damage_last / touch_scale_of(wave)`.
+		var danno := E.touch_damage_of(kinds[i]) * _touch_scale()
 		game.damage_player(danno)
 		touch_damage_last = danno
 		touch_bites_last += 1
@@ -1432,6 +1452,67 @@ func is_game_over() -> bool:
 ## essere nuova, non la fisica.
 func wave_hp_scale() -> float:
 	return 1.0 if run == null else run.hp_scale()
+
+## ## m14: `wave_touch_scale()`, il gemello di `wave_hp_scale()` per il **morso**
+##
+## Esposto perche' `tests/test_orda.gd::_difficolta` deve poter dividere il danno
+## che arriva al giocatore per la scala e ottenere il numero **senza** di essa:
+## senza questo accessor il test dovrebbe leggere `run.gd` direttamente e perdere
+## il controllo che i due numeri sono davvero lo stesso.
+func wave_touch_scale() -> float:
+	return 1.0 if run == null else run.touch_scale()
+
+## ## m13-w2: `elapsed_s()`, l'orologio di partita **esposto dall'orda**
+##
+##     horde.elapsed_s()   # secondi dall'inizio della partita, 0.0 senza partita
+##
+## Superficie dichiarata dal vertice in `src/core/contracts.gd` (`M2_SURFACE`):
+## `{"owner": "terminal-gun-orda", "prop": "horde", "member": "elapsed_s",
+## "kind": "method"}`. `-ui` la chiama e la mostra a schermo; il criterio e' in
+## `tests/test_ui.gd` e avvelena `Run.elapsed_s` per vedere se il numero cambia.
+##
+## ## Perche' un metodo e non un campo
+##
+## **Perche' `elapsed_s` non vive su `Horde`.** Il numero e' di `Run`
+## (`src/sim/run.gd`), che cresce di un `+=` in `advance(delta)` e torna a zero in
+## `restart()`. Un campo `elapsed_s` qui sarebbe un **numero copiato**, e la copia
+## si stacca dalla fonte al primo restart che qualcuno dimentica: l'HUD
+## mostrerebbe il tempo di una partita che non e' quella che si sta giocando.
+## Peggio, un campo asserirebbe l'esistenza di una superficie che l'orda non ha:
+## dichiarare un campo che non c'e' sarebbe una **dichiarazione falsa**, cioe' la
+## riga di `M2_SURFACE` che mente sul membro. Il metodo pubblico e' la superficie
+## vera, perche' non puo' dimenticarsi di chiamarsi.
+##
+## E' la stessa distinzione che regge `wave` contro `wave_total()`: `wave` e' un
+## campo perche' l'orda lo possiede davvero, `elapsed_s` no.
+##
+## ## Perche' non si legge `horde.run` direttamente
+##
+## Funziona — e per questo il criterio di `-ui` passava gia' prima che questa
+## riga esistesse. Ma e' esattamente il difetto che `M2_SURFACE` esiste per
+## trovare: **un percorso che funziona e non e' dichiarato**. Se domani qualcuno
+## cambia la superficie e lascia quello, nessuna porta se ne accorge e il
+## criterio continua a passare sulla strada sbagliata. In piu' `horde.run`
+## espone l'intero oggetto `Run`: chi lo legge puo' arrivare a qualunque campo
+## interno, e nessuno di quelli e' superficie.
+##
+## Non e' la strada vicina `run_state()` a poter sostituire questa: quella
+## restituisce una **String** (`"playing"` / `"game_over"`), e' la porta
+## dichiarata dello stato, non dell'oggetto che tiene il tempo.
+##
+## ## Il clock non e' qui, e non si sposta
+##
+## Questo metodo **non conta niente**: legge. L'unico posto dove i secondi
+## avanzano resta `run.advance(delta)` dentro `step()`, dopo il controllo di
+## `game_over`. Se il clock stesse qui dentro, le soglie di m17 — i 180 s del
+## mortar e la frase «terzo minuto = onda 4» — misurerebbero un'altra cosa da
+## quella che e' stata misurata.
+##
+## `run == null` (l'orda montata senza partita) **non ha tempo**, e restituisce
+## `0.0` come gli altri metodi di sopra fanno con la loro assenza: un orologio
+## fermo a zero, non un valore di riserva inventato.
+func elapsed_s() -> float:
+	return 0.0 if run == null else run.elapsed_s
 
 ## Ricomincia la partita: **onda 1**, barra piena, niente `game_over`, e l'orda
 ## di nuovo piena **di `population`**, che sull'onda 1 e' `Run.POP_BASE` = 25 e
@@ -1801,6 +1882,22 @@ func _player_hp() -> float:
 	if _player_cache == null or not is_instance_valid(_player_cache):
 		_player_cache = null
 		var found = game.get("player")
+		# ## Perche' `is_instance_valid` **prima** di `is Node`
+		#
+		# `found` viene dal contratto, e il contratto puo' tenere un nodo che
+		# qualcuno ha **gia' liberato**: `tests/test_orda.gd::_pressione_uscita`
+		# apre `scenes/arena_main.tscn`, ci registra dentro `Game.player`, e poi
+		# chiude la scena con `free()`. `Game.player` resta appeso a un oggetto
+		# morto, e ogni `step()` successivo lo trova qui.
+		#
+		# `is` su un'istanza liberata **non restituisce `false`**: spacca la
+		# funzione e lascia tornare il valore di prima. Percio' il numero che
+		# risaliva fino a `run.enter_game_over()` era spazzatura, e la misura della
+		# pressione ne tornava **negativa**. La domanda «e' vivo?» viene prima di
+		# ogni altra, e su un oggetto non valido la risposta e' "non lo so", cioe'
+		# `-1.0`: non un crash e non un numero inventato.
+		if not is_instance_valid(found):
+			return -1.0
 		if not (found is Node):
 			return -1.0
 		_player_cache = found

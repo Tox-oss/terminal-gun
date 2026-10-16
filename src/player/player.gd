@@ -429,7 +429,26 @@ func is_dead() -> bool:
 ## Il tasto che rimette in piedi la partita, una volta sola per pressione (non
 ## un `Input.is_key_pressed` tenuto premuto: quello chiamerebbe il restart a ogni
 ## frame finche' il tasto resta giù, e la partita ripartirebbe ogni 16 ms).
-const RESTART_KEYS := [KEY_ENTER, KEY_KP_ENTER, KEY_R]
+##
+## ## `R` e' il primo, e perche' l'ordine non e' un capriccio
+##
+## `Enter` e' **`ui_accept`** in Godot: in un contesto di UI puo' essere consumato
+## prima che `_unhandled_input()` lo veda, cioe' esattamente il difetto che
+## l'utente ha segnalato («non esiste un modo per riavviare dal gioco»). Un tasto
+## che il motore puo' mangiare non puo' essere il **primo** di una lista che
+## l'interfaccia mostra: il richiamo a schermo e' il primo della lista (e' la
+## scelta di -ui leggerlo da qui), e quindi deve essere il piu' affidabile dei
+## tre. `KEY_SPACE` c'è perche' e' il tasto che il genere ha gia' deciso; sotto un
+## pannello aperto l'albero e' fermo e questa riga non gira, quindi la carta di un
+## potenziamento non puo' diventare un restart.
+const RESTART_KEYS := [KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]
+
+## Il tasto del restart **in parole**, per l'interfaccia: il numero dei tasti e'
+## di questo file e l'interfaccia deve scrivere quello che qui e' dichiarato, non
+## scegliere un tasto suo che qui non e' fra quelli e quindi non fa niente. Il
+## primo della lista e' quello che l'interfaccia mostra, quindi qui e' in testa.
+func restart_hint() -> String:
+	return "R / INVIO / SPAZIO"
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not read_keys or not is_dead():

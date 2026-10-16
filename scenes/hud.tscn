@@ -1,12 +1,22 @@
 [gd_scene load_steps=2 format=3]
 
-; -ui (m2, m6). L'HUD: venticinque nodi, sempre gli stessi.
+; -ui (m2, m6, m17, m13-w2). L'HUD: ventisette nodi, sempre gli stessi.
 ;
 ; Otto venivano da -arena (vite, testo vite, nemici, punteggio, livello, arma).
 ; m2 aggiunge cinque: la barra dell'XP, il suo testo, il contatore d'onda, la
 ; barra dell'onda e la schermata di game over. Il passaggio di proprieta' e'
 ; dichiarato in piano sez. 3.3 e 4.1: -arena aveva gia' chiuso il suo scope e
 ; riaprirgli un file e' il difetto che la regola 1 vieta.
+;
+; m17 aggiunge uno: `Clock`, il tempo di partita. E uno solo perche' il numero
+; non e' di questa foglia: `Run.elapsed_s`, di `-orda`. Qui dentro non c'e' un
+; secondo orologio ne' un contatore di frame, e il separatore dei minuti e' un
+; due punti ASCII perche' la console di Windows e il pipe di `OS.execute` sono in
+; codepage.
+;
+; m13-w2 aggiunge uno: `RestartHint`, dentro `GameOver`. Sta dentro di proposito,
+; perche' il richiamo al restart deve sparire con la schermata; e il nome del
+; tasto che mostra non e' scritto qui, arriva da `RESTART_KEYS` di `-gameplay`.
 ;
 ; m6 aggiunge undici: il pannello delle carte (`Upgrade`), il suo titolo, e tre
 ; carte da tre nodi (bottone, titolo, effetto). Sono **nati qui dal primo frame**
@@ -182,6 +192,30 @@ offset_bottom = 128.0
 show_percentage = false
 step = 0.0
 
+; m17: il tempo di partita. Sta **sotto** la barra dell'onda, nella colonna
+; destra, e non in alto a sinistra perche' in alto a sinistra c'e' la vita: e la
+; domanda che questo numero risponde ("quanto ho giocato") e' una domanda da
+; fine partita, non una barra di cui preoccuparsi mentre si schiva.
+;
+; Il numero e' di `-orda` (`Run.elapsed_s`, in `src/sim/run.gd`): qui dentro non
+; c'e' nessun orologio e nessun contatore di frame, e il separatore dei minuti e'
+; un due punti **ASCII**.
+;
+; La scritta iniziale e' `00:00` perche' `src/ui/hud.gd::_redraw_clock` la
+; riscrive dal primo `redraw()`, e un Label che parte con un testo a caso
+; lampeggia per un frame a ogni avvio.
+
+[node name="Clock" type="Label" parent="Root"]
+offset_left = 956.0
+offset_top = 132.0
+offset_right = 1256.0
+offset_bottom = 160.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 18
+text = "TIME 00:00"
+horizontal_alignment = 2
+
 [node name="Weapon" type="Label" parent="Root"]
 offset_left = 24.0
 offset_top = 654.0
@@ -338,4 +372,24 @@ theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
 theme_override_constants/outline_size = 8
 theme_override_font_sizes/font_size = 44
 text = "GAME OVER - WAVE 1"
+horizontal_alignment = 1
+
+; m13-w2: il richiamo al restart. Sta **dentro** `GameOver`, quindi sparisce
+; insieme alla schermata: un richiamo che resta a schermo in partita e' un HUD
+; che dice una cosa che non vale.
+;
+; Il nome del tasto che appare qui NON e' scritto in questo file: arriva da
+; `RESTART_KEYS` di `-gameplay` (`src/player/player.gd`) e lo scrive
+; `src/ui/hud.gd::_redraw_clock`. Il testo iniziale e' il segnaposto perche' la
+; prima riga utile arriva dal contratto al primo `refresh()`.
+
+[node name="RestartHint" type="Label" parent="Root/GameOver"]
+offset_left = 240.0
+offset_top = 400.0
+offset_right = 1040.0
+offset_bottom = 440.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 26
+text = "PRESS ? TO RESTART"
 horizontal_alignment = 1

@@ -247,6 +247,22 @@ const M2_SURFACE := [
 	{"owner": "terminal-gun-orda", "prop": "horde", "member": "run_state", "kind": "method"},
 	{"owner": "terminal-gun-orda", "prop": "horde", "member": "is_game_over", "kind": "method"},
 	{"owner": "terminal-gun-orda", "prop": "horde", "member": "restart_run", "kind": "method"},
+	# --- m13-w2, 2026-10-15: l'orologio di partita esce dall'orda, dichiarato. ---
+	#
+	# `Run.elapsed_s` e' il clock che `-orda` ha introdotto in m17 per far comparire
+	# il mortar dopo 180 s, e `-ui` lo mostra a schermo dal primo frame.
+	#
+	# **Perche' una riga e non leggere `horde.run`**: `run_state()` e' gia' dichiarato
+	# sopra, ma `horde.gd:1421` restituisce una **String** (lo stato), non l'oggetto
+	# `Run`: e' la porta dichiarata dello stato, non dell'orologio. La strada che
+	# `-ui` usava — `horde.run.elapsed_s` — **funzionava** e non era dichiarata, ed e'
+	# stata tosta perche' un percorso che funziona ma non e' in `M2_SURFACE` e'
+	# esattamente il difetto che questa lista esiste per trovare.
+	#
+	# **Perche' `method` e non `field`**: `elapsed_s` non vive su `Horde`, vive su
+	# `Run`. Dichiarare un campo che non c'e' sarebbe una dichiarazione falsa; il
+	# metodo pubblico e' la superficie vera, e `-orda` lo implementa.
+	{"owner": "terminal-gun-orda", "prop": "horde", "member": "elapsed_s", "kind": "method"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "hp", "kind": "field"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "max_hp", "kind": "field"},
 	{"owner": "terminal-gun-gameplay", "prop": "player", "member": "progression", "kind": "field"},

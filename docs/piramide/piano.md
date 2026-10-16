@@ -1259,6 +1259,12 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
+**Stato al 2026-10-16, sommario.** Il sommario sotto è del **2026-10-15** e vale per m1–m18: non
+è stato riscritto, perché riscriverlo a ogni onda è il modo di far perdere la sostanza. **La sezione
+più recente è §1.14-ventiseiesima (m19)**: tetti di difficoltà rimossi, legge nuova verde con denti
+nelle due direzioni, quattro strumenti di misura corretti togliendo, e **una domanda aperta che è
+dell'utente** — se un morso solo che azzera la barra all'onda 8 sia voluto.
+
 **Stato al 2026-10-15, sommario.** `GATE: 8/8` e `PERM: 15/15` **rimesurati dal vertice** dopo
 m17+m18 (le due porte sono due fatti distinti e si riportano separati). Milestone chiuse: **da m1 a
 m10**. **m11 aperta**, e dentro m11:
@@ -4034,6 +4040,127 @@ Due round, perché il primo non era verde: lo scheletro esaurì i suoi step lasc
 **Debito noto, non risolto:** `scenes/arena_main.tscn` **non esiste**. Lo scheletro non ha l'`edit` allow su `scenes/**` e non l'ha aggirato: è di `terminal-gun-arena` in w2 (sovrascrittura già autorizzata in §3). Fino ad allora `--import` logga `ERROR: Cannot open file 'res://scenes/arena_main.tscn'` — innocuo per w1, ma **va riletto in w2** perché riguarda il criterio n. 2 della milestone.
 
 **Limite dichiarato:** il gate non ha timeout (`OS.execute` è bloccante): un test che si blocca blocca il gate. Scelta consapevole, documentata in `tools/gate.gd`.
+
+### 1.14-ventiseiesima **m19: via i tetti di difficoltà, e la cosa che la legge nuova non dice**
+
+**Il nome.** In conversazione questa onda e' stata chiamata `m14`, ma **`m14` e' gia' occupato** da
+`m14-a`/`m14-b`/`m14-c` (§1.14-diciannovesima, ventesima, ventunesima). Si chiama **`m19`**, e
+l'onda entra nel piano con questo nome perche' il piano e' la fonte di verita' e non la conversazione.
+
+**Il difetto, e lo ha trovato l'utente giocando** (livello 61, fermo al centro, che cancellava tutto):
+`src/sim/run.gd` aveva `HP_SCALE_STEP = 0,25` e `HP_SCALE_MAX = 4,0`. Il tetto e' stato raggiunto
+**all'onda 13** e da li' l'orda smetteva di crescere, mentre il giocatore no.
+
+**Il terzo tetto non era scritto da nessuna parte.** Rimosso `HP_SCALE_MAX`, il morso e' rimasto
+`(1 / TOUCH_INTERVAL) x TOUCH_DAMAGE_BASE x scala`, cioe' **10,67 hp/s costanti**: il danno
+dell'orda era fermo per costruzione indipendentemente dall'onda. Ora c'e' `touch_scale_of(w)` in
+`src/sim/horde.gd`, e la legge e' una sola per i due numeri:
+
+```
+scale_of(w) = power_ratio_of(player_level_at(w-1)) x catchup_of(w)
+```
+
+**Il criterio ha denti nelle due direzioni, ed è questo il fatto che conta:**
+
+```
+m14 CRITERIO (legge di PRIMA, 0,25/onda con tetto 4,0): ROSSO
+m14 CRITERIO (legge di oggi): VERDE
+
+  onda   3 | scala        17.1586 | ingresso       202.4716 hp/s | uscita liv  20  361.2339 hp/s | ing/usc  0.5605 | legge di prima   0.0490
+  onda  13 | scala     15209.9771 | ingresso    179477.7302 hp/s | uscita liv  66  138272.5194 hp/s | ing/usc  1.2980 | legge di prima   3.41e-4
+  onda  61 | scala        9.13e12 | ingresso        1.08e14 hp/s  | uscita liv 213    2.23e13 hp/s | ing/usc  4.8380 | legge di prima   2.12e-12
+```
+
+La legge vecchia non fallisce «un po'»: all'onda 61 **l'uscita e' 1,4 milioni di volte l'ingresso**.
+E' il bug che l'utente aveva trovato, quantificato, e il criterio lo prende.
+
+**La curva del giocatore, che nessuno aveva misurata, e che è la metà del progetto:**
+
+| livello | potenziamenti | danno | intervallo | DPS | sul livello 1 |
+|---|---|---|---|---|---|
+| 1 | 0 | 10,00 | 0,3500 s | 28,57 | 1,0× |
+| 5 | 4 | 15,63 | 0,2975 s | 52,52 | 1,8× |
+| 10 | 9 | 19,53 | 0,2149 s | 90,87 | 3,2× |
+| 20 | 19 | 47,68 | 0,1320 s | 361,23 | 12,6× |
+| 30 | 29 | 93,13 | 0,0689 s | 1.351,58 | 47,3× |
+| 40 | 39 | 181,90 | 0,0423 s | 4.298,49 | 150,4× |
+| **61** | **60** | **867,36** | **0,0136 s** | **63.937,21** | **2.237,8×** |
+
+E' il **potenziale** (ogni carta presa), ed e' per questo che la legge e' tarata su questo numero e
+non su quello di un giocatore medio: il criterio deve reggere il caso peggiore, e il caso peggiore
+e' chi prende tutto.
+
+**`CATCHUP_SAFETY = 4,0` e' dichiarato, e il suo valore non e' un eccesso da correggere:** la misura
+dice `colpi 4.88/s` contro un tetto di `6.67/s`, cioe' l'orda raggiunge il **73% del proprio tetto**.
+Il `4,8380` e' il margine che copre quel 27%.
+
+#### Quattro strumenti di misura che erano sbagliati, e in tutti e quattro il rimedio è stato togliere
+
+E' la parte di questa onda che vale per tutte le altre, quindi sta qui perche' il piano non deve
+perdersela:
+
+1. **`TOUCH_DAMAGE_BASE = 1,60` contro una media misurata di `0,3026` hp.** La tabella **sopravvaluta
+   la media reale di 5,3 volte** (media per morso misurata / scala = `0,3026` su tutte e tre le
+   onde). Il rimedio **non e' stato** sostituire `1,60` con `2,47`: e' stato **tolta la ricostruzione**,
+   perche' sostituire una media con un'altra media sposta il difetto invece di eliminarlo.
+2. **`touch_damage_last` non e' letto da nessuno in `src/`.** Sette occorrenze, tutte in
+   `horde.gd`: dichiarazione, azzeramento, scrittura, azzeramento al restart, e due commenti. Il suo
+   scarto di `8,000` costante non era un difetto del gioco: era un difetto di **chi lo aveva scritto**.
+   Il criterio e' stato **cancellato**, non diviso per 8. Al suo posto un conto di **interi**
+   (`morsi dichiarati` contro `morsi arrivati`), che puo' andare rosso e non si satura.
+3. **Due firme `-> int` il cui risultato veniva buttato**: `_report_live_resources` e `_kill_until`.
+   Una funzione con la firma di una porta e il comportamento di una sonda e' peggio di una sonda,
+   perche' il lettore ragiona su quello che vede. `-ui` ha meccanizzato la classe in una porta:
+   `_ritorni_morti_si_provano(h)` scansiona il file e va rossa su ogni chiamata a firma non-`void` col
+   risultato scartato.
+4. **`morso peggiore 100.0 hp` non era una misura, era il tetto della barra.** La differenza fra due
+   letture di hp non scende sotto zero, quindi quando il morso vero fa piu' di 100 hp la misura legge
+   esattamente 100. Sostituita da un intero che non ha soffitto:
+   **`passi in cui il morso ha azzerato la barra 36 su 16538`**.
+
+E illecchio di `-arda` su questo punto: `invuln` scende dentro `player.step()`, che nel test **non
+gira**. Senza decrementarlo a mano l'impalcatura avrebbe reso il giocatore irraggiungibile e
+**silenziato la legge che si voleva misurare**. Il rimedio che copre la misura e' peggio del difetto.
+
+#### APERTO, e non è una decisione che il vertice può prendere: **la legge è una misura di portata, non di lethality**
+
+Il criterio di m14 confronta `ingresso` e `uscita` in **hp al secondo**. E' la grandezza giusta per
+una legge che dice «l'orda non puo' essere piu' debole del giocatore». Ma il giocatore **non sente** gli
+hp al secondo: sente **il morso**. E la legge, cosi' com'e', **non dice niente** su quanto sia grosso un
+morso singolo. I due numeri possono soddisfare la legge e dare un morso istantaneo.
+
+Misurato (`test_arena`, che per arrivare a 200 vivi sale sette ondate con il giocatore fermo):
+
+```
+i 200 nemici vivi sono arrivati all'onda 8, dopo 16538 passi (275.63 s) e 2005 uccisioni
+impalcatura: hp ripristinati 46 volte su 16538 passi guardati, hp persi realmente 3737.1
+             su 100.0 = 37.37 vite
+passi in cui il morso ha azzerato la barra 36 su 16538
+morso peggiore letto >= 100.0 hp in un passo, numero SATURATO dalla barra
+```
+
+**36 passi su 16538 in cui un morso solo ha azzerato la barra**, all'onda 8, con un giocatore che
+**non ha mai preso una carta** (`max_hp` resta `100,0` perche' il pannello non viene mai risposto:
+e' il caso peggiore in assoluto, e va detto perche' un giocatore vero all'onda 8 ha ~7 potenziamenti
+e almeno 3 carte vita). E il numero vero **non lo sappiamo**: e' **saturato**, quindi e' **piu' grande
+di 100 hp**.
+
+**La domanda e' una sola ed e' dell'utente:** *e' voluto che oltre una certa onda un morso solo
+uccida, perche' la `B` puo' fermare il gioco ma non puo' annullare un contatto?* Il caso e' reale,
+non ipotetico, ed e' il primo punto in cui la legge di m19 dice una cosa e il gioco ne fa un'altra.
+Non si risolve muovendo `CATCHUP_SAFETY`: quel numero parla di portata, e il problema e' il morso.
+
+#### Le onde della milestone 11, onde m19
+
+| onda | agenti | esito | gate | stato |
+|---|---|---|---|---|
+| **m19-a** | `-orda` | via `HP_SCALE_MAX`, dentro `touch_scale_of(w)`, criterio con denti nelle due direzioni, quattro strumenti di misura corretti **togliendo** | `GATE: 8/8`, `PERM: 15/15` rieseguite dal vertice | **verde** |
+| **m19-b** | `-ui` | `vive`/`vives`, due firme `-> int` con il risultato scartato, `_ritorni_morti_si_provano` | `PASS test_ui (577 asserzioni)` | **verde** |
+| **m19-c** | `-arda` | impalcatura che tiene vivo il giocatore per il criterio 3; il numero stampato **era** saturo, ora e' un intero | `PASS test_arena (866 asserzioni)` | **verde** |
+
+`test_orda`: `PASS orda (17737 asserzioni)`, **101.470 ms dei 120.000** — restano **18.530 ms**.
+Il margine e' sceso di 6 s in tre giorni e `difficolta` costa 23.737 ms da sola: e' il primo file da
+guardare quando qualcosa si rompe perche' non ci sta piu'.
 
 ## 11. Politica delle risorse
 

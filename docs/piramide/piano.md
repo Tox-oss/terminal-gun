@@ -4323,20 +4323,35 @@ diventa una scelta di **gestione della popolazione**, non una leva di difficolta
 dove **gia' funziona e ha gia' denti**: i punti vita con la legge di m19 (`ing/usc` verde, legge di
 prima rossa a `2,12e-12`), il firewall, e la miscela di specie.
 
-#### IL NUMERO CHE MANCA, e da cui dipende tutto il finale
+#### IL NUMERO CHE MANCAVA, **e adesso c'è** (2026-10-17)
 
-** Quanto dura la `Spam`?** Il vertice non lo scrive perche' non lo sa, e non lo indovina. Da questa
-durata dipende **l'istante in cui il firewall si ferma**, e quindi la durata dell'arena del boss.
+**Quanto dura la `Spam`? `60 s`.** Chiuso dall'utente: «spam 1 minuto». Prima riga della tabella, e
+adesso **scritta**.
 
-| se la `Spam` dura | il firewall si ferma | il boss dura (fino a 1080 s) |
-|---|---|---|
-| 60 s | 780 s | 300 s = 5 min |
-| 120 s | 840 s | 240 s = 4 min |
-| 180 s (tutto il segmento) | 900 s | 180 s = 3 min |
+```
+t =   0 s   partita, grazia
+t = 120 s   il firewall comincia a scorrere
+t = 180 s   PRIMA Spam   180 -> 240 s
+t = 360 s   SECONDA Spam 360 -> 420 s
+t = 540 s   TERZA Spam   540 -> 600 s
+t = 720 s   QUARTA Spam  720 -> 780 s   <- il check della build
+t = 780 s   il firewall si FERMA all'ultima area
+t = 780 s   il BOSS comincia
+t = 1080 s  il firewall comincia a stringersi -> morte garantita
+```
 
-L'utente ha detto «il **minuto** di orda» parlando del check della build, che è un indizio e non una
-misura: e' la prima riga della tabella, ma **resta una riga letta, non una riga scritta**. Chi lo
-chiude porta un numero.
+**Il finale è di `300 s`, cioè cinque minuti esatti.** Non e' un numero che esce bene per caso: è la
+ragione per cui `60` era la risposta giusta fra le tre. Con `120` il boss durava `240 s` e con `180`
+durava `180 s`, e in entrambi i casi la `Spam` **finiva esattamente quando cominciava il boss** —
+l'evento che dovrebbe darti il tempo di sistemare la build si sarebbe chiuso mentre ti stava
+uccidendo. Con `60` fra la fine della quarta `Spam` e l'inizio del boss non c'e' sovrapposizione,
+e il firewall che si ferma ha `60 s` di anticipo sul nemico successivo.
+
+**Quindi `60 s` e' il primo numero di m12 che non e' una misura ma e' comunque giusto per una
+ragione strutturale**, e va detto cosi' perche' e' la classe di numero piu' fragile di questo piano:
+un numero di disegno che si regge solo sull'estetica diventa arbitrario alla prima sessione di gioco.
+
+**Il boss dura `300 s` e da qui in poi l'unico orologio che conta e' quello.**
 
 #### LA PROBE CHE IL VERTICE AVEVA DETTO CHE AVREBBE CORSO, e perché non la corre
 
@@ -4401,15 +4416,26 @@ Quindi **le nascite superano le uccisioni dell'8,89%**. Il tetto di assorbimento
 invece di stare fermo. Non e' un difetto, e' la misura che chiude il conto su quel numero: la
 derivazione era giusta nella forma e `1,09x` invece di `1,00x` nella taratura.
 
-**Quello che resta non e' una misura, e va detto cosi' perche' e' la differenza.** Mancano **due numeri
-di disegno**, nessuno dei due ricavabile da una misura:
+**I due numeri di disegno che mancavano, e adesso come sono chiusi.** Erano due, nessuno dei due
+ricavabile da una misura: sono design, e il design lo porta l'utente. Li ha chiusi entrambi il
+**2026-10-17**, in una riga: «spam 1 minuto, ransomware disabilita un'arma in caso di contatto».
 
-1. **Quanto dura una `Spam`.** Da l' dipende l'istante in cui il firewall si ferma e la durata
-   dell'arena del boss: 60 s lo ferma a 780 s, 120 s a 840 s, 180 s a 900 s.
-2. **Che cosa fa `Ransomware`**, che e' il primo canale `orda -> giocatore` e percio' il primo che va
-   nella direzione opposta a tutti gli altri. Il piano **nomina** `Trojan`, `Wurm`, `Ransomware` e
-   `Rootkit` ma non dice cosa facciano, e un canale senza un carico utile da consegnare e' uno stub:
-   questo progetto ne ha gia' cancellato uno (`touch_damage_last`, che non leggeva nessuno).
+1. **Durata della `Spam`: `60 s`.** Scritto, con la tabella dell'orario finale e il perché di `60` fra
+   le tre candidate. Vedi sopra, «IL NUMERO CHE MANCAVA, e adesso c'è».
+2. **Cosa fa `Ransomware`: toglie di mezzo un comando equipaggiato al contatto.** E il canale esiste
+   gia': `disable_command()` in `src/core/contracts.gd`, **il primo canale `orda -> giocatore`**.
+   Ha il **payload deliberatamente vuoto** — se portasse l'id del comando, `-orda` dovrebbe leggere
+   `player.gd` — quindi **quale** comando e **per quanto** tempo restano di `-gameplay`.
+
+   **«Un'arma» e' «un comando», perche' le armi adesso sono i comandi** (`echo`/`grep`/`ping`/`curl`/
+   `rm`). Non e' una metafora: e' la stessa lista. Quindi il nemico non toglie un'arma e basta,
+   **toglie una riga della riga di comando del giocatore**, e quella riga ritorna dopo un tempo che
+   nessuno ha ancora misurato.
+
+**Quello che resta aperto non e' piu' un numero di disegno**: sono cinque misure, e sono tutte
+scritte nella sezione sopra — danno e periodo del firewall, velocità del firewall (che segue
+dall'estensione verticale, ancora ignota), estensione verticale e larghezza del volume, rateo dei
+segmenti 2-4, durata dello stringimento dopo `1080 s`.
 
 #### Le casse: sono le 28 esistenti, e i 27 ostacoli restano ostacoli
 

@@ -4385,6 +4385,75 @@ prossima onda puo' farlo.
 `106,72 s`** (era `45,85 s`). Sono 2,33 volte, e un segmento e' 180 s: **l'onda 1 mangia il 59% del
 primo segmento**. E' «parti piano e con poco» fatto al massimo, forse oltre.
 
+**Il numero derivato, adesso confrontato con quello che il gioco fa davvero.** Ieri
+`ASSIMILATION_1 = 2,0408/s` e' stato derivato da due misure: DPS al livello 1 `28,57 hp/s` diviso
+`14 hp` del runner. Quel conto presuppone **due cose che un giocatore non fa**: che ogni colpo colpisca
+e che spari sempre. Oggi la misura c'e', dalla stessa riga di `test_progression`:
+
+```
+200 uccisioni in 106,72 s        ->  1,8741 uccisioni/s reali
+SPAWN_RATE di produzione         ->  2,0408/s
+2,0408 / 1,8741                  =  1,0889
+```
+
+Quindi **le nascite superano le uccisioni dell'8,89%**. Il tetto di assorbimento che avevo derivato e'
+**ottimista di quasi un punto dieci**, e ottimista **nel verso giusto**: il campo cresce, lentamente,
+invece di stare fermo. Non e' un difetto, e' la misura che chiude il conto su quel numero: la
+derivazione era giusta nella forma e `1,09x` invece di `1,00x` nella taratura.
+
+**Quello che resta non e' una misura, e va detto cosi' perche' e' la differenza.** Mancano **due numeri
+di disegno**, nessuno dei due ricavabile da una misura:
+
+1. **Quanto dura una `Spam`.** Da l' dipende l'istante in cui il firewall si ferma e la durata
+   dell'arena del boss: 60 s lo ferma a 780 s, 120 s a 840 s, 180 s a 900 s.
+2. **Che cosa fa `Ransomware`**, che e' il primo canale `orda -> giocatore` e percio' il primo che va
+   nella direzione opposta a tutti gli altri. Il piano **nomina** `Trojan`, `Wurm`, `Ransomware` e
+   `Rootkit` ma non dice cosa facciano, e un canale senza un carico utile da consegnare e' uno stub:
+   questo progetto ne ha gia' cancellato uno (`touch_damage_last`, che non leggeva nessuno).
+
+#### Le casse: sono le 28 esistenti, e i 27 ostacoli restano ostacoli
+
+L'utente lo ha notato giocando, il 2026-10-17: **«i cubi ocra sono ancora inerti»**. Sono le casse di
+`arena_ground.gd:24`, `CRATE_COUNT := 28`, e sono **scenografia dall'inizio** — la riga di commento
+alla 22 dice «sono un segnalibro, non un labirinto». Nessun tasto, nessuna collisione. **Non e' un
+difetto**: e' roba che non ha mai dovuto funzionare.
+
+**Il difetto vero era la collisione di nomi**: §1.14-ventiquarta decisione 4 diceva che i **27
+ostacoli** diventavano casse apribili con `E`, quindi il gioco avrebbe avuto **28 casse inerti e 27
+casse apribili** — due significati della stessa parola, uno dei quali occupava il nome dell'altro.
+
+**Deciso: sono le 28 esistenti.** I 27 cilindri bassi restano **ostacoli solidi**.
+
+**Perche' questa scelta e' quella economica, e non e' un parere.** I 27 cilindri sono **carichi**:
+stanno in `Game.obstacles`, il flow field ci aggira attorno, `-orda` ci ha i denti e `test_gameplay`
+asserisce `player.obstacle_count()`. Il piano stesso avvertiva cosa sarebbe costato convertirli:
+
+```
+criterio m10 "campo non ricostruito mai, 2400 passi"
+   -> FALSO per costruzione: aprire una cassa cambia il campo
+criterio m10 "0 nemici dentro un ostacolo in 30 s a 200 vivi"
+   -> va riscritto perche' la cassa non c'e' piu'
+```
+
+Le 28 casse scenografiche **non stanno in niente di tutto questo**. Scegliendole, **entrambi i criteri
+di m10 restano verdi senza essere riscritti**, e aprire una cassa **non cambia la simulazione**.
+
+**La conseguenza di disegno, che e' una cassa diversa da quella descritta**: il bottino diventa una
+**deviazione che scegli**, non una cosa che trovi a ogni ostacolo. E' un oggetto diverso, e va detto.
+
+**Tre cose che questa scelta rende necessarie, e che nessuna foglia ha ancora:**
+
+1. **`E` e' un verbo nuovo.** Input di `-gameplay`, prompt di `-ui`, e **un canale che nessuna foglia
+   possiede**. Non e' `damage_player`: quello e' danno, non interazione.
+2. **`medikit` e' una terza via e oggi non esiste nessuna guarigione.** `hp` va da 0 a 100 e basta:
+   nel codice non c'e' nessun punto in cui la vita **sale**. Una cassa che cura introduce il primo.
+3. **La disposizione delle casse e' a disco e deve diventare a volume.** `_build_crates()` fa
+   `rng.randf_range(CRATE_INNER = 7,0, radius - CRATE_OUTER_GAP = 4,0)` cioe' un **disco**; quando
+   la mappa sara' un volume verticale, anche le casse dovranno essere distribuite in un volume. E' lo
+   stesso cambiamento dell'arena, non uno nuovo, ma va detto perche' il `rng` delle casse **non e' il
+   4242 della scena** (le casse si costruiscono una volta sola in `_ready()`, l'orda tira un seme
+   nuovo a ogni `restart_run()`) e i due flussi **devono restare separati**.
+
 #### LA REGOLA DEI FORMATI, che adesso vive QUI e non in una porta
 
 **Godot accetta solo `%d`, `%s`, `%x`, `%c`, `%f`/`%.Nf`. I caratteri di conversione `g` ed `e` non

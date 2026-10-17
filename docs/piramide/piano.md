@@ -4744,6 +4744,66 @@ La variabile **non e' ancora stata espansa** quando il permesso viene valutato, 
 
 **Il vertice lo ha insegnato di nuovo** nella stessa forma, e tre foglie hanno perso **quattro porte** prima che `-arena` leggesse quel file. La regola per il vertice: **le istruzioni a una foglia devono essere copiate dal file che la foglia puo' leggere, non dalla memoria del vertice.**
 
+#### `test_progression`: la soglia dell'onda 1 **resta `200`**, e il suo fallimento e' altrove
+
+L'utente ha lasciato la decisione al vertice (2026-10-17). **La soglia non si tocca**, e il
+motivo e' che il numero e' una **durata travestita**:
+
+```
+200 uccisioni a 1,30/s   ->  154 s   dentro il segmento da 180 s
+100 uccisioni a 1,30/s   ->   77 s   meno di mezza segmento
+```
+
+Abbassarla al numero del campo (`100`) cambierebbe **la durata dell'onda**, non il suo
+significato, e un'onda da `77 s` su un segmento da `180 s` fa salire di livello **una volta
+per onda** invece che tre. **Quindi `200` resta**, ed e' derivato, non scelto.
+
+**E il suo fallimento non e' un problema di soglia.** Il criterio chiede `200` uccisioni in
+`40.000` passi e ne ottiene **`45`**:
+
+```
+m12 mira (scena vera, torre montata):  10,0 s, 27 colpi (2,700/s), 9 uccisioni (0,9000/s)
+test_progression:                     45 uccisioni in 666,67 s  ->  0,0675/s
+```
+
+**Nei primi 10 s il ritmo e' sano** (`0,9000/s`) e poi la partita **finisce**: da `0,9000/s` a
+`0,0675/s` non e' un calo di ritmo, e' una **partita terminata**. Quindi la domanda non e'
+«la soglia e' giusta?» — lo e' — ma **«perche' la partita finisce a 45 uccisioni?»**, e quella e'
+una **misura**: `hp` alla fine, e **il passo al quale `hp` arriva a zero**.
+
+Non si abbassa la soglia per far verde la porta, e non si alza per far rossa qualcosa che e'
+giusto. **Si misura il motivo.**
+
+#### Il dirupo di `test_orda.gd`, che sta davanti a noi
+
+```
+test_orda.gd   116,0 s dei 120 s del tetto   ->  4,0 s di margine
+```
+
+`TEST_TIMEOUT_MS` resta a `120 s` — riconfermato due volte dall'utente, e non si tocca. Quindi
+**qualsiasi prova che `-orda` aggiunge lo fa esplodere**, e il sintomo sara' un timeout che sembra
+un hang: peggio di un rosso, perche' **non dice quale prova e' quella che ha mangiato il tempo**.
+I due posti gia' noti sono `miscela` a `27,1 s` e `scena_vera` a `17,6 s`.
+
+**Il rimedio e' restringere lo scope di quelle due sezioni, non alzare il tetto.** E va detto
+prima, perche' il giorno che il timeout arriva la reazione naturale e' alzare il numero, che e'
+esattamente la mossa che questo progetto vieta.
+
+#### La lezione di questa onda, e la regola che ne nasce
+
+**Quattro dei rossi che hanno chiuso l'ultima parte non erano nel codice di produzione.** Erano,
+nell'ordine: un confronto di confine su un numero normalizzato; uno scarto laterale passato a
+*entrambe* le camminate di un controfattuale; un ripiego silenzioso che restituiva `-1`, un valore
+che **non esiste in nessun mondo**; e un denominatore sbagliato in una funzione che serviva a due
+grandezze diverse.
+
+**La regola che ne escue, e che vale per la piramide:** **una sonda, un criterio e la sua
+dichiarazione devono guardare lo stesso istante e la stessa grandezza.** Tre volte su quattro la
+riga che mi ha fatto agire diceva **quello che la foglia credeva di aver misurato**, e non quello
+che aveva misurato. Ogni volta che e' successo, la foglia lo ha trovato da sola quando ha potuto
+girare da sola — e tre di queste volte il numero che lo chiudeva era gia' in una riga che non
+guardavo.
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

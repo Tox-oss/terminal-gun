@@ -6,7 +6,7 @@ extends Node
 ## DATI — nel proprio `_ready()`, una volta sola:
 ##     Game.player = self
 ##     Game.horde = self
-##     Game.arena_radius = 60.0
+##     Game.arena_radius = 35.0
 ##
 ## Quell'ultima riga e' un **esempio di forma**, non un valore da copiare: il raggio
 ## dell'arena ha una sola fonte, `src/render/arena.gd:ARENA_RADIUS`, che la registra lei
@@ -59,6 +59,20 @@ const API := [
 	"player_position",
 	# --- m7, 2026-10-13: la via che il danno prende. Vedi `damage_player` sotto.
 	"damage_player",
+	# --- m12, 2026-10-17: la torre. Vedi `floor_of` e `player_floor` sotto.
+	#
+	# `floor_of` NON e' qui e non deve esserlo: e' aritmetica pura sul contratto, non
+	# un'implementazione, e quindi non si registra. Registrarla sarebbe chiedere a
+	# una foglia di copiare un'operazione che il contratto fa gia' e meglio.
+	"player_floor",
+	# Il primo canale `orda -> giocatore`. Registrato da `-gameplay` nell'onda delle
+	# armi, quando i due numeri (quale comando, per quanto tempo) saranno misurati.
+	"disable_command",
+	# `-arena`. La primitiva della regola di nascita fuori schermo.
+	"ground_visible",
+	# `-arena`. La quota della superficie sotto il giocatore: l'unica via per salire
+	# la rampa senza introdurre un sistema di movimento. Vedi `surface_height_at`.
+	"surface_height_at",
 ]
 
 # --- Dati esposti dalle foglie -------------------------------------------------
@@ -120,7 +134,22 @@ var horde: Node
 ## e' una seconda fonte e non deve essere cambiato per ottenere un verde: e' il valore che
 ## `tests/test_smoke.gd` e `tests/test_gameplay.gd` asseriscono, e il criterio n. 2 di m9
 ## verifica che tutte le copie **esistenti** dicano lo stesso numero.
-var arena_radius: float = 60.0
+##
+## ## m12, 2026-10-17: `60,0 -> 35,0`, e perche' il default era nel posto sbagliato
+##
+## Non e' una correzione di comodo: a `35,0 m` la torre sta e a `60,0 m` no. Il numero
+## e' derivato da una **misura di `-orda`**, non da una scelta: con `R = 20,0 m` il
+## raggio degli ostacoli scende a `1,30 m` (e' `RADIUS_FRACTION = 0,065` per raggio),
+## `RADIUS[BOSS]` e' `1,90 m`, la corona rasterizzata dell'anello interno si chiude e
+## **il centro, dove nasce il giocatore, diventa irraggiungibile**. Soglia misurata:
+## `R > 29,23 m`. A `35,0 m` il margine sugli ostacoli e' del `19,7%` invece del `2,6%`
+## che avrebbe avuto a `30,0 m`, e la larghezza (70 m) resta sotto l'altezza (80 m).
+##
+## **Questa copia e' dichiarata e va tenuta allineata**: `tests/test_arena.gd` la
+## confronta con la fonte in `src/render/arena.gd` e va rosso se differiscono, ed e'
+## esattamente quello che deve succedere. `-orda` ne ha **una copia sua** in
+## `src/sim/horde.gd:564` che va portata allo stesso numero.
+var arena_radius: float = 35.0
 
 ## ## m11, 2026-10-14: il fattore di calibrazione del corpo entra nel contratto.
 ##
@@ -845,6 +874,139 @@ func player_position() -> Vector3:
 		return c.call() as Vector3
 	_missing("player_position", "terminal-gun-gameplay")
 	return Vector3.ZERO
+
+## -arena. **A che quota c'e' la superficie sotto il punto `punto` sul piano `piano`,
+## oppure `-1,0` se quel punto non e' su una rampa.**
+##
+## ## LA DOMANDA CHE NASCE DALLA RAMPA, e non l'avevo vista
+##
+## `-arena` ha costruito `src/render/arena_ramp.gd` — tre rampe, geometria e collisione,
+## pendenza `20 m` su `24 m` di corsa — e ha segnalato il buco: **`player.gd::_move()`
+## scrive solo su XZ** (`world_direction()` appiattisce l'input a `Vector3(x, 0, z)`), quindi
+## il giocatore **non sale**. E non puo' salire da solo, perche' salire vuol dire scrivere
+## `y`, e questo progetto vieta esplicitamente **un nuovo sistema di movimento**.
+##
+## La via che non e' un sistema di movimento e' una sola: **il giocatore continua a muoversi
+## in XZ e prende la quota dalla superficie che ha sotto.** Non e' un salto, non e' una
+## gravita', non e' un ascensore: e' la stessa forma di `ground_visible()`, cioe' una
+## domanda di geometria al possessore della geometria.
+##
+## ## Perche' `-1,0` e non `0,0`
+##
+## Una quota di `0,0` **e' una quota vera**: e' il fondo della prima rampa, e rispondere
+## `0,0` a «non c'e' niente qui» la renderebbe indistinguibile dal fondo della torre. Il
+## `-1,0` e' l'unico valore che la torre non raggiunge mai, quindi non si confonde con
+## niente. E' la regola di `Vector3.ZERO` in `random_spawn_point()`, applicata a una quota.
+##
+## **Il parametro `piano` e' l'indice della rampa, non una decorazione.** Su un disco da
+## `35 m` i corridoi di piani diversi **si incrociano**, quindi senza il piano un punto
+## avrebbe due risposte e nessuna delle due sarebbe sbagliata. Il vincolo e' scritto sopra
+## al corpo della funzione, perche' e' il posto dove due foglie lo leggono e lo interpretano
+## in modo diverso.
+##
+## **Il neutro e' `-1,0` e rumora**: non registrata significa che la torre non e' montata, e
+## in quel mondo il giocatore resta sul pavimento — che e' la risposta **esatta** per il mondo
+## di prima di m12, non una risposta inventata per far passare una prova. Una prova che
+## asserisce «il giocatore sale sul piano 3» va rossa, e per la ragione giusta.
+## ## L'INDICE DELLA RAMPA, scritto per numeri e non in prosa
+##
+## `f` e' **il piano che la rampa LASCIA**, quindi `f` va da `0` a `floor_count - 2`:
+## la rampa `0` parte dal piano `0` e arriva al piano `1`, l'ultima parte dal piano
+## `floor_count - 2` e arriva in cima. **Mentre la si percorre il piano logico e' `f`**,
+## cioe' quello da cui si e' partiti, e il piano cambia **all'arrivo**, non durante.
+##
+## Questo e' il punto su cui due foglie erano in disaccordo, quindi la prosa non basta:
+## `surface_height_at(p, 0)` risponde `>= 0,0` **solo** se `p` e' dentro il corridoio della
+## rampa che parte dal piano `0`. Chiedere `floor_count - 1` non ha risposta: **non esiste
+## una rampa che parte dall'ultimo piano**, perche' l'ultimo piano e' la destinazione e non
+## ha niente sopra di se'.
+##
+## La conseguenza pratica e' che **chi chiama passando il proprio piano ottiene la risposta
+## giusta**: e l'unico uso previsto, cioe' «il giocatore e' dentro una rampa che parte dal
+## mio piano?», torna vero senza che nessuno debba ricordarsi che le rampe sono
+## numerate dal piano di partenza e non da quello di arrivo.
+func surface_height_at(punto: Vector2, piano: int) -> float:
+	var c := _live("surface_height_at")
+	if c.is_valid():
+		return c.call(punto, piano) as float
+	_missing("surface_height_at", "terminal-gun-arena")
+	return -1.0
+
+## ## L'asse della rampa, perche' senza questo due foglie scrivono la stessa divisione
+##
+## `ramp_angle(f)` e' **l'angolo della rampa che parte dal piano `f`**, ed e' aritmetica
+## pura sul contratto come `floor_of()`: la rampa si distribuisce su un giro completo,
+## `TAU * f / (floor_count - 1)`, quindi `f = 0` e' a `0°`, `f = 1` a `90°`, `f = 2` a `180°`.
+##
+## **Serve perche' `src/sim/obstacles.gd` deve allineare i varchi degli anelli su questo
+## angolo**, e lo farebbe preloading `src/render/arena_ramp.gd`: un file di simulazione
+## che legge un file di rendering per una divisione. E' esattamente la copia che la
+## sezione 5 vieta, peggio di quelle gia' contate, perche' qui la copia e' **silenziosa**:
+## se i due calcoli divergono di un grado, i dischi non coprono piu' la rampa e nessuna
+## asserzione lo dice, perche' il corridoio e' ancora geometricamente valido.
+##
+## `floor_count = 1` non ha rampa e restituisce `0,0`: in quel mondo `TAU * f / 0` non e'
+## un angolo e' una divisione per zero.
+## ## L'asse, e perché il denominatore e' `floor_count` e NON `floor_count - 1`
+##
+## `ramp_angle(f)` e' l'angolo su cui devono aprirsi i **varchi** degli anelli, e la
+## formula e' `f * TAU / floor_count`: a quattro piani dà `0° / 90° / 180° / 270°`.
+##
+## **Ho sbagliato due volte e il secondo errore lo ha trovato una misura.** La prima
+## volta ho scritto `f * TAU / (floor_count - 1)` ragionando «le rampe sono tre, quindi
+## tre quarti di giro». Il denominatore delle rampe **e'** `floor_count - 1`, ma la fase
+## degli anelli e' un'altra grandezza. Poi ho «corretto» aggiungendo una seconda
+## funzione, `layout_phase()`, ed era la mossa sbagliata: **aggiungere un nome invece di
+## togliere il numero sbagliato lascia due grandezze con due nomi**.
+##
+## **Perche' la dimostrazione di `-orda` chiude la questione, ed e' un teorema e non un
+## caso.** La fase che mette il varcio su `alpha` e' `alpha - PI/n` **modulo il passo**,
+## quindi esiste **una sola classe di fasi per asse**, e due piani hanno lo stesso
+## reticolo **se e solo se** i loro assi sono uguali modulo il passo:
+##
+## ```
+## assi 0/120/240/360   ->  resti modulo 72 gradi:  0 / 48 / 24 / 0     piano 3 = piano 0
+## assi 0/ 90/180/270   ->  resti modulo 72 gradi:  0 / 18 / 36 / 54    distinti
+## ```
+##
+## Con `360°` il piano 3 riceveva **lo stesso reticolo del piano 0**, e i due sintomi sono
+## lo stesso difetto visto da due lati: «quattro reticoli diversi» che falliva, e «nessuna
+## coppia di dischi si tocca» che leggeva `min 0,00 m`. **Quattro reticoli diversi e un
+## varcio su ogni rampa sono due condizioni che reggono insieme solo con assi distinti**,
+## e con `TAU / floor_count` sono distinti.
+func ramp_angle(f: int) -> float:
+	var n := maxi(floor_count, 1)
+	return TAU * float(f) / float(n)
+
+## ## L'autoload raggiunto da una funzione **statica**, e perche' serve
+##
+## `Game` come identificatore globale **non e' affidabile dentro una `static func`**:
+## `src/render/arena_ramp.gd` e `src/sim/obstacles.gd` hanno entrambe una funzione
+## statica che lo usa, e il risultato e' un `Compile Error: Identifier not found: Game`
+## che compare **solo** in uno dei test che le caricano — cioe' il file da solo compila,
+## e il fallimento dipende da **chi lo ha caricato prima**. E' la peggiori forma di
+## difetto: non riproducibile con lo stesso comando.
+##
+## La via che funziona e' passare dal **main loop**, che esiste sempre:
+##
+##     static func ramp_angle(f: int) -> float:
+##         var game := autoload_game()
+##         if game == null: return 0.0
+##         return game.call("ramp_angle", f) as float
+##
+## Il ritorno `null` e' **il neutro dichiarato**: in un mondo senza torre `ramp_angle`
+## vale `0,0`, che e' la risposta vera per `floor_count < 2`, e perche' la torre non
+## esiste anche quando l'autoload non e' ancora in albero. **Il chiamante che ha bisogno
+## di distinguere** — «non c'e' torre» da «la torre c'e' ma non e' montata» — deve
+## chiedere `has_impl()` o `floor_count`, non affidarsi a questa funzione.
+static func autoload_game() -> Node:
+	var loop := Engine.get_main_loop()
+	if loop == null:
+		return null
+	var root := loop.get("root") as Node
+	if root == null:
+		return null
+	return root.get_node_or_null("Game")
 
 # --- Interno -------------------------------------------------------------------
 

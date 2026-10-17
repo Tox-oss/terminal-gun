@@ -4681,6 +4681,69 @@ nuova difficolta'**, ed e' il punto aperto di `prompt_armi_e_augment.md` domanda
 punisce chi gioca male, che e' esattamente chi non dovrebbe punire di piu'. **Non e' deciso** e resta
 dichiarato.
 
+#### Le due decisioni che restano al vertice, e sono entrambe mie (2026-10-17)
+
+La torre ha chiuso tutti i criteri di simulazione. I quattro rossi rimasti si riducono a **due numeri**, e nessuno dei due e' un difetto di codice.
+
+**1. `12` direzioni di input, perche' `8` non tengono la retta.**
+
+`-arena` e `-gameplay` hanno misurato la stessa cosa da due lati:
+
+```
+rampa 2, 76 passi a 7,0 m/s     deriva laterale 5,9234 m  su 26 m di corsa   ->  22,5°
+gameplay, corridoio vero         il canale smette di rispondere al passo 194
+                                 quota 19,103 m  ->  mancano 0,897 m
+```
+
+`22,5°` e' esattamente **meta' di `45°`**: otto direzioni non tengono la retta, e meta' errore e' meta' passo. La tabella di `-gameplay`:
+
+| `D` | errore | deriva su 24 m | margine |
+|---|---|---|---|
+| 8 (oggi) | `11,25°` | `4,77 m` | ✗ supera `4,00 m` di meta' larghezza |
+| 10 | `9,00°` | `3,80 m` | `0,20 m` = **5%** — non sopravvive |
+| **12** | `7,50°` | `3,16 m` | `0,84 m` = **21%** ✓ |
+
+**Perche' `10` non basta**: il `5,9234` misurato dice che la formula **sottostima il misurato del `13%`**, e un margine del `5%` non sopravvive a uno scarto del `13%`. Quindi **`12`**, dichiarato in `src/player/player.gd` come `N_DIREZIONI_INPUT_DICHIARATE` **e non ancora applicato**.
+
+**E la leva non e' un conteggio.** Se l'ingresso e' analogico **l'angolo lo da' il pollice** e `12` non costa niente: si cambia la risoluzione con cui si legge. Il conteggio lo pagano solo **il pilota automatico** (che deve tenere la retta dentro un corridoio) e **la tastiera** (dove `12` vettori non sono raggiungibili con un D-pad). Quindi la domanda vera non e' «`8` o `12`» ma «**quanto e' fine la risoluzione con cui si legge un analogico**».
+
+**2. Il pavimento della banda del tempo di riempimento non e' piu' valido, e non si allarga.**
+
+```
+banda attuale   5,52 - 90,00 s
+pavimento 5,52 s   dichiarato come "la misura di m4: 25 nemici entro 6 m"
+misurato adesso    12,50 s   con POP_BASE = 100, cioe' 25 per piano
+```
+
+**Non e' la banda che si e' sbagliata: e' la grandezza.** `5,52 s` e' stato misurato su **un campo da `25` nemici** e lo si sta confrontando con **un campo da `100`**. Sono due grandezze diverse, e la banda ne prometteva una terza.
+
+E' la stessa classe del fallback a `-1` di questa onda: **un numero che resta nel posto suo mentre la cosa che misura cambia di dimensione**.
+
+**Quindi: il pavimento `5,52 s` e' dichiarato non valido, e non si sostituisce con `12,50 s`.** Sostituirlo sarebbe prendere il numero del difetto e usarlo come riferimento. Il pavimento **si rimisura** sul campo che esiste, e il criterio stampa il numero cosi' la riga successiva lo puo' scrivere. **Fino ad allora la banda e' sospesa, e la sospensione e' dichiarata** — non un verde silenzioso.
+
+#### `test_progression`: la soglia dell'onda 1 resta rossa, e non la abbasso
+
+```
+FAIL test_progression: l'onda 1 si chiude e l'onda successiva parte (dopo 40000 passi, 45 uccisioni)
+```
+
+L'onda 1 chiede **`200` uccisioni** e il campo ne dà **`100`** (`POP_BASE = 100` totale, `25` per piano). Non e' un difetto di codice: e' **una soglia tarata su un'onda piatta**.
+
+**Non la abbasso a `100`.** Una soglia abbassata per far verde una porta e' la cosa che questo progetto vieta piu' di tutte: il rosso e' onesto, lo slancio no. Resta **debito dichiarato**, e la domanda che porta — «un'onda si chiude quando il campo e' vuoto, o quando hai ucciso un numero che non dipende dal campo?» — e' di disegno, non di misura.
+
+#### Il canale che ha insegnato la forma giusta del permesso
+
+`tools/env.sh:5-18` lo dice dal **2026-10-15**, con due misure a `-ui` e a `-gameplay`:
+
+```
+godot --headless --path . --script tools/gate.gd          <- nuda, funziona
+. tools/env.sh && "$GODOT" --headless ...                <- NON combacia
+```
+
+La variabile **non e' ancora stata espansa** quando il permesso viene valutato, quindi la riga che lo scanner vede e' `"$GODOT" --headless ...`, che **non combacia con `godot *`**, e cade su `shell "*" deny`. Il commento del file lo dice: *«in entrambi i casi la foglia ha perso la verifica perche' aveva scritto il comando come le era stato insegnato qui»*.
+
+**Il vertice lo ha insegnato di nuovo** nella stessa forma, e tre foglie hanno perso **quattro porte** prima che `-arena` leggesse quel file. La regola per il vertice: **le istruzioni a una foglia devono essere copiate dal file che la foglia puo' leggere, non dalla memoria del vertice.**
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

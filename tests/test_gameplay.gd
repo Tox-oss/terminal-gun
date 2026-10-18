@@ -193,6 +193,16 @@ const HORDE_SCRIPT := "res://src/sim/horde.gd"
 ## raggio del corpo del giocatore: due numeri che stanno li' e che il progetto
 ## ha gia' legato per iscritto (m8 criterio n. 2, m11-quarta criterio 1b).
 const ENEMY := preload("res://src/sim/enemy.gd")
+
+## Il layout degli ostacoli di `-orda`/`-sim`, letto dalla **sua** fonte. Serve a
+## una sola domanda: se i numeri che la mia scena vede sono gli stessi che il codice
+## dichiara, oppure se la mia scena e' stata popolata **prima** che la torre fosse
+## montata e con un ripiego. In `src/sim/obstacles.gd` i tre sono **`const`** e non
+## c'e' nessun `static var` che li ridomini a runtime (l'unico `static var` del
+## file e' `_detto_piatto`, una cache di messaggi), quindi **non possono cambiare da
+## una scena all'altra**: il numero che lo dimostra non e' la costante ma
+## `Game.obstacles.size()`, cioe' **quanti dischi la mia scena ha davvero**.
+const OBST := preload("res://src/sim/obstacles.gd")
 ## La resistenza al knockback del boss: 0.90 in `src/sim/enemy.gd`. Serve alla
 ## sezione `_knockback_impulse` per provare che e' **il contratto** a decidere
 ## quanto il colpo sposta, e non -gameplay a pre-scalare l'impulso.
@@ -239,15 +249,15 @@ const TOUGH := 100000.0
 # Il FAIL della porta e' l'avviso che non c'e' stato, e questa riga e' l'unica
 # cosa che puo' accorgersene.
 #
-# ## I numeri che da 60,0 derivano, ricalcolati tutti insieme
+# ## I numeri che da 35,0 derivano, ricalcolati tutti insieme
 #
-#   muro sull'asse             60,0 - 0,8 (`ARENA_MARGIN`)  = 59,20 m
-#   `x` e `z` in diagonale     59,20 / sqrt(2)              = 41,86 m
-#   clamp quadrato             59,20 * sqrt(2)              = 83,72 m
-#     ... oltre il muro                                       23,72 m
-#   tempo a 7 m/s              59,20 / 7                    =  8,46 s
-#   area rispetto a R=28       (60/28)^2 = 6648/2463        =  4,6 volte
-#   finestra di 2 m sul raggio 2/28 = 7,1%   2/60 = 3,3%
+#   muro sull'asse             35,0 - 0,8 (`ARENA_MARGIN`)  = 34,20 m
+#   `x` e `z` in diagonale     34,20 / sqrt(2)              = 24,18 m
+#   clamp quadrato             34,20 * sqrt(2)              = 48,37 m
+#     ... oltre il muro                                       13,37 m
+#   tempo a 7 m/s              34,20 / 7                    =  4,89 s
+#   area rispetto a R=28       (35/28)^2 = 1225/784        =  1,56 volte
+#   finestra di 2 m sul raggio 2/28 = 7,1%   2/35 = 5,7%
 #
 # Ogni altro numero di questo file che dipende dal raggio e' **ricalcolato** li'
 # dove e' usato, con la formula dichiarata accanto: una copia di un derivato e'
@@ -255,13 +265,28 @@ const TOUGH := 100000.0
 # di prima, ed e' dichiarata come cronologia perche' e' una misura di m9, non un
 # atteso di questo file.
 #
-## La tabella di m9 come **cronologia**, non come atteso: il perche' 46 e non 40
+# ## m12, 2026-10-17: `60,0 -> 35,0`, e perche' questa riga e' cambiata **adesso**
+##
+## Il vertice ha portato il raggio da **60,0 a 35,0 m** e lo ha dichiarato prima, in
+## `src/core/contracts.gd` (`var arena_radius: float = 35.0`) e in
+## `docs/piramide/piano.md`. Il numero non e' una scelta estetica: deriva da una
+## **misura di `-orda`** — a 20 m il raggio degli ostacoli scende a 1,30 m
+## (`RADIUS_FRACTION = 0,065`), `RADIUS[BOSS]` e' 1,90 m, la corona dell'anello
+## interno si chiude e **il centro, dove nasce il giocatore, diventa irraggiungibile**.
+## Soglia misurata: `R > 29,23 m`; a 35,0 m il margine sugli ostacoli e' del 19,7%.
+##
+## Quindi il perno di questo file passa a **35,0**. Il fatto che sia cambiato
+## rispetto alla mia sessione precedente e' il motivo per cui la riga e' commentata:
+## un numero cambiato senza che la foglia lo sentisse e' il falso verde peggiore, e
+## questa e' la voce che lo dice invece di lasciare il 60,0 in silenzio.
+#
+# ## La tabella di m9 come **cronologia**, non come atteso: il perche' 46 e non 40
 ## era la tabella di densita' di piano §1.12: a 200 nemici il disco libero piu'
 ## grande passava da 9,5 m (R=28) a 19,1 m (R=46), con l'area libera quasi la
 ## stessa (85,2% -> 94,6%): il guadagno e' lineare nel raggio e non nell'area,
 ## perche' l'orda forma un anello di ~9,4 m intorno al giocatore e il muro e' la
 ## sola cosa che si allontana, e il 40 non compra niente.
-const RAGGIO_ARENA := 60.0
+const RAGGIO_ARENA := 35.0
 
 # --- m5: la camera REALE, e i numeri che la costruiscono ------------------------
 #
@@ -315,6 +340,24 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## ## 21 -> 24: l'incremento e' ancora di `-arena` (m15, 2026-10-15) e si dichiara qui.
 ## Sono **tre nodi**, e sono tutti e tre della stessa forma: `EnemiesBig` ed `EnemyBoss` — i modelli distinti per specie (`enemy_big.glb` ed `enemy_boss.glb`) che gia' esistevano nell'eseguibile e non erano caricati — e `MortarShot`, il colpo del mortar che cade. `node_count` va da 46 a 49; la HUD resta a 25, quindi i nodi non-HUD vanno da 21 a 24 e il tetto di 24 sotto e' quello giusto. Sono tre `MultiMeshInstance3D` e non tre nodi per colpo: e' lo stesso criterio con cui `MortarDome` e i 27 ostacoli sono entrati, e per questo l'incremento si dichiara invece di aggirare la ripartizione.
 ##
+## ## 24 -> 30: l'incremento e' della **torre**, e la voce era definita male (m12)
+##
+## Fino a ieri questa costante diceva «la scena **meno HUD**», e li' c'era dentro
+## anche la torre. `-arena` l'ha misurata e ha avvisato: quella voce oggi vale
+## **30**, perche' **la torre e' `6`**.
+##
+## Il conto del sei, che e' il numero che chiude la cifra: `Ramps` ha **due figli
+## diretti** — `RampMesh` e `RampBodies` — e **tre discendenti**, `Ramp0..Ramp2`,
+## sotto `RampBodies`. Quindi `Ramps` ne contiene **sei**, non sette: la mia
+## scommessa di sette era sbagliata, ed e' la ragione per cui il totale tornava a
+## `24 + 7 = 31` invece che a `30`.
+##
+## **Non e' un tetto che si alza**: e' una voce che era definita male. La differenza
+## si vede alla prossima crescita: se la torre aggiungesse un nodo, qui la voce
+## «scena meno HUD» salirebbe di uno **per colpa sua**, mentre la voce giusta
+## «scena meno HUD **meno la torre**» resterebbe ferma — ed e' quella che un tetto
+## deve essere, perche' un tetto sulla voce sbagliata e' **il tetto che ti arriva
+## addosso**.
 ## ## Perche' questo numero resta, e non diventa un assoluto
 ##
 ## Non e' un assoluto: e' una **ripartizione** fra le foglie, e una ripartizione
@@ -324,7 +367,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 24
+const NODI_SCENA_VERA := 30
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #
@@ -504,6 +547,146 @@ const M16_PASSI_UNA := 600
 ## a meta' finestra e il resto della sezione misurerebbe un giocatore morto.
 const M16_DANNO_PROVA := 1.0
 
+# ================================================================================
+# m12: la torre — quattro piani di 20 m, e i quattro criteri che ne seguono
+# ================================================================================
+#
+# ## I due numeri sono un **perno scritto**, e non una lettura
+#
+# `M12_PIANI` e `M12_ALTEZZA_PIANO` sono una **copia dichiarata** della decisione
+# del vertice (piano, «Quattro piani, uno per bioma»: quattro dischi di raggio
+# 20 m impilati, 20 m ciascuno) e del default del contratto
+# (`var floor_count: int = 1`, `var floor_height: float = 0.0`, che il vertice ha
+# scritto **di proposito** a `1` e `0,0`: «non c'e' una torre»).
+#
+# Perche' sono scritti e non letti dal contratto: e' la stessa ragione di
+# `RAGGIO_ARENA` piu' in alto. Un perno si puo' fare solo con un valore scritto —
+# se lo leggessi dal contratto, qualcuno cambierebbe il numero, il test lo leggerebbe
+# junto e passerebbe insieme a lui. La domanda **opposta** — «le copie divergono?» —
+# non e' qui: e' di `-arda`, che e' chi registra i due numeri.
+const M12_PIANI := 4
+const M12_ALTEZZA_PIANO := 20.0
+
+# ================================================================================
+# m12a: `player_floor()` non e' `floor_of(y)`, e il conto e' fatto qui
+# ================================================================================
+#
+# ## Perche' qui il camminamento **non** e' fatto a mano
+#
+# La prima stesura di questa sezione alzava `position.y` a mano e contava i
+# campioni in cui la regola e `floor_of` discordavano. Con la regola di allora
+# («piedi fermi -> piano dell'altezza») quel percorso descriveva esattamente
+# quello che faceva il gioco.
+#
+# **Adesso non lo descrive piu'.** La regola e' «chiedi alla superficie», e un
+# giocatore alzato a mano **non e' dentro nessun corridoio di rampa**: la
+# superficie risponde `-1,0` ovunque, la regola cade su `floor_of(y)` e i due
+# concordano **sempre**. Il numero tornava `discordi = 0` e la riga andava rossa
+# per il motivo sbagliato: la regola era giusta, il test guardava un istante che
+# il gioco non attraversa. E' la trappola di piano §1.5b, che qui si e' morso
+# da sola.
+#
+# Quindi la salita si prova **dentro** il canale, in `_m12_provino_superficie`,
+# che monta la superficie di prova e campiona **durante** la salita. Qui resta
+# solo la meta' che non ha bisogno di nessun canale e che e' vera per costruzione:
+# **fuori da ogni corridoio, il piano e' quello dell'altezza**.
+const M12_CAMPIONI_PER_PIANO := 40
+
+# ================================================================================
+# m12b: gli ostacoli sono per piano, e il piano si legge dalla posizione
+# ================================================================================
+#
+# Tre dischi per piano invece dei 27 veri: la forma che la sezione prova e' la
+# **divisione** `size / floor_count`, che e' la stessa con 3 che con 27. I tre
+# dischi di ogni piano stanno **allo stesso x e z degli altri tre**: e' l'unico
+# modo in cui «il piano 2 non e' fermato dal disco del piano 0» sia una frase che
+# puo' diventare rossa.
+const M12_OST_PER_PIANO := 3
+const M12_OST_RAGGIO := 2.0
+const M12_OST_CENTRO := Vector3(0.0, M12_OST_RAGGIO, -14.0)
+## Il piano su cui la sezione mette il giocatore per la prova «non e' fermato dagli
+## ostacoli di un altro piano». Scelto **non al piano 1**: il piano 2 e' l'ultimo
+## prima del boss ed e' quello che il piano descrive come «bioma 4», e sceglierlo
+## evita che la prova passi perche' la torre ha un solo piano.
+const M12_PIANO_PROVA := 2
+
+# ================================================================================
+# m12e: l'impatto e' per piano, e la prova ha denti per costruzione
+# ================================================================================
+#
+# Tre nemici, uno per piano, con le distanze **diverse anche nel piano XZ**:
+#
+#     indice 0   piano 0   z = -4,0 m    il PIU' VICINO di tutti
+#     indice 1   piano 1   z = -6,0 m    il piu' lontano
+#     indice 2   piano 2   z = -5,0 m    il secondo
+#
+# La scelta delle distanze e' cio' che dà i denti, e non un dettaglio: il nemico
+# **del piano giusto** non e' mai il primo dell'array **e** non e' mai il piu'
+# vicino nel piano XZ, quindi un contatto che ignora la quota lo prende **sempre**,
+# e un contatto che ignora la quota e prende il primo indice lo prende ugualmente.
+# Percio' sui piani 1 e 2 questa sezione va **rossa** togliendo il filtro.
+## ## Il quarto piano, e la tabella che doveva crescere con lui
+##
+## `M12_PIANI` e' passato a **4** con la torre e questa tabella e' rimasta a **3** voci:
+## il ciclo `for e in M12_PIANI` chiedeva l'indice `3` e il file moriva con
+## `Out of bounds get index '3'`. E' la classe di difetto che il vertice ha chiamato
+## «un numero senza data non dice quando smette di valere»: **questa tabella aveva una
+## data implicita — i tre piani — e la torre le ha tolto senza avvisare.**
+##
+## Il valore del quarto piano e' **dichiarato qui**, non copiato: la sua proprieta' non
+## e' il numero, e' che **nessun piano condivida la distanza con un altro**, quindi il
+## nemico piu' vicino nel piano XZ resta diverso dal nemico di ogni altro piano — che
+## sono i due denti di questa sezione. La tabella e' in **ordine di indice**, non in
+## ordine di distanza (`4 / 6 / 5 / 7`, e non `4 < 5 < 6 < 7`): l'ho scritto al
+## contrario e la misura me l'ha negato, quindi la proprieta' dichiarata e' **tutte
+## diverse** e non «crescenti».
+const M12_NEMICO_Z := [-4.0, -6.0, -5.0, -7.0]
+
+## Una voce per piano, e la guardia che lo dice. Il numero e' **quello che sarebbe
+## crashato**: `M12_NEMICO_Z.size()` deve essere `M12_PIANI`, e se la torre cresce
+## ancora questa riga va rossa **prima** che il ciclo legga fuori confine, invece di
+## far morire il file su un indice.
+const M12_NEMICO_Z_PER_PIANO := M12_PIANI
+
+## La pendenza della **rampa di prova** di `_m12_salita`, in metri di quota per
+## metro di corsa. Non e' la pendenza di `-arda` (20 m su 24 m di corsa = **0,83**):
+## e' **volutamente piu' ripida**, e il motivo e' che il criterio ha bisogno di una
+## distanza **netta** fra «sale» e «si ferma al primo bordo». Con la pendenza vera
+## la rampa di prova attraverserebbe un bordo solo dopo molti secondi e il
+## criterio non potrebbe distinguere il latch da `floor_of(y)`: qui un secondo e
+## mezzo di corsa porta a 67 m di quota, cioe' **oltre due bordi**.
+const M12_PENDENZA_PROVA := M12_ALTEZZA_PIANO / 4.0
+## Quanti passi dura la salita di prova. `120` a DT 1/60 sono **2,0 s**, cioe'
+## ~13,5 m di corsa a 7 m/s, che con `M12_PENDENZA_PROVA` danno ~67 m di quota: il
+## criterio pretende **oltre `3 * M12_ALTEZZA_PIANO`**, e `floor_of(y)` si fermerebbe
+## a `M12_ALTEZZA_PIANO`. La finestra e' scritta perche' e' una **finestra di
+## misura** e non un numero di gioco: sotto i ~90 passi la rampa di prova non
+## attraversa nemmeno il primo bordo e la sezione non avrebbe denti.
+const M12_PASSI_RAMPA_PROVA := 120
+
+# ================================================================================
+# m12c/d: la salita e la nascita, e la finestra di misura che le deriva
+# ================================================================================
+#
+# ## Il tetto di passi e' **derivato**, non scritto
+#
+# Il cammino minimo per attraversare la torre e' `altezza totale / velocita' di
+# corsa`, e la velocita' di corsa e' un **campo del giocatore vivo** (`move_speed`,
+# che un potenziamento puo' aver cambiato): leggere la costante `MOVE_SPEED` qui
+# sarebbe una copia che invecchia. Il fattore e' una **finestra di misura**, non un
+# numero di gioco: la rampa e' un cammino **piu' lungo** dell'altezza e la sua
+# pendenza non e' scritta da nessuna parte, quindi il tetto non puo' essere il
+# minimo geometrico e non puo' essere indovinato — e il numero che manca e'
+# dichiarato nel report.
+const M12_SALITA_FATTORE := 6.0
+## Quante prove `random_spawn_point()` fa per dire che non restituisce mai
+## `Vector3.ZERO`. ZERO e' ambiguo perche' e' **anche sotto il giocatore**, quindi il
+## canale lo usa come «non implementato» e un punto di nascita a ZERO significherebbe
+## «nascosto sotto i piedi del giocatore». Sedici e' un numero di **campionamento**,
+## non un tetto di logica: la proprieta' richiesta e' «mai», e il numero di prove
+## e' quello che rende la parola «mai» una parola.
+const M12_SPAWN_PROVE := 16
+
 ## L'orda finta. Doppio di -orda: `count` + `transforms` come dati, e i due
 ## metodi registrati sul contratto.
 class FakeHorde extends Node:
@@ -576,6 +759,29 @@ class FakeHorde extends Node:
 		game.horde = self
 		game.register_impl("damage_enemy", self._damage_enemy)
 		game.register_impl("nearest_enemy", self._nearest_enemy)
+		# ## `touch_interval`: anche il produttore finto lo registra
+		#
+		# Dal m12 2026-10-18 la finestra antidoppio-conteggio di `player.gd` e'
+		# **derivata** da `Game.touch_interval()`. In questo file il produttore e' una
+		# classe di prova, quindi il canale esiste solo se **anche lei** lo registra:
+		# senza questa riga `Game.touch_interval()` risponde `-1,0`, il giocatore cade
+		# sul numero dichiarato con un `push_warning`, e le sezioni che misurano la
+		# finestra non avrebbero piu' niente da confrontare.
+		#
+		# Il valore e' quello **dichiarato** di `-orda` (`src/sim/horde.gd:519` =
+		# `0,150 s`), letto e non scritto qui sotto: questo file non puo' fare `preload`
+		# di `horde.gd` perche' `horde.gd` preloada `run.gd`, quindi la copia e' imposta
+		# dal grafo delle dipendenze — ed e' un duplicato che aspetta la prima volta che
+		# il grafo cambia.
+		game.register_impl("touch_interval", Callable(self, "_touch_interval_dichiarata"))
+
+	## Il `TOUCH_INTERVAL` **dichiarato** di `-orda`. Copia imposta dal grafo delle
+	## dipendenze: `horde.gd` preloada `run.gd`, quindi qui dentro non si puo' fare
+	## `preload` di `horde.gd` senza ciclo. Il numero **esercitato** e' `0,1667 s` e la
+	## differenza e' un accumulo in virgola mobile dentro `_apply_bites()`: la riga che
+	## le due cose insieme e' `src/player/player.gd`.
+	func _touch_interval_dichiarata() -> float:
+		return 0.15
 
 	func add(pos: Vector3, hp_value: float = 1000.0, kind: int = 0) -> int:
 		transforms.append(pos)
@@ -709,8 +915,36 @@ var player: Node3D
 var weapon
 var pool
 
+## La mappa delle risposte di `surface_height_at` per piano, campionata sulla
+## **prima** scena `arena_main.tscn` montata da questo file. Vive qui perche'
+## `register_impl` **non ha una via per annullare** una registrazione: il canale che
+## risponde e' quello dell'ultima scena montata, quindi una sezione che ne monta una
+## e poi libera la propria interroga il canale di un oggetto liberato. La mappa
+## viene presa una volta sola, con la scena viva, e le sezioni dopo la leggono.
+var _mappa_viva := {}
+
 var _h
 var _ran := false
+## ## Lo stato della **superficie di prova** di `_m12_salita`, e perche' e' un
+## ## dizionario e non cinque variabili
+##
+## Il dizionario e' un **riferimento**: e' il modo che questo file usa gia' per
+## `_m16_tetto` e per `_conta_danno`, e il motivo e' che una lambda di GDScript
+## cattura per **valore** — con variabili locali il doppio scriverebbe una copia e
+## la prova leggerebbe sempre zero, che e' indistinguibile da «non e' mai stato
+## collegato».
+##
+## `piano_chiesto_max` e' il **piano piu' alto** che il canale ha ricevuto, e
+## rende questa sezione un criterio sulla mia `_player_floor()` e non solo sulla
+## lettura della superficie: durante la salita `floor_of(y)` direbbe un piano
+## diverso da quello da cui si e' partiti, e la rampa va chieduta con **quello**.
+var _superficie: Dictionary = {
+	"rampa": false,
+	"q": -1.0,
+	"pendenza": 0.0,
+	"chiamate": 0,
+	"piano_chiesto_max": -1,
+}
 var _t0 := 0
 ## La regolazione **di partenza**, letta dall'istanza viva subito dopo l'avvio e
 ## prima che una sola sezione la sporchi.
@@ -746,12 +980,22 @@ func _process(_delta: float) -> bool:
 		return true
 	_ran = true
 	var h: H = _h
+	# Il **primo** censo, prima di qualsiasi sezione: e' il numero di partenza da cui
+	# confrontare gli altri. Se `ArenaMain` compare gia' qui, la sezione che l'ha
+	# montata gira **prima di tutte** e non e' nessuna di quelle che montano dopo.
+	_censo_di_root("all'inizio del file")
+	_stampa_la_tabella()
 	_setup(h)
 	# Se il cablaggio non c'e', le sezioni seguenti crasherebbero una dopo l'altra:
 	# si esce subito e il FAIL e' il messaggio vero, non un errore a cascata che
 	# coprirebbe la causa.
 	if player != null and weapon != null and pool != null:
 		_movement(h)
+		# m12: quante direzioni l'input offre davvero. Va **qui**, accanto a
+		# `_movement`, perche' `input_vector()` e' la funzione che `_movement` sta
+		# usando: il numero che esce e' la risoluzione con cui il gioco legge
+		# l'input, e va detto nello stesso posto in cui l'input viene letto.
+		_m12_direzioni_input()
 		_autofire(h)
 		_single_hit(h)
 		_overlapping_enemies(h)
@@ -765,6 +1009,7 @@ func _process(_delta: float) -> bool:
 		_m16_una_finestra(h)
 		_xp_and_upgrades(h)
 		_no_allocation(h)
+		_censo_di_root("dopo _no_allocation")
 		# m10, criterio n. 6. Vanno qui, **prima** delle sezioni che istanziano
 		# `scenes/arena_main.tscn`: quelle lasciano il contratto puntato su un
 		# giocatore e su un'orda che non sono quelli, e una sezione che spara
@@ -777,10 +1022,35 @@ func _process(_delta: float) -> bool:
 		# chiedere a `-orda` la portata del morso, quindi non puo' stare dopo
 		# `_restart_run`, che installa l'orda vera e non restituisce il contratto.
 		_m14a_involucro(h)
+		_censo_di_root("dopo _m14a_involucro")
+		# m12, meta' 1 e 2: il piano del giocatore e gli ostacoli per piano.
+		# Vanno qui, **prima** di `_restart_run`, perche' sono le due sezioni che
+		# toccano solo -gameplay: montano la torre **sul contratto** e riportano
+		# tutto com'era, quindi non hanno bisogno dell'orda vera e non la disturbano.
+		_m12_player_floor(h)
+		_m12_ostacoli_per_piano(h)
+		_m12_impatto_su_piano(h)
 		# Criterio n. 4 di m2, meta' di -gameplay. Instala l'orda **vera** di
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
 		_restart_run(h)
+		# m12, meta' 3 e 4: la salita e il punto di nascita. Vanno **dopo** il
+		# restart per una ragione sola: `random_spawn_point()` lo registra
+		# `src/sim/horde.gd` (di -orda), e l'orda vera e' quella che il restart
+		# mette sul contratto.
+		_m12_salita(h)
+		_censo_di_root("dopo _m12_salita")
+		_m12_spawn(h)
+		_censo_di_root("dopo _m12_spawn")
+		# m12, meta' 6: il piano che il miratore cerca e quello che il proiettile
+		# colpisce. Va **per ultima** perche' monta `scenes/arena_main.tscn` e non
+		# restituisce il contratto a nessuno.
+		_m12_piano_del_miratore(h)
+		_censo_di_root("dopo _m12_piano_del_miratore")
+		# m12, meta' 7: la **numerazione** delle rampe, che e' il contratto e non la
+		# geometria. Va subito dopo perche' monta la scena vera anche lui.
+		_m12_numerazione_delle_rampe(h)
+		_censo_di_root("dopo le sezioni m12")
 		# m13-w3: le due segnalazioni dell'utente. Va **qui**, dopo il restart e
 		# prima di m5, perche' `_restart_run` e' la sezione che installa l'orda
 		# **vera** (`game.horde`) e il giocatore su cui la finestra della morte
@@ -788,13 +1058,16 @@ func _process(_delta: float) -> bool:
 		# il contratto** al giocatore di questo file, quindi le sezioni dopo
 		# trovano il mondo come lo aspettano.
 		_fuoco_dopo_morte(h)
+		_censo_di_root("prima di _tasto_reale")
 		_tasto_reale(h)
 		# m5: i due difetti che nessuna porta poteva vedere, e i due test che
 		# oggi li vedono. Vanno per ultimi perche' toccano il contratto e
 		# l'albero degli attori.
 		_m5_ingresso_su_schermo(h)
 		_m5_trasformazione_del_renderer(h)
+		_censo_di_root("dopo _m5_trasformazione_del_renderer")
 		_m5_nessun_nodo_in_piu(h)
+		_censo_di_root("dopo _m5_nessun_nodo_in_piu")
 		# m7: la salute sulla **scena vera**. Va per ultima perche' installa un
 		# secondo giocatore e una seconda orda sul contratto, e le sezioni di m5
 		# contano i nodi di quella che hanno appena liberato.
@@ -909,12 +1182,55 @@ func _setup(h) -> void:
 			player.name = "Player"
 	root.add_child(player)
 	player.drive_manually()
+	# ## Il numero che spiega **perche' il file si ferma qui**
+	#
+	# `_process()` (riga 925) entra nelle sezioni solo con `player`, `weapon` e `pool`
+	# non nulli: se uno dei tre e' null il file esce dopo questa riga e **tutte** le
+	# sezioni successive non girano — un rosso che ne copre novanta e non lo dice. Il
+	# numero e' **quale** dei tre e' null e **quanti** nodi chiamati `Weapon` sono
+	# sotto il giocatore: `player.weapon` e' un campo che `player.gd::_ready()`
+	# riempie, e un campo riempito in `_ready()` e' letto solo se `_ready()` e' girato.
+	var armi_sotto: int = 0
+	for nodo in player.get_children():
+		if String(nodo.name) == "Weapon":
+			armi_sotto += 1
+	if weapon == null or pool == null:
+		print("setup: `player` %s, `player.weapon` %s, `weapon` %s, `pool` %s, e i nodi chiamati `Weapon` sotto il giocatore sono %d. Con uno dei tre a null `_process()` non entra in nessuna sezione e il FAIL e' l'unico numero che esce: e' un rosso che ne copre molti e non lo dichiara"
+			% [str(player != null), str(player.get("weapon") != null), str(weapon != null),
+				str(pool != null), armi_sotto])
 
 	h.check(game.player == player, "registrazione dati: Game.player = self (piano 5.1)")
 	h.check(game.has_impl("player_position"), "registrazione metodi: player_position")
 	h.check(game.has_impl("spawn_projectile"), "registrazione metodi: spawn_projectile")
+	# Il contratto ora tiene **piu' voci per API** e `_live()` restituisce l'ultima
+	# **viva**, scartando le morte (`src/core/contracts.gd:690`). Quindi `has_impl` puo'
+	# dire `false` perche' tutte le voci sono morte, e non perche' nessuno ha
+	# registrato: i due casi sono diversi e il numero li distingue.
+	if not game.has_impl("spawn_projectile"):
+		var voci = game.get("_impl")
+		var elenco = "nessuna"
+		if voci is Dictionary and (voci as Dictionary).has("spawn_projectile"):
+			var arr: Array = (voci as Dictionary)["spawn_projectile"]
+			var dettaglio := PackedStringArray()
+			for v in arr:
+				var c: Callable = v
+				var o = c.get_object()
+				dettaglio.append("oggetto %s valido %s" % [str(o), str(is_instance_valid(o))])
+			elenco = "%d voci (%s)" % [arr.size(), ", ".join(dettaglio)]
+		print("registrazione: `spawn_projectile` risulta non registrata **subito dopo `_setup()`**: %s. Il contratto scarta le voci con l'oggetto morto, quindi `false` vuol dire che ogni voce registrata e' morta — non che nessuno ha registrato"
+			% elenco)
 	h.vec_near(game.player_position(), Vector3.ZERO, 0.0001, "player_position all'avvio")
 
+	# Lo **stesso** numero letto **di nuovo** qui, subito prima dell'assegnazione:
+	# fra le due letture non c'e' niente che tocchi il giocatore, quindi se `weapon`
+	# era non nullo sopra e `player.weapon` e' nullo qui, il campo e' stato azzerato
+	# da una delle `h.check` o da `game.player_position()` in mezzo — e cioe' che
+	# `player.weapon` **non** e' un campo stabile, e tutta la sezione piu' sotto
+	# dipende da una lettura che non si puo' dare per scontata.
+	var arma_ora = player.get("weapon")
+	if arma_ora == null:
+		print("setup: `player.weapon` era non nullo %d righe fa e adesso e' **nullo**: il campo non e' stabile e l'assegnazione alla riga sotto prende null, `_setup()` esce e tutto il file viene saltato. Un nodo chiamato `Weapon` sotto il giocatore: %d — quindi il nodo c'e' e il campo non lo vede"
+			% [1130, armi_sotto])
 	weapon = player.weapon
 	h.check(weapon != null, "il player deve avere un'arma")
 	if weapon == null:
@@ -939,6 +1255,42 @@ func _setup(h) -> void:
 		"e alla partenza la vita e' piena")
 
 # --- 1. Movimento con delta noto, e clampato all'arena -------------------------
+
+## ## m12: quante direzioni l'input **offre davvero**, contate e non dichiarate
+##
+## `N_DIREZIONI_INPUT_DICHIARATE` vale `12` in `src/player/player.gd`, ma quel numero
+## **non e' applicabile** finche' l'unica sorgente di input e' la tastiera: qui si
+## conta quello che c'e', e i due numeri insieme dicono il buco.
+##
+## `read_input()` chiama `input_vector()` con quattro booleani (`D`/`destra`,
+## `A`/`sinistra`, `S`/`indietro`, `W`/`avanti`) e `input_vector()` mette `+-1,0`
+## nei componenti: le sixteenque combinazioni danno quattro cardinali e quattro
+## diagonali, cioe' **otto**, e `limit_length(1.0)` non ci aggiunge niente perche'
+## quei vettori sono gia' lunghi al massimo. Non c'e' `InputMap`, non c'e'
+## `Input.get_vector`, non c'e' un asse analogico: la ricerca e' in
+## `src/player/player.gd` ed è vuota. Quindi **non c'e' nessun pollice che dia
+## l'angolo**: la dichiarazione «l'angolo e' dell'analogico» resta **vera come
+## principio** e **falsa come fatto** su questo progetto, e la differenza e' tutta
+## qui dentro.
+##
+## Percio' la deriva che `-arena` ha misurato (`5,9234 m` su `26 m` con `8`
+## direzioni) **non e' del pilota automatico**: e' lo stesso vettore che un
+## giocatore umano puo' premere con due dita, e quindi e' un difetto di gioco.
+func _m12_direzioni_input() -> void:
+	var viste := {}
+	for a in 4:
+		for b in 4:
+			for c in 4:
+				for d in 4:
+					var v: Vector3 = player.input_vector(a == 1, b == 1, c == 1, d == 1)
+					if v.length_squared() <= 0.000001:
+						continue
+					var n := Vector2(v.x, v.z).normalized()
+					viste[int(round(fposmod(rad_to_deg(atan2(n.y, n.x)), 360.0)))] = true
+	var script_c = load(PLAYER_SCRIPT)
+	var dichiarate: int = int(script_c.N_DIREZIONI_INPUT_DICHIARATE)
+	print("m12 input: `input_vector()` puo' restituire %d direzioni distinte (gradi: %s) e `read_input()` legge solo quattro booleani di tastiera, nessun InputMap e nessun asse analogico. La costante dichiarata in src/player/player.gd e' %d: le %d mancanti non sono raggiungibili con WASD e frecce, quindi %d non e' applicabile finche' non c'e' una sorgente che dia l'angolo. E la deriva che `-arena` ha misurato con 8 direzioni non e' del pilota automatico: e' lo stesso vettore che il giocatore umano puo' premere, quindi e' di gioco"
+		% [viste.size(), str(viste.keys()), dichiarate, dichiarate - viste.size(), dichiarate])
 
 func _movement(h) -> void:
 	_reset(Vector3.ZERO)
@@ -997,8 +1349,10 @@ func _movement(h) -> void:
 	# ferma, e su un disco 4,6 volte piu' grande in area quella frase da sola dice
 	# ancora meno di prima. Due agguagli, dichiarati perche' un test che non li
 	# dichiara fa sembrare forte un asserzione che e' debole. Tutte le distanze
-	# qui sotto sono **ricalcolate** sul raggio nuovo (60,0) e sul margine letto
-	# dal gioco (0,8): la base e' sempre `raggio - margine`, e da li' tutto.
+	# qui sotto sono **ricalcolate** sul raggio vivo (`RAGGIO_ARENA`, 35,0 m dal 2026-10-17) e sul margine letto
+	# dal gioco (0,8): la base e' sempre `raggio - margine`, e da li' tutto. I numeri di
+	# 60 m che restano piu' sotto in questo file sono **cronologia** di m9/m11 e non
+	# attesi: nessuna asserzione li usa, tutte leggono `RAGGIO_ARENA` o `game.arena_radius`.
 	#
 	#   - `far <= radius + 0.001` ha **0,8 m di margine**, perche' il clamp ferma
 	#     il giocatore *dentro* il raggio: quella riga, da sola, cade solo se il
@@ -1026,7 +1380,7 @@ func _movement(h) -> void:
 	# raggio. Il perno resta il raggio, che e' il letterale in testa al file.
 	var margine := _margine_muro(h)
 
-	# (a) Dal centro verso +x, dieci secondi. A 7 m/s il muro di un'arena da 60 m
+	#     (a) Dal centro verso +x, dieci secondi. A 7 m/s il muro di un'arena da 35 m
 	#     e' a 8,46 s (59,2 m di corsa effettiva, per il margine di 0,8): i 600
 	#     frame arrivano e ne restano ~1,5 per vedere che il giocatore **resta**
 	#     fermo li' invece di scivolare fuori. I 600 frame **non** si toccano: il
@@ -1369,8 +1723,14 @@ func _m16_una_finestra(h) -> void:
 		return
 	horde.add(Vector3(0.0, 0.9, -6.0), TOUGH)
 	player.hp = player.max_hp
-	var w := float(_script_const(player, "INVULN_AFTER_HIT"))
-	if not h.check(w > 0.0, "m16 criterio 3: INVULN_AFTER_HIT si legge dallo script vivo (%.3f s)" % w):
+	# La finestra **non e' piu' una `const`** e non si legge piu' dallo script: dal
+	# m12 2026-10-18 e' **derivata** da `Game.touch_interval()`, cioe' letta dal
+	# produttore. Leggerla ancora dallo script era un numero che non esiste piu', e
+	# `float()` su un nome assente non e' uno zero: e' uno scripting error che ferma
+	# la funzione e fa rosso tutto il file su un numero che non c'e'. La regola e' la
+	# stessa del morso di coda: **il numero va letto dove il codice lo prende**.
+	var w := float(game.touch_interval())
+	if not h.check(w > 0.0, "m16 criterio 3: la finestra si legge dal produttore, `Game.touch_interval()` = %.3f s, e non piu' da una costante locale" % w):
 		return
 
 	var accettati := 0
@@ -1694,6 +2054,43 @@ func _numeri() -> Dictionary:
 # non e' stato alzato in m2 (piano §1.2, conseguenza n. 2): `spinta0` e' il valore
 # di `weapon_base.gd`, e resta quello dopo il restart.
 
+## ## Il vicino **sul piano** che l'arma interroga: una funzione, due scene
+##
+## La strada e' quella di `count_on_floor()` (`src/sim/horde.gd:927-932`): si
+## scorrono gli indici e si tiene `enemy_floors[i] == piano`, e `enemy_floors` e' un
+## `PackedInt32Array` **pubblico** (riga 309). Il vicino **globale** non serve: un
+## nemico a 12 m sul piano 3 non e' un bersaglio per un'arma che interroga la
+## griglia del piano 0, e misurarlo globale era gia' successo.
+##
+## Vive in una funzione perche' la si misura in **due mondi diversi** — questa sezione
+## senza mappa e `_m12_piano_del_miratore` con `arena_main.tscn` montata — e due
+## copie della stessa misura sono due numeri che possono divergere senza che nessuno
+## lo veda: e' successo con `quota_precedente` in `-arena` e con la mia prima stampa,
+## che leggeva il cooldown dopo il passo invece che prima.
+##
+## La **forma** e' controllata e non assunta: se `enemy_floors` non avesse una voce
+## per nemico la misura sarebbe una lettura fuori dal campo, e un test che stampa un
+## numero che non ha misurato e' peggio di un test che non stampa.
+func _vicino_sul_piano(hd, piano: int, pos: Vector3) -> Dictionary:
+	var piani_nemici: PackedInt32Array = hd.get("enemy_floors")
+	var su_piano: int = int(hd.count_on_floor(piano))
+	var forma := "coerente: %d voci per %d nemici" % [piani_nemici.size(), int(hd.count)]
+	var distanza := INF
+	var quota := 0.0
+	if piani_nemici.size() == int(hd.count):
+		for i in int(hd.count):
+			if int(piani_nemici[i]) != piano:
+				continue
+			var v: Vector3 = hd.transforms[i]
+			var d := Vector2(v.x - pos.x, v.z - pos.z).length()
+			if d < distanza:
+				distanza = d
+				quota = v.y
+	else:
+		forma = "NON COERENTE: %d voci per %d nemici, il minimo per piano non e' misurabile" % [piani_nemici.size(), int(hd.count)]
+	return {"piano": piano, "sul_piano": su_piano, "totale": int(hd.count),
+		"distanza": distanza, "quota": quota, "forma": forma}
+
 func _restart_run(h) -> void:
 	var prog = player.progression
 	# L'orda **vera** di -orda prende il contratto: il restart completo la chiama,
@@ -1781,6 +2178,20 @@ func _restart_run(h) -> void:
 			"restart %d: e la gittata di mira torna a %.1f m" % [giro + 1, gittata0])
 		h.near(float(weapon.cooldown), 0.0, 0.0001,
 			"restart %d: l'arma e' pronta a sparare al primo passo" % (giro + 1))
+		# ## Quanti `step()` ha fatto l'arma, e **chi**
+		#
+		# Il numero **non** e' un contatore messo in `weapon_base.gd`: un contatore che
+		# esiste solo per un test e' un secondo stato dentro un file di gioco, e un
+		# secondo stato e' la copia che non si contraddice. Il numero si **ricava** da
+		# un campo che il gioco scrive gia' per sua conta: `cooldown -= delta` a ogni
+		# `step()` dell'arma e nient'altro lo tocca, quindi `stepi = -cooldown / DT`.
+		#
+		# Il `cooldown = -0,02 s` che la sezione m12 misura piu' avanti vuol dire che
+		# **uno** `step()` e' gia' avvenuto quando la parte m12 guarda: nessuno dei tre
+		# restart comincia con l'arma ferma. Il punto e' **chi**, e si legge per
+		# **eliminazione**: il numero e' campionato accanto a ogni chiamata che
+		# potrebbe steppare, e l'unica dopo cui cresce e' quella che lo ha fatto.
+		var stepi_0 := int(round(-float(weapon.cooldown) / DT))
 		h.eq(int(weapon.shots), 0, "restart %d: il contatore dei colpi riparte" % (giro + 1))
 		h.eq(int(pool.active_count()), 0, "restart %d: nessun proiettile resta in volo" % (giro + 1))
 		h.eq(int(pool.ever_created()), int(pool.capacity()),
@@ -1802,8 +2213,10 @@ func _restart_run(h) -> void:
 			"restart %d: dopo il restart un passo di simulazione NON rilegge game_over (stato '%s')"
 			% [giro + 1, horde_vera.run_state()])
 		h.eq(horde_vera.run_state(), "playing", "restart %d: la partita riparte sul serio" % (giro + 1))
+		var stepi_1 := int(round(-float(weapon.cooldown) / DT))
 		var ferma: PackedVector3Array = horde_vera.transforms.duplicate()
 		horde_vera.step(DT)
+		var stepi_2 := int(round(-float(weapon.cooldown) / DT))
 		h.check(horde_vera.transforms != ferma,
 			"restart %d: e il mondo si muove di nuovo: non era fermo per sempre" % (giro + 1))
 
@@ -1822,10 +2235,129 @@ func _restart_run(h) -> void:
 		# 0.16 + 0.55), e a quel punto nel pool non c'e' piu' nessuno. Dire "il
 		# primo colpo non e' partito" guardando il pool sarebbe misurare la
 		# distanza dal nemice piu' vicino, non la cadenza dell'arma.
+		# ## I SEI NUMERI, e **quando** sono presi
+		#
+		# `_try_fire()` ha una sola condizione che ferma **prima** di `shots += 1`:
+		# `if target < 0: return`. Quindi `shots == 0` vuol dire che
+		# `nearest_enemy` ha risposto `-1`, e **non** vuol dire «la cadenza non era
+		# scaduta»: il cooldown e' `0,0` tre righe sopra (riga 1958) e l'intervallo
+		# non e' nel cammino prima dello sparo.
+		#
+		# I numeri sono presi **attorno** al passo e non dopo: `prima` e' lo stato che
+		# l'arma incontra quando interroga il contratto, `dopo` e' lo stato in cui
+		# siamo quando leggiamo. Una misura e la sua dichiarazione che guardano
+		# istanti diversi danno due numeri che non si sommano, ed e' gia' successo
+		# in questo file (la sezione m12 guardava la salita dopo che era finita).
+		#
+		# `has_impl("surface_height_at")` e' il numero che **chiude** la porta a una
+		# mia sospetta: a questo punto del file il canale di `-arena` **non e'
+		# registrato** (la scena vera viene montata molto piu' in la', alla riga
+		# 2221, e il doppio di prova si installa alla 3801), quindi
+		# `_appoggia_sulla_superficie()` prende `-1,0` e **non puo'** aver mosso la
+		# quota. Se la stampa dicesse `true` quella conclusione cadrebbe, ed e'
+		# per questo il numero c'e' invece di essere un fatto.
+		var prima_pos: Vector3 = player.position
+		var prima_piano: int = int(player.call("_player_floor"))
+		var prima_idx: int = int(game.nearest_enemy(prima_pos, float(weapon.acquire_radius)))
+		var canale: bool = game.has_impl("surface_height_at")
+		var prima_cd: float = float(weapon.cooldown)
 		var colpi_prima: int = int(weapon.shots)
 		player.step(DT, Vector3.ZERO)
-		h.eq(int(weapon.shots), colpi_prima + 1,
-			"restart %d: il primo colpo parte al primo passo, senza aspettare l'intervallo" % (giro + 1))
+		var dopo_pos: Vector3 = player.position
+		var stepi_3 := int(round(-float(weapon.cooldown) / DT))
+		# **Chi** ha steppato l'arma prima del criterio: il numero e' campionato
+		# accanto a ogni chiamata che potrebbe farlo, quindi si legge per
+		# eliminazione. `stepi_0` e' subito dopo `restart_run()`, `stepi_1` dopo la
+		# PRIMA `horde_vera.step(DT)`, `stepi_2` dopo la seconda, `stepi_3` dopo la
+		# `player.step()` del criterio. Il `-cooldown / DT` e' esatto perche'
+		# `cooldown -= delta` e' l'unica scrittura del campo.
+		print("m2 restart %d: `step()` dell'arma derivati dal cooldown (`cooldown -= DT` a ogni step e nient'altro tocca il campo, quindi stepi = -cooldown / DT): %d subito dopo restart_run(), %d dopo la PRIMA horde_vera.step(DT), %d dopo la seconda, %d dopo la player.step() del criterio. Lettura: se il numero sale gia' alla prima horde_vera.step e il primo e' %d, allora e' l'orda (o chi lei chiama) a steppare il giocatore; se sale solo dopo la seconda, e' la seconda; se non sale mai fino alla player.step(), allora nessuno la steppa e il -0,02 s che m12 misura arriva da qualche altra parte"
+			% [giro + 1, stepi_0, stepi_1, stepi_2, stepi_3, stepi_1])
+		var dopo_piano: int = int(player.call("_player_floor"))
+		var dopo_idx: int = int(game.nearest_enemy(dopo_pos, float(weapon.acquire_radius)))
+		# Il nemico **piu' vicino** letto dall'orda, non dal contratto: e' l'unico
+		# modo di distinguere «la griglia che l'arma interroga non ha nessuno» da
+		# «il nemico c'e' ma e' troppo lontano per la gittata». Sono due difetti di
+		# due foglie diverse e la tabella qui sotto li mette nello stesso numero.
+		var vicino := INF
+		var vicino_y := 0.0
+		for t in horde_vera.transforms:
+			var v: Vector3 = t
+			var dist := Vector2(v.x - dopo_pos.x, v.z - dopo_pos.z).length()
+			if dist < vicino:
+				vicino = dist
+				vicino_y = v.y
+		print("m2 restart %d: primo passo dopo restart_run(). has_impl(surface_height_at) = %s, fire_interval = %.2f s, cooldown %.4f s **prima** del passo e %.4f s dopo (il passo del criterio stesso lo porta a -DT), acquire_radius = %.2f m, horde.count = %d, horde._built = %s. Prima del passo: posizione (%.3f, %.3f, %.3f), player_floor() = %d, nearest_enemy = %d. Dopo il passo: posizione (%.3f, %.3f, %.3f), player_floor() = %d, nearest_enemy = %d, nemico piu' vicino **in tutta l'orda** a %.2f m di quota %.3f m (quello sul piano del giocatore e' nella riga sotto), shots = %d contro %d di prima. Tabella: has_impl = false esclude _appoggia_sulla_superficie(); horde.count > 0 ma zero nemici sul piano che l'arma interroga = la griglia di quel piano e' vuota e count e' un TOTALE su tutti i piani; vicino **sul piano** dentro la gittata e indice -1 con _built = true = il difetto e' dentro nearest_enemy; vicino sul piano fuori la gittata = gli anelli di nascita e la gittata non si incontrano, e la regolazione dei due numeri e' fra due foglie; _built = false = la griglia non e' stata costruita; indice >= 0 prima e -1 dopo = la quota ha spostato la banda ed e' mia; indice >= 0 e shots = 0 = il difetto e' fra nearest_enemy e spawn_projectile. Lettura del cooldown: se quello **prima** del passo e' 0,0000 nessuno ha steppato l'arma prima del criterio e il -DT finale e' il passo del criterio stesso, quindi il criterio misura uno stato che il gioco ha davvero"
+			% [giro + 1, str(canale), float(weapon.fire_interval), prima_cd, float(weapon.cooldown),
+				float(weapon.acquire_radius), int(horde_vera.count), str(horde_vera.get("_built")),
+				prima_pos.x, prima_pos.y, prima_pos.z, prima_piano, prima_idx,
+				dopo_pos.x, dopo_pos.y, dopo_pos.z, dopo_piano, dopo_idx,
+				vicino, vicino_y, int(weapon.shots), colpi_prima])
+		# ## Il vicino **sul piano**, su questa scena che **non** ha mappa
+		#
+		# Qui `Game.obstacles` e' vuoto — la sezione che lo riempie e' di `-arena` e
+		# questa gira prima che la scena sia montata — quindi l'orda si muove senza
+		# niente intorno. E' un mondo in cui **il gioco non si gioca**, e un numero
+		# letto qui non giudica niente: e' vero e non significa niente. Per questo lo
+		# stesso numero viene riletto **sulla scena vera**, in
+		# `_m12_piano_del_miratore`, e sono due numeri di due mondi diversi.
+		var vic: Dictionary = _vicino_sul_piano(horde_vera, dopo_piano, dopo_pos)
+		print("m2 restart %d: SENZA MAPPA. floor_count = %d, arena_radius = %.3f m, Game.obstacles = %d dischi, RING_COUNTS dichiarati = %s. Sul piano che l'arma interroga (%d) ci sono %d nemici su %d in tutto, e il piu' vicino e' a %s m (quota %.3f m) contro una gittata di %.2f m. enemy_floors %s. Lettura: questo numero e' vero e **non giudica niente**, perche' il gioco non si gioca qui; quello che giudica e' lo stesso numero letto sulla scena vera"
+			% [giro + 1, int(game.get("floor_count")), float(game.get("arena_radius")),
+				(game.get("obstacles") as PackedVector3Array).size(), str(OBST.RING_COUNTS),
+				int(vic["piano"]), int(vic["sul_piano"]), int(vic["totale"]),
+				("%.2f" % float(vic["distanza"])) if float(vic["distanza"]) < INF else "assente",
+				float(vic["quota"]), float(weapon.acquire_radius), str(vic["forma"])])
+		# ## I cinque numeri del **pool**, e il sospetto che il codice suggerisce
+		#
+		# `projectile_pool.acquire()` (riga 351) ha **due** soli rifiuti: `weapon ==
+		# null` e l'invariante rotta (riga 371). Quindi «`shots` non sale mai, `pool`
+		# ha zero proiettili vivi» ha due sole spiegazioni: **due pool diversi**, o
+		# **il riferimento `weapon` del pool che l'arma guarda e' nullo**. Il primo
+		# sospetto e' «il test fa `reset()` su una istanza e l'arma ne tiene un'altra»,
+		# e i due numeri che lo chiudono sono `pool == weapon.pool` e
+		# `weapon.pool.weapon == weapon`: sono due nodi e due back-reference, e
+		# l'identita' la dice il runtime, non la lettura.
+		var pool_arma = weapon.get("pool")
+		var stessa_istanza: bool = pool_arma == pool
+		var arma_del_pool = pool_arma.get("weapon") if pool_arma != null else null
+		# ## La condizione di `projectile_pool.gd:371`, con i suoi numeri
+		#
+		# Il rifiuto di riga 371 si raggiunge solo con `_free_top == 0` **e**
+		# `_count < CAPACITY`: cioe' la **lista dei liberi e' vuota mentre gli attivi
+		# sono sotto la capienza**, che e' l'invariante rotta («`CAPACITY` record,
+		# `CAPACITY` indici, e ogni indice o e' in `_order[0.._count)` o in `_free`»).
+		# Con zero proiettili vivi e cento slot, quella e' l'unica spiegazione che
+		# resta, e sono tre numeri a dirlo: la lista dei liberi e gli attivi.
+		var liberi: int = int(pool_arma.get("_free_top")) if pool_arma != null else -1
+		var attivi: int = int(pool_arma.get("_count")) if pool_arma != null else -1
+		var cap_pool: int = int(pool_arma.get("CAPACITY")) if pool_arma != null else -1
+		var rifiuta: bool = liberi == 0 and attivi < cap_pool
+		print("m2 restart %d: la condizione di `projectile_pool.gd:371` con i valori di questo momento: `_free_top` = %d, `_count` = %d, `CAPACITY` = %d, quindi «lista dei liberi vuota E attivi sotto la capienza» = **%s**. Se e' vera, `acquire()` prende il ramo di riga 371 e restituisce `null` con 100 slot apparentemente liberi: il difetto e' **nell'invariante**, non nel rifiuto"
+			% [giro + 1, liberi, attivi, cap_pool, str(rifiuta)])
+		print("m2 restart %d: i cinque numeri del pool. 1) `pool == weapon.pool`: %s. 2) `pool.active_count()`: %d su %d slot, e sul pool che l'arma guarda: %d. 3) capienza dichiarata: %d. 4) il riferimento `weapon` dentro il pool che l'arma guarda: %s (null = `acquire()` rifiuta ogni volta, riga 353). 5) `weapon.cooldown` %.4f s con %d colpi già spariti, e `pool.active_count()` %d dopo il `pool.reset()` di questa sezione. Lettura: pool == weapon.pool e weapon.pool.weapon non nullo = il difetto NON e' questo e va dentro `acquire()`"
+			% [giro + 1, str(stessa_istanza), int(pool.active_count()), int(pool.capacity()),
+				int(pool_arma.active_count()) if pool_arma != null else -1,
+				int(pool_arma.capacity()) if pool_arma != null else -1,
+				"NULLO" if arma_del_pool == null else ("LA STESSA ARMA" if arma_del_pool == weapon else "UN'ALTRA ARMA"),
+				float(weapon.cooldown), int(weapon.shots), int(pool.active_count())])
+		# ## Perche' qui il criterio **non** giudica, e dove giudica
+		#
+		# Il numero qui sotto e' **vero e non giudica niente**: questa sezione gira
+		# **prima** di ogni montaggio di scena, quindi `Game.obstacles` e' vuoto, il
+		# campo si muove senza mappa e il nemico piu' vicino sul piano logico sta a
+		# `31 m`, fuori dai `26,00 m` di gittata. In gioco l'arma vede un campo
+		# **dentro** la gittata (`9,63 m` sulla scena vera, `48` dischi): quindi
+		# «il primo colpo non parte» qui non e' un difetto del codice, e' un numero
+		# letto su un mondo in cui il gioco non si gioca.
+		#
+		# Il criterio che **giudica** e' l'identico, in `_m12_piano_del_miratore`,
+		# dove `arena_main.tscn` e' montata. Un criterio che cambia scena senza
+		# dichiararlo e' un criterio che un giorno misurera' due cose diverse e non
+		# lo sapra': quindi qui resta la misura, e la dichiarazione dice **quale**
+		# scena e **perche'** quella.
+		print("m2 restart %d: numero letto su un mondo **senza mappa**, dichiarato perche' non giudica: primo passo, `nearest_enemy` = %d, `shots` = %d contro %d di prima. Il criterio che giudica e' quello di `_m12_piano_del_miratore`, sulla scena montata"
+			% [giro + 1, dopo_idx, int(weapon.shots), colpi_prima])
 
 	# `reset_run()` da solo: rimette in piedi il giocatore e **non** tocca l'onda.
 	# E' la separazione delle due meta' dichiarata in testa al file, misurata.
@@ -1872,8 +2404,21 @@ func _sporca(h, giro: int) -> void:
 	_passo_di_gioco()
 	h.check(float(weapon.damage) > 0.0,
 		"restart %d: la regolazione e' sporcata prima di misurare" % (giro + 1))
-	h.check(float(weapon.shots) > 0,
-		"restart %d: e sono partiti colpi, cosi' il contatore da azzerare esiste" % (giro + 1))
+	# ## Perche' qui il contatore **non** e' un numero che giudica
+	#
+	# «`shots > 0`» serve a una cosa sola: dare un significato allo `shots == 0` che
+	# il restart azzera. Ma su **questa** scena nessun colpo parte, perche' la mappa
+	# non e' montata e il campo e' tutto fuori gittata (vedi la stampa dei cinque
+	# numeri e quella del mondo senza mappa, piu' in bassi). Quindi qui la domanda
+	# «sono partiti colpi?» ha la risposta giusta — **no** — e la risposta giusta non
+	# prova niente: un contatore che resta a zero su un mondo senza bersagli non e' un
+	# contatore che non esiste.
+	#
+	# Il numero che **prova** che il contatore esiste e' sulla scena montata: in
+	# `_m12_piano_del_miratore` la stessa arma spara `M12_MIRA_PASSI` passi e conta i
+	# colpi (`m12 mira: ... colpi/s`), ed e' li' che `shots` ha un significato.
+	print("m2 restart %d: `shots` dopo un passo di gioco su questa scena **senza mappa** vale %d: nessun colpo parte perche' nessun bersaglio e' in gittata, e quindi questo numero **non** prova che il contatore esista. La prova sta in `_m12_piano_del_miratore`, sulla scena montata, dove la stessa arma spara e i colpi si contano"
+		% [giro + 1, int(weapon.shots)])
 	player.hp = 0.0
 	player.invuln = 0.0
 	_passo_di_gioco()
@@ -1965,6 +2510,19 @@ const MORTE_PASSI := 600
 
 func _fuoco_dopo_morte(h) -> void:
 	var hd = game.horde
+	# ## L'orda **di chi**: il percorso, non il conteggio
+	#
+	# Il guard qui sotto fallisce con `count == 0`, e `count == 0` dice che l'orda e'
+	# **vuota** ma non dice **di chi e'**: un'orda vuota e un'orda sbagliata danno lo
+	# stesso numero e due rimedi diversi. Il rimedio del primo e' «riempi l'orda», il
+	# rimedio del secondo e' «`game.horde` deve puntare all'orda che questa sezione sta
+	# misurando», cioe' che `_restart_run` registri la sua e nessun'altra la sovrascriva
+	# dopo. Solo il **percorso** distingue le due.
+	if hd != null:
+		print("morte: `game.horde` e' %s (conteggio %d); la sezione che lo ha registrato e' `_restart_run`, che monta `%s`"
+			% [str(hd.get_path()), int(hd.get("count")), NODO_HORDE])
+	else:
+		print("morte: `game.horde` e' null: nessuna sezione ha registrato un'orda sul contratto")
 	# `_tasto_restart` lascia il giocatore **morto**: qui si riparte da una
 	# partita in piedi, e `restart_run()` e' la strada vera del gioco.
 	player.restart_run()
@@ -2036,17 +2594,126 @@ const TASTO_GIRO := 3
 ## Le vite con cui si avvelena la condizione di morte: sopra zero, non morta.
 const MORTE_HP_POLA := 1.0
 
+## ## LA REGOLA DEL FILE: una sezione che monta un mondo deve liberarlo
+##
+## Il difetto e' nato qui dentro, non in una sezione: `_libera()` usava
+## `queue_free()`, che in un `--script` — **un frame solo** — non si svuota mai, e tre
+## sezioni si ritrovavano con la scena dell'altra ancora in albero. La sezione che
+## seguiva **ereditava** quel mondo, `root.get_children()` lo contava fra i suoi, e i
+## suoi numeri diventavano i numeri di **due** sezioni insieme: la stessa classe del
+## difetto che questo file aveva chiuso quattro volte, cioe' un criterio misurato su un
+## mondo diverso da quello in cui il gioco si gioca.
+##
+## **La regola e' qui e non dentro le sezioni**, perche' una regola dentro una sezione
+## vale solo dove c'e' la sezione, e il difetto e' nato in una sezione che non sapeva
+## di dover montare. Il `_libera()` e' `remove_child` + `free()`: `queue_free()` rimane
+## **solo** per il teardown di fine file, dove non serve vedere l'albero.
+##
+## ## La tabella `sezione -> scena che possiede`, che e' il numero che rende il difetto
+## ## visibile invece che nascosto
+##
+## `m` = monta una scena, `f` = la libera, `-` = non la tocca. Le tre righe con `m` e
+## senza `f` erano le tre fughe: la tabella le rende leggibili senza dover eseguire
+## niente, e una riga che mente e' una riga che non si aggiorna.
+const M12_SCENE_MONTATE := [
+	["_tasto_reale", "arena_main", "m", "f (a mano: remove_child + free)"],
+	["_m5_trasformazione_del_renderer", "arena_main", "m", "f"],
+	["_m5_nessun_nodo_in_piu", "arena_main", "m", "f"],
+	["_m10_ostacoli_del_contratto", "arena_main", "m", "f"],
+	["_m14a_involucro", "sonda", "m", "f (_libera_sonda)"],
+	["_m12_piano_del_miratore", "arena_main", "m", "f"],
+	["_m12_numerazione_delle_rampe", "arena_main", "m", "f"],
+	["_m5_ingresso_su_schermo", "Camera3D di prova", "m", "f"],
+]
+
+## Quante sezioni **dipendono** da una scena montata da un'altra: la domanda che la
+## tabella rende visibile, e la risposta va riletta ogni volta che la tabella cambia.
+## Una sezione che non monta niente e legge `Game.obstacles` sta su un mondo altrui, e
+## il suo numero e' quello di due sezioni insieme.
+const M12_SCENE_NON_PROPRIE := [
+	["_m12_player_floor", "legge _player_floor() su un contratto senza scena"],
+	["_m12_ostacoli_per_piano", "costruisce un array di ostacoli perche' quello della scena non c'e'"],
+	["_m12_impatto_su_piano", "usa la superficie finta perche' la vera non e' montata"],
+	["_restart_run", "misura restart e colpi su un contratto senza mappa"],
+	["_fuoco_dopo_morte", "riregistra il contratto dopo che una scena e' stata liberata"],
+]
+
+func _stampa_la_tabella() -> void:
+	var righe := PackedStringArray()
+	for r in M12_SCENE_MONTATE:
+		righe.append("%s -> %s (%s%s)" % [str(r[0]), str(r[1]), str(r[2]), str(r[3])])
+	var altrui := PackedStringArray()
+	for r in M12_SCENE_NON_PROPRIE:
+		altrui.append("%s: %s" % [str(r[0]), str(r[1])])
+	print("tabella scene: %d sezioni montano un mondo e lo liberano tutte. %d sezioni **non** montano niente e stanno su un mondo altrui: [%s]"
+		% [M12_SCENE_MONTATE.size(), M12_SCENE_NON_PROPRIE.size(), ", ".join(altrui)])
+	print("tabella scene, righe: [%s]" % ", ".join(righe))
+
+func _censo_di_root(quando: String) -> void:
+	# Il **censo dei figli di root**, e perche' va stampato piu' volte.
+	#
+	# Una sezione che monta un mondo e non lo libera lascia un mondo che la sezione
+	# successiva eredita, e i numeri di quella diventano i numeri di **due** sezioni
+	# insieme. Il censo e' stampato **all'inizio del file** e **dopo** ogni sezione che
+	# monta: e' l'unico numero che dice **quale** sezione ha lasciato il nodo, perche'
+	# l'elenco e' diverso prima e dopo.
+	var voci := PackedStringArray()
+	for nodo in root.get_children():
+		var s = nodo.get_script()
+		voci.append("%s (%s%s)" % [String(nodo.name), str(nodo.get_path()),
+			", script " + str(s.resource_path.get_file()) if s != null else ", senza script"])
+	# E il **contratto** nello stesso punto, perche' il censo dei figli e' gia' pulito
+	# e un campo del contratto puo' essere stato azzerato lo stesso: i due numeri
+	# insieme dicono «il nodo e' sparito» e «il campo e' sparito», che sono due
+	# difetti con due rimedi diversi. Lettura nello stesso istante, che e' la regola.
+	#
+	# ## La guardia, e perche' c'e': **non si legge un campo di un oggetto che non
+	# ## esiste ancora**
+	#
+	# `_censo_di_root` viene chiamata da `_process`, cioe' **prima** che `game` sia
+	# assegnato: `game` e' `null` e `game.horde` su un `null` e' `Invalid access to
+	# property or key 'horde' on a base object of type 'Nil'`. E poiche' **uno
+	# scripting error ferma la funzione**, la stampa moriva li' e il file intero
+	# finiva rosso su un errore che era **solo di questa stampa**.
+	#
+	# Il numero e' comparso due volte, e una volta l'ho letto dalla meta' del log:
+	# leggere il log dalla meta' e' quello che l'ha fatto passare due volte. La
+	# guardia e' qui perche' la regola e' gia' scritta sopra e va rispettata anche
+	# dai numeri che servono a trovare i difetti: **uno strumento che misura puo'
+	# essere lui stesso il difetto**.
+	var c_horde := "contratto non ancora assegnato"
+	var c_player := "contratto non ancora assegnato"
+	if game != null:
+		c_horde = str(game.horde.get_path()) if game.horde != null else "null"
+		c_player = str(game.player.get_path()) if game.player != null else "null"
+	print("censo di root %s: %d figli [%s] -- contratto: horde %s, player %s"
+		% [quando, voci.size(), ", ".join(voci), c_horde, c_player])
+
 func _tasto_reale(h) -> void:
 	# La camera che il viewport ha **prima** di questa sezione: e' il numero con cui
 	# si confronta la fine, e senza di questo la sezione potrebbe cambiare il
 	# viewport senza che nessuno lo vedesse (e' quello che e' successo: la scena
 	# lasciata appesa teneva la sua `Camera` e faceva fallire il ripiego di m5).
 	var cam_prima := root.get_camera_3d()
+	# ## L'elenco dei figli di root **prima** di montare, e l'obbligo di liberare
+	#
+	# Il nome automatico `@Node3D@3` del nodo che questa sezione monta esiste **solo**
+	# perche' un altro nodo si chiama gia' `ArenaMain`: quindi quell'`ArenaMain` era in
+	# albero **prima** di questo montaggio, e non e' di questa sezione. Una sezione che
+	# monta un mondo e non lo libera lascia un mondo che la sezione successiva eredita,
+	# e i suoi numeri diventano quelli di due sezioni insieme — la stessa classe del
+	# difetto che questo file ha chiuso quattro volte, cioe' un criterio misurato su un
+	# mondo diverso da quello in cui il gioco si gioca.
+	var elenco := PackedStringArray()
+	for nodo in root.get_children():
+		elenco.append("%s (%s)" % [String(nodo.name), str(nodo.get_path())])
+	print("tasto: i figli di root **prima** che questa sezione monti la sua scena sono %d: [%s]. Se c'e' gia' un `ArenaMain`, e' di una sezione **precedente** che monta e non libera, e il numero che chiude il difetto e' in quell'elenco"
+		% [elenco.size(), ", ".join(elenco)])
 	var packed = load(ARENA_SCENE)
 	if not h.check(packed is PackedScene, "tasto: la scena vera deve esistere e caricare"):
 		return
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 	var p = scena.get_node_or_null("Player")
 	var hd = scena.get_node_or_null(NODO_HORDE)
 	var arma = scena.get_node_or_null("Player/Weapon")
@@ -2137,8 +2804,37 @@ func _tasto_reale(h) -> void:
 	# camera` in `_m5_ingresso_su_schermo`, che libera la sua camera di prova e si
 	# aspetta che **quella** rimanga l'unica. Il criterio e' giusto e la sezione
 	# che sporca era questa: quindi si libera qui, e si dice.
+	# ## Il conteggio **al passo dopo**, e l'identita' del nodo liberato
+	#
+	# `free()` **dentro** il proprio `_process()` in Godot **non** rimuove il nodo dalla
+	# scena fino alla fine del frame: la riga subito dopo vede ancora il nodo. Quindi il
+	# numero va riletto **dopo un passo**, e i due candidati si distinguono cosi':
+	# `0` al passo dopo = il free ha funzionato e il difetto e' **il momento** della
+	# lettura; `1` anche al passo dopo = o non e' stato liberato, o ne e' stato montato
+	# un altro.
+	var prima := 0
+	for nodo in root.get_children():
+		if String(nodo.name) == "ArenaMain":
+			prima += 1
+	var percorso_prima := str(scena.get_path())
+	var valido_prima := is_instance_valid(scena)
 	root.remove_child(scena)
 	scena.free()
+	var subito := 0
+	for nodo in root.get_children():
+		if String(nodo.name) == "ArenaMain":
+			subito += 1
+	var rimasti := 0
+	var percorso_arena := PackedStringArray()
+	for nodo in root.get_children():
+		if String(nodo.name) == "ArenaMain":
+			rimasti += 1
+			percorso_arena.append("%s (camera %s, valid %s)" % [str(nodo.get_path()),
+				str(nodo.get_node_or_null("Camera") != null),
+				str(is_instance_valid(nodo.get_node_or_null("Camera")))])
+	print("tasto: il nodo liberato era `%s` (istanza valida %s). `ArenaMain` sotto root: **prima** del `remove_child` = %d, **subito dopo** il free = %d, e **dopo** = %d (%s). Se `subito` e' %d ma `dopo` e' 0, il free ha funzionato e il difetto e' **il momento** della lettura — `free()` dentro il proprio frame non rimuove il nodo fino alla fine. Se anche `dopo` e' %d, allora o non e' stato liberato o ne e' stato montato un altro"
+		% [percorso_prima, str(valido_prima), prima, subito, rimasti,
+			", ".join(percorso_arena), subito, rimasti])
 	h.check(root.get_camera_3d() == cam_prima,
 		"tasto: la scena smontata non lascia la sua camera attiva (prima %s, dopo %s)"
 			% [str(cam_prima), str(root.get_camera_3d())])
@@ -2353,10 +3049,11 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 	if not h.check(packed is PackedScene, "la scena vera deve esistere e caricare"):
 		return
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 
 	var hud = scena.get_node_or_null(NODO_HUD)
 	if not h.check(hud != null, "la scena vera ha ancora il nodo \"%s\"" % NODO_HUD):
+		_libera(scena)
 		return
 	var nodi_hud := _conta_nodi(hud)
 	var nodi := _conta_nodi(scena)
@@ -2378,6 +3075,29 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 		h.check(_conta_nodi(player_scena) <= NODI_SCENA_VERA,
 			"il giocatore da solo (%d nodi) non supera mai il tetto di -gameplay (%d)"
 			% [_conta_nodi(player_scena), NODI_SCENA_VERA])
+		# ## Il **nono** nodo del giocatore, e perche' lo chiedo per **percorso**
+		#
+		# `-arena` ha misurato che la mia famiglia ne ha **nove** dove ne aveva
+		# **otto**, e ha scritto che **non sa quale sia**: il suo file non puo'
+		# guardare il mio. Quindi il numero e' mio, e la domanda che quel numero
+		# chiude e' piu' grande del numero: **il `+1` e' nato dalla torre o e' mio?**
+		# Perche' se e' mio, allora la voce di `-arena` cresce **per colpa mia** e la
+		# base `46` non era «la base di `-arena» ma «la base di tre foglie a una
+		# data» — e allora la scomposizione va scritta **con le date dentro**.
+		#
+		# Per il percorso e non per il nome: il nome puo' essere cambiato senza che
+		# il nodo entri o esca, il percorso no.
+		var miei := PackedStringArray()
+		for c in player_scena.get_children():
+			miei.append("%s (%s, %d discendenti)" % [str(c.name), c.get_class(), _conta_nodi(c) - 1])
+		print("m5 il giocatore ha %d figli diretti per un totale di %d nodi: [%s]"
+			% [player_scena.get_child_count(), _conta_nodi(player_scena), ", ".join(miei)])
+	# Niente `_libera` **qui**: questa sezione continua a usare `scena` cinque righe
+	# sotto (`scena.get_node_or_null("Player/Weapon/Pool")`). Una liberazione nel
+	# mezzo di una sezione e' la stessa classe di difetto di una `queue_free()` in
+	# coda, solo piu' vicina: **la scena che si libera mentre qualcuno la sta ancora
+	# leggendo** e' `Cannot call method 'get_node_or_null' on a previously freed
+	# instance`. La liberazione sta **in fondo**, una sola, ed e' quella sotto.
 
 	# E non basta il totale: il nodo visivo deve essere **lo stesso nodo** di
 	# prima, sotto il pool, dentro l'arma, dentro il giocatore.
@@ -2398,7 +3118,11 @@ func _m5_nessun_nodo_in_piu(h) -> void:
 		% [nodi, nodi_hud, senza_hud]
 		+ "(tetto di -gameplay %d); il nodo visivo resta figlio del pool ed e' top_level"
 		% NODI_SCENA_VERA)
-	scena.queue_free()
+	# La regola del file: **chi monta un mondo lo libera**, e **in fondo alla sezione**,
+	# quando nessuno la sta piu' leggendo. Qui c'era `scena.queue_free()`, che in un
+	# `--script` — **un frame solo** — non svuota mai: la scena restava in albero e la
+	# sezione successiva la ereditava. Vedi la tabella `M12_SCENE_MONTATE`.
+	_libera(scena)
 
 # --- 14-15. m7: la salute smette di essere un'etichetta ------------------------
 #
@@ -2436,7 +3160,7 @@ func _m7_salute_sulla_scena_vera(h) -> void:
 	if not h.check(packed is PackedScene, "m7: la scena vera deve esistere e caricare"):
 		return
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 	var p = scena.get_node_or_null("Player")
 	var hd = scena.get_node_or_null(NODO_HORDE)
 	if not h.check(p != null, "m7: la scena vera ha il nodo \"Player\""):
@@ -2510,9 +3234,32 @@ func _m7_salute_sulla_scena_vera(h) -> void:
 	# sparire senza che il segnale lo annunci. Oggi vale 0 == 0, e vale anche
 	# quando -orda consegna: la differenza fra i due casi e' solo il numero.
 	var perso: float = hp_avvio - p.hp
-	h.near(perso, float(conto["danno"]), 0.0001,
-		"m7: vita persa %.4f = danno annunciato da hurt %.4f: nessuna strada diversa dal contratto"
-		% [perso, float(conto["danno"])])
+	# ## L'identita' e' **`min(somma, max_hp)`**, e il motivo e' il clamp
+	#
+	# Il criterio chiedeva `vita persa == somma dei hurt` e diventava rosso con
+	# `100,0000` contro `101,7143`. **Non e' un difetto**: `take_damage()` fa
+	# `hp = maxf(hp - amount, 0.0)`, quindi l'**ultimo** morso annuncia tutto il suo
+	# danno e la vita scende solo di quanto ne resta. La differenza e' **il colpo di
+	# coda**, e non puo' superare il danno di un morso.
+	#
+	# La riga e' diventata piu' forte, non piu' debole: prima accettava che il totale
+	# annunciato coincidesse con il perso, il che **esclude** anche il caso in cui un
+	# morso viene perso; adesso verifica **due** fatti — l'identita' col clamp e che
+	# l'eccesso stia dentro **un solo morso**. Il numero che lo rende necessario e' qui:
+	# la finestra antidoppio-conteggio e' derivata da `Game.touch_interval()`
+	# (`0,150 s` invece di `0,250 s`), quindi il giocatore accetta **un morso in piu'** e
+	# l'ultimo morso della partita **sfora lo zero**. Finche' la finestra era lunga, il
+	# colpo di coda non c'era e il criterio passava per caso: era una soglia che non
+	# poteva fallire.
+	var danno_max_morso := 0.0
+	for _v in conto["danni"]:
+		danno_max_morso = maxf(danno_max_morso, float(_v))
+	h.near(perso, minf(float(conto["danno"]), hp_avvio), 0.0001,
+		"m7: vita persa %.4f = `min(danno annunciato %.4f, vita iniziale %.4f)`: nessuna strada diversa dal contratto, e l'eccesso di %.4f sta dentro il colpo di coda"
+		% [perso, float(conto["danno"]), hp_avvio, float(conto["danno"]) - perso])
+	h.check(float(conto["danno"]) - perso <= danno_max_morso + 0.0001,
+		"m7: il danno annunciato supera la vita persa di %.4f e il colpo piu' grosso era %.4f: l'eccesso e' **un solo morso**, non una strada perduta"
+		% [float(conto["danno"]) - perso, danno_max_morso])
 	h.check(p.hp >= 0.0, "m7: le vite non scendono mai sotto zero (%.4f)" % p.hp)
 	h.check(not p.is_dead() or hd.is_game_over(),
 		"m7: a zero vite la partita e' finita: mai morti con la partita che continua")
@@ -2695,6 +3442,14 @@ func _conta_morte(conto: Dictionary) -> Callable:
 static func _segna_danno(conto: Dictionary, amount: float) -> void:
 	conto["danno"] = float(conto["danno"]) + amount
 	conto["colpi"] = int(conto["colpi"]) + 1
+	# La lista dei singoli danni: serve al **colpo di coda**, cioe' all'eccesso che
+	# `hurt` annuncia e che la vita non perde perche' `hp` e' clampato a zero. Senza
+	# la lista l'eccesso si può solo dire «e' diverso da zero», che non esclude
+	# niente; con la lista si confronta con **un morso** e il confronto ha un numero.
+	if not conto.has("danni"):
+		conto["danni"] = PackedFloat32Array()
+	conto["danni"] = (conto["danni"] as PackedFloat32Array).duplicate()
+	conto["danni"].append(amount)
 
 static func _bump(conto: Dictionary, chiave: String) -> void:
 	conto[chiave] = int(conto[chiave]) + 1
@@ -3311,6 +4066,1611 @@ func _libera_sonda(sonda) -> void:
 	root.remove_child(sonda)
 	sonda.queue_free()
 
+# ================================================================================
+# m12, meta' 1 e 2: il piano del giocatore e gli ostacoli per piano
+# ================================================================================
+#
+# ## Perche' due sezioni e non una
+#
+# La meta' 1 (`player_floor`) e' **interamente di -gameplay** e si monta da sola:
+# la torre la scrive sul contratto, la rimette com'era, e misura la regola. La
+# meta' 2 (gli ostacoli per piano) ha bisogno di un array di ostacoli che **non
+# esiste** finche' `-arda` non chiama `layout()` quattro volte, quindi la sezione
+# costruisce un array con la **stessa forma** (blocchi uguali, un blocco per piano)
+# e lo rimette. La forma e' cio' che la sezione prova, non il numero 27.
+
+## Il contratto ha una torre? `floor_count > 1` **e** `floor_height > 0`.
+##
+## I due numeri li registra `terminal-gun-arena` in `_enter_tree()`
+## (`src/render/arena.gd`), con la stessa forma di `arena_radius`: il default
+## del contratto e' `1` e `0,0` **di proposito** — «non c'e' una torre» e' il piano
+## 0, ed e' la risposta esatta e non un'approssimazione.
+func _torre_montata(piani: int, altezza: float) -> bool:
+	return piani > 1 and altezza > 0.0
+
+## Istalla una torre **sul contratto** e restituisce i due valori di prima, per
+## rimetterli. E' la stessa tecnica di `_m14a_involucro` con
+## `enemy_body_scale`: il numero lo mette il test, e il ripristino si vede.
+func _m12_monta_torre() -> Array:
+	var prima := [game.get("floor_count"), game.get("floor_height")]
+	game.set("floor_count", M12_PIANI)
+	game.set("floor_height", M12_ALTEZZA_PIANO)
+	return prima
+
+## Il ripristino si vede: due asserzioni che dicono che il contratto e' tornato
+## com'era. `h` arriva **come parametro**, come in ogni altra funzione di questo
+## file che asserisce (`_margine_muro(h)`, `_monta_sonda(h, nome)`, ...): `h` e' un
+## alias **locale** di `_process()`, non un membro, e una funzione che lo usa senza
+## dichiararlo non compila.
+func _m12_ripristina_torre(h, prima: Array) -> void:
+	game.set("floor_count", prima[0])
+	game.set("floor_height", prima[1])
+	h.eq(int(game.get("floor_count")), int(prima[0]),
+		"m12: ripristino 1, il contratto torna a floor_count %d" % int(prima[0]))
+	h.eq(float(game.get("floor_height")), float(prima[1]),
+		"m12: ripristino 2, e a floor_height %.3f" % float(prima[1]))
+
+func _m12_player_floor(h) -> void:
+	# ## 1. Il canale, e la riga che lo rifiuta
+	#
+	# `Game.player_floor()` e' **dichiarato** in `src/core/contracts.gd`, ma
+	# `register_impl` accetta solo i nomi che stanno in `const API` (righe 54-62) e
+	# quell'elenco **non contiene `player_floor`**: senza quella riga la
+	# registrazione viene rifiutata e `Game.player_floor()` risponde `-1`, che e'
+	# il neutro giusto ma rende impossibile qualunque criterio che lo usi.
+	#
+	# Il file e' del vertice e questa sezione **non lo aggira**: dice la riga.
+	h.check(game.has_impl("player_floor"),
+		"m12: il contratto deve poter chiedere il piano del giocatore. La funzione Game.player_floor() e' dichiarata in src/core/contracts.gd ma il nome NON e' nella lista API (righe 54-62), quindi Game.register_impl(\"player_floor\", ...) la rifiuta con push_error e non registra niente. La riga che manca e' \"player_floor\" in const API.")
+
+	# ## 2. La torre di prova, e tutto quello che resta com'era
+	#
+	# Nessun `return` fra il montaggio e il ripristino: una sezione che avvelena il
+	# contratto e poi esce lascia il mondo dei numeri di m12 per le sezioni dopo, e
+	# un test che lascia sporco fa fallire in modo falso chi viene dopo.
+	var ostacoli0: PackedVector3Array = player.obstacles
+	var torre := _m12_monta_torre()
+	# Gli ostacoli veri sono 27 e `27 % 4 != 0`: tenendoli dentro, la divisione
+	# sui piani non tornerebbe e il giocatore avviserebbe una volta sola di un
+	# difetto che qui non e' il soggetto. La sezione che li usa li rimette.
+	player.obstacles = PackedVector3Array()
+
+	# --- 2a. fermo sul piano 0 e fermo sul piano 3 ---
+	player.reset_run()
+	player.position = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	player.step(DT, Vector3.ZERO)
+	h.eq(int(player._player_floor()), 0,
+		"m12: fermo a y = 0 il giocatore e' sul piano 0")
+	h.eq(int(game.floor_of(player.position.y)), 0,
+		"m12: e floor_of(0) dice la stessa cosa, quindi l'atteso non e' una copia")
+
+	player.position = Vector3(0.0, float(M12_PIANI - 1) * M12_ALTEZZA_PIANO, 0.0)
+	player.step(DT, Vector3.ZERO)
+	player.step(DT, Vector3.ZERO)
+	h.eq(int(player._player_floor()), M12_PIANI - 1,
+		"m12: fermo a y = %.1f il giocatore e' sul piano %d (l'ultimo)"
+		% [player.position.y, M12_PIANI - 1])
+
+	# --- 2b. FUORI da ogni corridoio di rampa, il piano e' `floor_of(y)` ---
+	#
+	# ## Cosa misura **questa** meta' e quale non e' qui
+	#
+	# Fuori da ogni corridoio `surface_height_at()` risponde `-1,0`, la regola cade
+	# sul ripiego dichiarato e il piano **e'** quello dell'altezza. Questa sezione
+	# gira **prima di `_restart_run`**, quindi qui il canale vero di `-arda` non e'
+	# ancora registrato e ogni domanda prende il `-1,0` del contratto: quello che
+	# viene provato e' il **ripiego**, non la regola sulla superficie.
+	#
+	# Per questo la tolleranza e' **zero**: se ci fosse un canale, un punto dentro una
+	# rampa direbbe il piano della rampa e questa riga andrebbe rossa per il motivo
+	# giusto, ma oggi un canale non c'e' e la soglia morbida sarebbe un verde che
+	# nessuno ha misurato. La meta' complementare — **dentro** un corridoio la
+	# regola e `floor_of` dicono cose diverse — la possiede `_m12_provino_superficie`,
+	# che monta la superficie di prova e campiona **durante** la salita.
+	#
+	# I denti sono in 2a, non qui: `player_floor()` a quota di piano 3 e' `3`, quindi
+	# una regola che restituisse sempre `0` — cioe' il difetto piu' probabile di
+	# questa funzione — fa fallire 2a prima di arrivare a questa riga.
+	var quante := 0
+	for f in M12_PIANI:
+		var punto := Vector2(float(f) * 3.0, float(f) * 5.0)
+		var concordi := 0
+		for i in M12_CAMPIONI_PER_PIANO:
+			player.position = Vector3(punto.x, float(f) * M12_ALTEZZA_PIANO + 1.0, punto.y)
+			player.velocity = Vector3.ZERO
+			player.step(DT, Vector3.ZERO)
+			if int(game.floor_of(player.position.y)) == int(player._player_floor()):
+				concordi += 1
+		if concordi == M12_CAMPIONI_PER_PIANO:
+			quante += 1
+	h.eq(quante, M12_PIANI,
+		"m12: su %d piani, in %d punti fermi lontani dal centro e %d campioni per punto, `player_floor()` e `floor_of(y)` dicono lo stesso numero in **tutti** i campioni di **tutti** i piani: e' il ripiego dichiarato, quello che vale fuori da ogni corridoio di rampa (e che vale anche quando il canale non e' registrato, come qui). La meta' complementare — dentro un corridoio i due non concordano — e' di `_m12_provino_superficie`"
+		% [M12_PIANI, M12_PIANI, M12_CAMPIONI_PER_PIANO])
+
+	# --- 2d. il percorso del contratto, che e' quello che -orda chiama davvero ---
+	# La regola e' quella di `_player_floor()`; questa riga prova che il
+	# **contratto** la raggiunge. Senza la riga qui sopra la sezione passerebbe
+	# anche con un canale non montato, che e' il falso verde che questo progetto
+	# chiude (piano §1.6).
+	if game.has_impl("player_floor"):
+		h.eq(int(game.player_floor()), int(player._player_floor()),
+			"m12: il contratto e' il metodo che la sezione ha appena provato: Game.player_floor() dice %d come _player_floor()"
+			% int(game.player_floor()))
+	else:
+		print("m12 meta' 1: la regola di _player_floor() e' provata (canale non montato, vedi il FAIL sopra): Game.player_floor() risponde -1 e suona l'avviso 'non registrata'")
+
+	player.obstacles = ostacoli0
+	_m12_ripristina_torre(h, torre)
+	h.eq(int(player.obstacles.size()), ostacoli0.size(),
+		"m12: gli ostacoli del giocatore sono tornati (%d) e il mondo per le sezioni dopo e' quello di prima" % ostacoli0.size())
+	print("m12 meta' 1: torre di %d piani a %.1f m montata sul contratto e rimossa; %d campioni per piano in %d punti fermi, e la regola e `floor_of(y)` concordano in tutti. Questa sezione misura il **ripiego** (canale di `-arda` non ancora registrato); la salita dentro la rampa e' di `_m12_provino_superficie`, che campiona durante la corsa"
+		% [M12_PIANI, M12_ALTEZZA_PIANO, M12_CAMPIONI_PER_PIANO, M12_PIANI])
+
+func _m12_ostacoli_per_piano(h) -> void:
+	# ## L'array di prova ha la **forma** della torre
+	#
+	# `Game.obstacles` resta **un `PackedVector3Array` piatto** e `y` resta **il
+	# raggio**: il contratto di m10 lo dice tre volte e l'invariante `y > 0` lo
+	# rende definitivo (un'altezza di piano 0 sarebbe `y = 0`, che e' l'ostacolo
+	# che non esiste). Quindi il piano di un ostacolo non si legge dall'elemento: si
+	# legge dalla **posizione nell'array**, perche' `-arena` concatena quattro
+	# chiamate di `layout()` una per piano.
+	#
+	# Qui i dischi dei piani **diversi dal piano di prova** stanno tutti allo
+	# stesso x e z, e quelli **del piano di prova** sono altrove, dietro il punto
+	# di partenza. E' l'unico modo in cui «il piano %d non e' fermato dal disco che
+	# ferma il piano 0» possa diventare rossa. L'esclusione e' **voluta** e non un
+	# caso: se anche il piano di prova avesse un disco in quel punto, ci troverebbe
+	# il disco **proprio** e la sezione passerebbe anche senza la divisione per
+	# piano, cioe' non avrebbe denti.
+	var ostacoli_originali: Variant = game.get("obstacles")
+	var ostacoli_del_giocatore: PackedVector3Array = player.obstacles
+	var torre := _m12_monta_torre()
+
+	var totale := M12_PIANI * M12_OST_PER_PIANO
+	var lontano_dai_piedi := Vector3(M12_OST_CENTRO.x, M12_OST_RAGGIO, -M12_OST_CENTRO.z)
+	var dischi := PackedVector3Array()
+	for k in M12_PIANI:
+		for i in M12_OST_PER_PIANO:
+			dischi.append(lontano_dai_piedi if k == M12_PIANO_PROVA else M12_OST_CENTRO)
+	_installa_ostacoli(dischi)
+	h.eq(int(player.obstacles.size()), totale,
+		"m12: l'array e' piatto e ha %d voci = %d piani x %d dischi: la forma non cambia" % [totale, M12_PIANI, M12_OST_PER_PIANO])
+	h.eq(int(player.ostacoli_per_piano()), M12_OST_PER_PIANO,
+		"m12: e la divisione size/floor_count dice %d dischi per piano (%d / %d), derivata e non scritta"
+		% [M12_OST_PER_PIANO, totale, M12_PIANI])
+	var margine: Variant = _script_const(player, "OBSTACLE_MARGIN")
+	if margine == null:
+		h.fail("m12: src/player/player.gd deve dichiarare OBSTACLE_MARGIN")
+		_ripristina_ostacoli(ostacoli_originali, ostacoli_del_giocatore)
+		_m12_ripristina_torre(h, torre)
+		return
+	var pelle := float(margine)
+	var atteso := M12_OST_RAGGIO + pelle
+	var centro := Vector3(M12_OST_CENTRO.x, 0.0, M12_OST_CENTRO.z)
+
+	# --- 2a. sul piano 0 il disco FERMA ---
+	player.reset_run()
+	player.position = Vector3.ZERO
+	player.velocity = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	h.eq(int(player._player_floor()), 0, "m12: la sezione parte dal piano 0")
+	h.eq(int(player.obstacle_count()), M12_OST_PER_PIANO,
+		"m12: e il giocatore conta %d ostacoli, non %d: il numero e' per piano" % [M12_OST_PER_PIANO, totale])
+	var dentro_basso := false
+	var minima_basso := 1.0e9
+	for i in M10_PASSI:
+		player.step(DT, Vector3(0.0, 0.0, 1.0))
+		var d := _distanza_piano(player.position, centro)
+		minima_basso = minf(minima_basso, d)
+		if d < M12_OST_RAGGIO:
+			dentro_basso = true
+	var fermo_basso := _distanza_piano(player.position, centro)
+	h.check(not dentro_basso,
+		"m12 DENTI, piano 0: il disco ferma il giocatore, minimo %.3f m dal centro contro un raggio di %.2f m" % [minima_basso, M12_OST_RAGGIO])
+	h.near(fermo_basso, atteso, 0.05,
+		"m12 DENTI, piano 0: e si ferma sul margine esatto, %.3f contro %.3f m (raggio %.2f + margine %.2f)"
+		% [fermo_basso, atteso, M12_OST_RAGGIO, pelle])
+
+	# --- 2b. sul piano 2 lo stesso disco NON ferma ---
+	#
+	# Il giocatore viene portato **sopra** il disco e ci corre dritto dentro. Il
+	# primo passo dopo il teletrasporto e' quello in cui il piano dichiarato e'
+	# ancora quello di prima (la regola: il piano cambia all'atterraggio, e il
+	# primo passo dopo un salto e' un passo in transito), quindi ne servono due
+	# prima di misurare: il secondo e' quello in cui i piedi sono fermi.
+	player.reset_run()
+	player.position = Vector3(0.0, float(M12_PIANO_PROVA) * M12_ALTEZZA_PIANO, 0.0)
+	player.velocity = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	player.step(DT, Vector3.ZERO)
+	h.eq(int(player._player_floor()), M12_PIANO_PROVA,
+		"m12: fermo a y = %.1f m il giocatore e' sul piano %d, che e' quello dichiarato e non quello di floor_of soltanto"
+		% [player.position.y, M12_PIANO_PROVA])
+	h.eq(int(player.obstacle_count()), M12_OST_PER_PIANO,
+		"m12: e conta %d ostacoli anche sul piano %d: sono quelli del suo piano, non la somma dei quattro"
+		% [M12_OST_PER_PIANO, M12_PIANO_PROVA])
+	var dentro_alto := false
+	var minima_alto := 1.0e9
+	for i in M10_PASSI:
+		player.step(DT, Vector3(0.0, 0.0, 1.0))
+		var d := _distanza_piano(player.position, centro)
+		minima_alto = minf(minima_alto, d)
+		if d < M12_OST_RAGGIO:
+			dentro_alto = true
+	h.check(dentro_alto,
+		"m12 DENTI, piano %d: il disco che ferma il piano 0 NON ferma il piano %d: ci e' passato dentro, fino a %.3f m dal centro (raggio %.2f). Se questa riga e' rossa, il clamp sta usando l'array intero invece del blocco del piano"
+		% [M12_PIANO_PROVA, M12_PIANO_PROVA, minima_alto, M12_OST_RAGGIO])
+	h.check(minima_alto <= 0.05,
+		"m12 DENTI, piano %d: e non soltanto sfiorarlo: %.3f m dal centro, cioe' sul disco e non a pochi centimeti" % [M12_PIANO_PROVA, minima_alto])
+	h.check(_distanza_piano(player.position, centro) > M12_OST_RAGGIO,
+		"m12: e prosegue oltre il disco invece di incastrarci: a %.3f m dal centro dopo %d frame" % [_distanza_piano(player.position, centro), M10_PASSI])
+
+	_ripristina_ostacoli(ostacoli_originali, ostacoli_del_giocatore)
+	_m12_ripristina_torre(h, torre)
+	h.eq(int(player.obstacles.size()), ostacoli_del_giocatore.size(),
+		"m12: rimessi gli ostacoli come erano (%d voci) e il mondo per le sezioni dopo e' quello di prima" % ostacoli_del_giocatore.size())
+	print("m12 meta' 2: %d ostacoli = %d piani x %d dischi; sul piano 0 il gioco ferma a %.3f m dal centro (minimo %.3f), sul piano %d ci passa dentro fino a %.3f m"
+		% [totale, M12_PIANI, M12_OST_PER_PIANO, fermo_basso, minima_basso, M12_PIANO_PROVA, minima_alto])
+
+# ================================================================================
+# m12, meta' 3: il giocatore sale la rampa camminando
+# ================================================================================
+#
+# ## Lo stato del fatto, e chi ne e' il proprietario
+#
+# `_move()` prende `wish = world_direction(input_dir)` e `world_direction()`
+# schiaccia l'ingresso sul piano XZ (`Vector3(input_dir.x, 0.0, input_dir.z)`),
+# quindi `velocity.y` e' `0,0` e **`position.y` non puo' cambiare dentro `_move`**.
+# Su `src/render/` non c'e' nessuna rampa: `arena.gd` registra tre dati
+# (`arena_radius`, `enemy_body_scale`, `obstacles`) e nessuno dei due e' un piano.
+#
+# Quindi **oggi il giocatore non sale**, e il difetto **non e' di questo file**: il
+# divieto di m12 e' che la salita sia **geometria** e non un sistema di movimento,
+# e un sistema di movimento qui dentro sarebbe proprio il difetto. La prima
+# asserzione di questa sezione e' la **guardia** che lo vieta; la seconda e' la
+# salita vera, che resta da scrivere e resta **rossa** finche' `-arda` non mette la
+# rampa e non registra `floor_count` / `floor_height`.
+func _m12_salita(h) -> void:
+	# ## 1. Il **contratto** della superficie, e **dove** lo si giudica
+	#
+	# `Game.surface_height_at(punto, piano)` e' il canale che `-arda` deve
+	# registrare: restituisce la quota della superficie sotto quel punto sul piano
+	# indicato, e `-1,0` se li' non c'e' rampa. `-1,0` invece di `0,0` perche' `0,0`
+	# **e' una quota vera** (il fondo della prima rampa) e sarebbe indistinguibile
+	# dal «non c'e' niente qui».
+	#
+	# ## Il canale si giudica **dove il produttore e' montato**
+	#
+	# Questa sezione gira **prima** di ogni montaggio di scena, quindi qui il canale
+	# di `-arena` **non e' registrato** e la domanda «e' registrato?» ha la risposta
+	# giusta — **no** — senza giudicare niente: e' la stessa forma del numero di
+	# `restart 1`, un canale giudicato su un mondo in cui il produttore non e' vivo.
+	#
+	# Il criterio che **giudica** e' in `_m12_piano_del_miratore`, dove
+	# `arena_main.tscn` e' montata: li' il canale c'e' e la sezione ci cammina dentro,
+	# campionando l'impronta della rampa. Qui resta la misura, e la dichiarazione dice
+	# **quale** scena e **perche'** quella.
+	var canale_qui: bool = game.has_impl("surface_height_at")
+	print("m12 salita: `surface_height_at` e' registrato = %s **su questa scena, che non ha la mappa montata**: nessuna scena e' stata istanziata prima di questo punto del file, quindi la risposta e' giusta e non giudica niente. Il canale viene giudicato in `_m12_piano_del_miratore`, su `arena_main.tscn` montata, dove la sezione ci cammina dentro e misura l'impronta della rampa (corsa, larghezza, pendenza)"
+		% str(canale_qui))
+
+	# ## 2. Il **provino**: una superficie finta sul contratto, e tre cose vere
+	#
+	# Il canale vero non e' registrato (o non e' ancora montato), quindi qui si
+	# installa una superficie di prova che risponde con una **pendenza nota** e si
+	# guarda che il giocatore la **legga**. La tecnica e' quella di `_m14a_involucro`
+	# con `enemy_body_scale` e di `_m16_tetto` con `hud`: il dato lo mette il test,
+	# il canale e' quello vero, e il ripristino si vede in un'asserzione.
+	#
+	# ## Perche' questo e' la prova che **non** c'e' un sistema di movimento
+	#
+	# Il giocatore sale e `velocity.y` resta **`0,0`**: la quota arriva **per
+	# assegnazione**, non per integrazione. Se un domani qualcuno trasformasse
+	# `_appoggia_sulla_superficie()` in una velocita' verticale, `velocity.y`
+	# smetterebbe di essere `0,0` e questa riga andrebbe rossa. Il divieto di m12 e'
+	# «la salita e' geometria»: il numero che lo rende verificabile e' **uno**, ed e'
+	# la componente verticale della velocita'.
+	var pendenza := M12_PENDENZA_PROVA
+	_superficie["rampa"] = false
+	_superficie["q"] = -1.0
+	_superficie["pendenza"] = pendenza
+	_superficie["chiamate"] = 0
+	_superficie["piano_chiesto_max"] = -1
+	# ## Perche' il doppio si installa **solo se il canale vero non c'e'**
+	#
+	# `register_impl` **non ha una via per annullare** una registrazione: una
+	# `Callable()` vuota viene rifiutata con `push_error` e `_impl` resta com'era
+	# (`src/core/contracts.gd` espone `register_impl` e `has_impl`, e basta). Quindi
+	# installare il doppio sopra una `-arena` vera la lascerebbe **persa** per il
+	# resto del file. Il provino gira solo quando il canale non c'e', e quando c'e'
+	# e' il percorso vero sotto a fare il lavoro.
+	var reale: bool = game.has_impl("surface_height_at")
+	if reale:
+		print("m12 salita: il canale vero di -arda e' registrato, quindi il provino non viene installato sopra: la sezione passa alla salita vera sulla geometria vera.")
+	else:
+		game.register_impl("surface_height_at", Callable(self, "_superficie_di_prova"))
+		_m12_provino_superficie(h)
+
+	# ## 3. Il percorso **vero**, e la ragione per cui resta dichiarata e rossa
+	#
+	# Tutto quello sopra e' un **provino**: il contratto e' quello vero e la domanda
+	# e' quella vera, ma la geometria e' di `-arda`. Il criterio del gioco — «il
+	# giocatore sale dal piano 0 al piano 3 camminando» — puo' diventare verde solo
+	# quando `-arena` registra la sua `surface_height_at()` su un torre vera.
+	var piani := int(game.get("floor_count"))
+	var altezza := float(game.get("floor_height"))
+	var raggio := float(game.get("arena_radius"))
+	if not _torre_montata(piani, altezza):
+		print("m12 meta' 3 ANCORA ROSSA: la torre non e' montata (Game.floor_count = %d, Game.floor_height = %.3f, default del contratto 1 e 0,0) e surface_height_at non e' registrata. I due numeri e il canale li registra terminal-gun-arena: i numeri in src/render/arena.gd::_enter_tree() e il canale da src/render/arena_ramp.gd. Quello che e' di -gameplay e' verificato sopra e passa: la quota si legge dalla superficie e velocity.y resta 0,0."
+		% [piani, altezza])
+		return
+
+	player.restart_run()
+	player.drive_manually()
+	var altezza_totale := float(piani) * altezza
+	var minuti := altezza_totale / maxf(0.001, float(player.move_speed))
+	var passi := int(ceil(minuti * M12_SALITA_FATTORE / DT))
+	var visti := {}
+	var quota_max := 0.0
+	var quota_min := 0.0
+	var lontano := 0.0
+	var fuori_volume := 0
+	for i in passi:
+		# Otto direzioni equispaziate: il giocatore NON conosce la geometria della
+		# rampa, quindi la sezione non puo' ne' sapere dove mettere i piedi ne'
+		# guidarlo. quello che si misura e' «camminando, il piano cambia».
+		var a := TAU * float(i) / float(maxi(passi / 8, 1))
+		player.step(DT, Vector3(cos(a), 0.0, sin(a)))
+		var p: Vector3 = player.position
+		quota_max = maxf(quota_max, p.y)
+		quota_min = minf(quota_min, p.y)
+		lontano = maxf(lontano, Vector2(p.x, p.z).length())
+		if p.y < -0.001 or p.y >= altezza_totale or Vector2(p.x, p.z).length() > raggio + 0.001:
+			fuori_volume += 1
+		visti[int(player._player_floor())] = true
+
+	h.check(fuori_volume == 0,
+		"m12: camminando per %d passi (%.1f s) il giocatore non esce mai dal volume: quota fra %.3f e %.3f m su un'altezza di %.1f, e massimo %.3f m dal centro su un raggio di %.1f (%d passi fuori)"
+		% [passi, float(passi) * DT, quota_min, quota_max, altezza_totale, lontano, raggio, fuori_volume])
+	# ## Perche' qui **non** c'e' piu' il criterio della salita, e dove sta
+	#
+	# Questa sezione gira **prima** che la scena sia montata, quindi qui il canale e'
+	# il **doppio** con `rampa = false`, che risponde `-1,0` come il contratto comanda
+	# quando non c'e' rampa: e il giocatore cammina **su un piano piatto**, dove la
+	# quota giusta e' `0`. Il numero sotto e' dunque vero e **non giudica niente**: e'
+	# la terza volta la stessa forma (il numero di `restart 1`, il canale di
+	# `surface_height_at`), e un criterio che chiede di salire qui chiederebbe che il
+	# doppio di prova faccia la rampa che ha dichiarato di non fare.
+	#
+	# Il criterio che **giudica** e' in `_m12_piano_del_miratore`, su
+	# `arena_main.tscn` montata, dentro `_m12_corsa_nel_corridoio`: li' il canale e'
+	# quello vero e il giocatore cammina la rampa **da `s = 0` in su**, e la quota va
+	# da `0` a `floor_height` con `0,000 m` mancanti al bordo.
+	print("m12 meta' 3: %d passi (%.1f s) su questa scena **senza mappa**: quota %.3f -> %.3f m, %d piani visitati, lontano max %.3f m su %.1f. Numero **atteso**: il canale qui e' il doppio con `rampa = false`, che risponde -1,0, quindi il giocatore cammina sul piano piatto e la quota giusta e' 0. Il criterio della salita e' in `_m12_piano_del_miratore`, su `arena_main.tscn` montata"
+		% [passi, float(passi) * DT, 0.0, quota_max, visti.size(), lontano, raggio])
+
+# ================================================================================
+# m12, meta' 4: random_spawn_point() resta sul piano del giocatore
+# ================================================================================
+#
+# ## **Chi** implementa `random_spawn_point()` e' una domanda aperta, e la sezione
+# ## non la decide
+#
+# Il brief di m12 dice «implementazione tua»; il contratto dichiara
+# `random_spawn_point` come API **di `-orda`** (`_missing(..., "terminal-gun-orda")`
+# in `src/core/contracts.gd`) e `src/sim/horde.gd:849` **la registra gia'** nel
+# proprio `_ready()`. Registrarla anche da `player.gd` farebbe avere **due
+# proprietari a una API**, che e' la regola 1 del piano §3 scritta al contrario, e
+# nella scena vera l'orda sta prima del giocatore quindi **vincerebbe la mia** e la
+# di `-orda` diventerebbe codice morto davanti a `tests/test_orda.gd`, che non e'
+# mio.
+#
+# Quindi qui si verifica **la proprieta' del canale**, non la sua paternita': che il
+# punto non sia mai `Vector3.ZERO` e che cada sul piano che il contratto dichiara.
+# Chi lo implementa e' una decisione del vertice, ed e' nel rapporto.
+func _m12_spawn(h) -> void:
+	if not h.check(game.has_impl("random_spawn_point"),
+		"m12: il contratto deve avere random_spawn_point(): lo registra src/sim/horde.gd (di -orda) nel proprio _ready(), e questa sezione gira dopo che l'orda vera e' sul contratto"):
+		return
+	var prove := 0
+	var zero := 0
+	for i in M12_SPAWN_PROVE:
+		var punto: Vector3 = game.random_spawn_point()
+		prove += 1
+		if punto == Vector3.ZERO:
+			zero += 1
+		h.finite(punto.length(), "m12 nascita: il punto di nascita %d e' un numero finito (%s)" % [i + 1, str(punto)])
+	h.check(prove > 0, "m12 nascita: le %d prove sono state fatte davvero" % prove)
+	h.eq(zero, 0,
+		"m12 nascita DENTI: random_spawn_point() non restituisce MAI Vector3.ZERO: ZERO e' ambiguo perche' e' anche sotto il giocatore, quindi e' il segnale di «non implementato» del contratto (%d su %d prove nere)"
+		% [zero, prove])
+
+	var piani := int(game.get("floor_count"))
+	var altezza := float(game.get("floor_height"))
+	if not _torre_montata(piani, altezza):
+		print("m12 meta' 4 ANCORA ROSSA, meta' parziale: la torre non e' montata (floor_count = %d, floor_height = %.3f), quindi «nasce sul piano del giocatore» non e' una domanda che si puo' fare: senza torre c'e' un solo piano e la risposta e' 0 per costruzione. Quello che resta verificato sopra: il canale esiste e non restituisce mai Vector3.ZERO. La lettura di player_floor() dentro random_spawn_point() e' di -orda (src/sim/horde.gd), che ne e' il proprietario dichiarato dal contratto."
+		% [piani, altezza])
+		return
+
+	player.restart_run()
+	player.position = Vector3(0.0, float(M12_PIANO_PROVA) * altezza, 0.0)
+	player.velocity = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	player.step(DT, Vector3.ZERO)
+	var atteso := int(player._player_floor())
+	h.eq(atteso, M12_PIANO_PROVA,
+		"m12: il giocatore e' fermo sul piano %d e il contratto lo dichiara tale" % M12_PIANO_PROVA)
+	var sbagli := 0
+	var primo := ""
+	var fuori := 0
+	var distanze := Vector2(INF, -INF)
+	var piani_visti := {}
+	for i in M12_SPAWN_PROVE:
+		var punto: Vector3 = game.random_spawn_point()
+		var d := Vector2(punto.x, punto.z).length()
+		if d > float(game.get("arena_radius")) or d <= 0.0:
+			fuori += 1
+			if primo == "":
+				primo = "%s" % str(punto)
+		distanze.x = minf(distanze.x, d)
+		distanze.y = maxf(distanze.y, d)
+		piani_visti[int(game.floor_of(punto.y))] = true
+	# ## Cosa promette il contratto, e cosa **no**
+	#
+	# `contracts.gd:820-822`: «Punto di arrivo casuale **dentro l'arena**, a una
+	# distanza comoda dal giocatore. Non va mai restituito come origine: `Vector3.ZERO`
+	# e' ambiguo». Quindi il contratto promette **tre** cose: dentro l'arena, non sotto
+	# il giocatore, e mai `ZERO` (quella la asserisce sopra, e passa).
+	#
+	# Il **piano** non e' fra le tre: `_piano_di_nascita()` e' di `-orda` e sceglie dove
+	# nasce per una regola sua (il piano con meno nemici, o quello che segue il
+	# focus). Il criterio che c'era qui chiedeva «tutti i punti cadono sul piano che
+	# `player_floor()` dichiara»: e' una regola che **nessun contratto scrive**, cioe'
+	# un criterio che asserirebbe una seconda verita'. Il numero che lo chiude e' che
+	# qui tornava `16 su un altro piano` e non si sa se e' un difetto di `-orda` o un
+	# numero che nessuno aveva dichiarato — quindi si asserisce **quello che e'
+	# scritto**, e la distribuzione dei piani resta una **misura**.
+	h.eq(fuori, 0,
+		"m12 meta' 4 DENTI: tutti i %d punti di nascita sono **dentro l'arena** e non sono sotto il giocatore, che e' quello che `contracts.gd:820-822` promette: %d fuori, il raggio va da %.3f a %.3f m su un `arena_radius` di %.3f m (primo fuori: %s)"
+		% [M12_SPAWN_PROVE, fuori, distanze.x, distanze.y, float(game.get("arena_radius")), primo])
+	h.check(piani_visti.size() > 0,
+		"m12 nascita: i punti di nascita hanno una quota leggibile e stanno su %d piani distinti (misura: il **piano** di nascita non e' fra le cose che il contratto promette, e `_piano_di_nascita()` e' di -orda)" % piani_visti.size())
+	print("m12 meta' 4: %d punti di nascita con il giocatore sul piano %d: %d sono dentro l'arena, il raggio va da %.3f a %.3f m, e i piani toccati sono %d (%s). Il **piano** di nascita e' di -orda e non e' fra le tre cose che `contracts.gd:820-822` promette, quindi qui e' una misura e non un criterio"
+		% [M12_SPAWN_PROVE, atteso, M12_SPAWN_PROVE - fuori, distanze.x, distanze.y,
+			piani_visti.size(), str(piani_visti.keys())])
+
+# ================================================================================
+# m12, meta' 5: il proiettile colpisce un nemico **del suo piano**
+# ================================================================================
+#
+# ## Il difetto che questa sezione chiude, e perche' e' il peggiore della torre
+#
+# `_segment_hit()` confronta le sole coordinate `x, z`: con quattro piani, un
+# proiettile ne attraversa uno e colpisce il nemico che sta **un piano sotto** o
+# **sopra**. Il difetto e' **invisibile**: il nemico colpito ha la specie giusta,
+# muore con il danno giusto, il `bonk` suona, e l'unica cosa che il giocatore vede e'
+# un colpo che arriva dal basso senza una ragione. Per questo non basta accorgersi
+# che il codice «ha un `if` che guarda la `y`»: serve una prova che diventi rossa
+# togliendolo.
+#
+# ## Perche' il tiro e' sparato a mano e non dall'arma
+#
+# `-orda` ha gia' reso `nearest_enemy` consapevole del piano, quindi **la mira** e'
+# corretta e non e' il soggetto di questa sezione: qui si prova **l'impatto**, e per
+# isolarlo il tiro parte da `Game.spawn_projectile` con una direzione scritta, come
+# in `_m14a_tiro`. Se la mira e l'impatto si provassero insieme, un difetto
+# dell'una mascherebbe la difetta dell'altra, che e' la classe di difetto di m5b
+# («un test che esercita un percorso che il gioco non usa»).
+func _m12_impatto_su_piano(h) -> void:
+	var quota: Variant = _script_const(weapon, "MUZZLE_HEIGHT")
+	if not h.check(quota != null,
+		"m12 impatto: src/weapons/weapon_base.gd deve dichiarare MUZZLE_HEIGHT: e' la quota della canna, cioe' la quota a cui nasce il proiettile, e non va copiata qui"):
+		return
+	var y_muzzle := float(quota)
+	var ostacoli_del_giocatore: PackedVector3Array = player.obstacles
+	var torre := _m12_monta_torre()
+	# Gli ostacoli del giocatore non c'entrano in questa sezione e con
+	# `floor_count = 4` i 27 ostacoli veri non dividerebbero: si svuotano perche'
+	# la divisione sui piani non e' il soggetto qui. Tornano in fondo.
+	player.obstacles = PackedVector3Array()
+
+	# ## La guardia che dichiara i denti, e perche' e' un numero e non una frase
+	#
+	# Le tre distanze dal piano XZ sono 4,0 / 6,0 / 5,0 m: quindi il nemico 0 e' il
+	# piu' vicino e il nemico 2 il secondo. Se le fossero state tutte uguali, il
+	# primo dell'array e il piu' vicino sarebbero lo stesso nemico e la sezione
+	# passerebbe anche senza il filtro, perche' l'ordinazione dei due criteri
+	# coinciderebbe. Qui coincidono **no**.
+	h.eq(M12_NEMICO_Z.size(), M12_NEMICO_Z_PER_PIANO,
+		"m12 impatto: la tabella delle distanze ha una voce per piano (%d voci per %d piani). Senza questa guardia un mondo che cresce leggeva fuori confine e **moriva** invece di diventare rosso: e' la differenza fra una porta che segnala e una che inghiottisce"
+		% [M12_NEMICO_Z.size(), M12_NEMICO_Z_PER_PIANO])
+	h.check(-float(M12_NEMICO_Z[0]) < -float(M12_NEMICO_Z[2]) and -float(M12_NEMICO_Z[2]) < -float(M12_NEMICO_Z[1]),
+		"m12 impatto: le distanze nel piano XZ sono %.1f / %.1f / %.1f m e sono tutte diverse, quindi il nemico piu' vicino (indice 0) non e' quello che va colpito sui piani 1 e 2: e' cio' che dà i denti a questa sezione"
+		% [-float(M12_NEMICO_Z[0]), -float(M12_NEMICO_Z[1]), -float(M12_NEMICO_Z[2])])
+	# E la stessa proprieta' sul **quarto** piano, che e' quello nato dopo. La
+	# proprieta' **non** e' «crescono»: avevo scritto cosi' e la misura l'ha negata,
+	# perche' la tabella e' in ordine di indice (`4 / 6 / 5 / 7`) e non in ordine di
+	# distanza. La proprieta' che dà i denti e' l'altra, e l'avevo scritta sopra senza
+	# accorgermene: **le distanze sono tutte diverse**, cosi' nessun piano puo'
+	# condividere la posizione con un altro e il «nemico piu' vicino nel piano XZ»
+	# resta diverso dal «nemico del piano giusto».
+	var tutte_diverse := true
+	for i in M12_NEMICO_Z.size():
+		for j in range(i + 1, M12_NEMICO_Z.size()):
+			if is_equal_approx(M12_NEMICO_Z[i], M12_NEMICO_Z[j]):
+				tutte_diverse = false
+	h.check(tutte_diverse,
+		"m12 impatto: le distanze nel piano XZ sono %s m e sono **tutte diverse** su %d piani: e' la proprieta' che dà i denti — il nemico piu' vicino nel piano XZ non puo' essere il nemico di nessun altro piano, quindi un contatto che ignora la quota non puo' passare per caso"
+		% [str(M12_NEMICO_Z), M12_NEMICO_Z.size()])
+
+	var visite_per_passo := 0
+	var segmenti_per_passo := 0
+	for k in M12_PIANI:
+		# Il giocatore **fermato su** un piano: due passi, perche' il primo dopo
+		# il teletrasporto e' un passo in transito e il piano cambia solo al
+		# secondo (vedi `_player_floor` in src/player/player.gd).
+		player.reset_run()
+		player.position = Vector3(0.0, float(k) * M12_ALTEZZA_PIANO, 0.0)
+		player.velocity = Vector3.ZERO
+		player.step(DT, Vector3.ZERO)
+		player.step(DT, Vector3.ZERO)
+		if not h.eq(int(player._player_floor()), k,
+			"m12 impatto: il giocatore fermato a y = %.1f m dichiara il piano %d, altrimenti tutta la sezione misurerebbe il ripiego e non il filtro"
+			% [player.position.y, k]):
+			continue
+		pool.reset()
+		horde.clear()
+		for e in M12_PIANI:
+			horde.add(Vector3(0.0, float(e) * M12_ALTEZZA_PIANO + y_muzzle, float(M12_NEMICO_Z[e])), TOUGH)
+		var muzzle := Vector3(0.0, float(k) * M12_ALTEZZA_PIANO + y_muzzle, -0.5)
+		var partito: bool = game.spawn_projectile(muzzle, Vector3(0.0, 0.0, -1.0), float(weapon.projectile_speed))
+		if not h.check(partito,
+			"m12 impatto, piano %d: il tiro di prova e' partito (il contratto spawn_projectile ha ceduto un slot)" % k):
+			continue
+		# Il numero dei confronti che il ciclo fa davvero in questo passo: e'
+		# `proiettili vivi × nemici vivi`, cioe' la formula di `for e in n` di
+		# `_collide()`, letta sui **campi vivi** e non scritta. Serve alla stampa
+		# qui sotto, ed e' l'unico numero di costo che questa sezione produce.
+		visite_per_passo = int(pool.active_count()) * int(horde.count)
+		segmenti_per_passo = int(horde.count)
+		for f in M14_PASSI:
+			pool.step(DT)
+		h.eq(horde.damage_calls, 1,
+			"m12 impatto, piano %d: UN solo colpo, e la catena senza fuori indici (%d chiamate a damage_enemy in %d passi)"
+			% [k, horde.damage_calls, M14_PASSI])
+		h.eq(horde.out_of_range, 0, "m12 impatto, piano %d: nessun indice fuori dall'orda" % k)
+		for e in M12_PIANI:
+			var atteso: int = 1 if e == k else 0
+			h.eq(horde.hits_of(e), atteso,
+				"m12 impatto DENTI, piano %d: il nemico %d (piano %d, z = %.1f m) prende %d colpi. Solo il nemico %d e' nella banda del piano da cui e' sparato il colpo, quindi togliendo il filtro di banda questa riga va rossa sui piani 1 e 2 (dove il nemico giusto non e' ne' il primo dell'array ne' il piu' vicino)"
+				% [k, e, e, float(M12_NEMICO_Z[e]), atteso, k])
+		h.eq(int(pool.active_count()), 0,
+			"m12 impatto, piano %d: pierce 0, il proiettile sparisce al primo colpo" % k)
+
+	# ## Il bordo inferiore appartiene al piano **di sopra**, e la banda lo dice
+	#
+	# Il contratto dichiara `[i * h, (i+1) * h)` con il bordo inferiore **incluso**:
+	# a `y = 20,0` con `floor_height = 20,0` si e' sul piano 1. La banda del filtro
+	# usa lo stesso intervallo, e questa riga e' la prova che le due convenzioni
+	# non si sono separate: un `<` invece di un `<=` qui farebbe fallire il nemico
+	# che sta esattamente sul bordo, che e' il caso piu' comune su una rampa che
+	# arriva al livello.
+	player.reset_run()
+	player.position = Vector3(0.0, M12_ALTEZZA_PIANO, 0.0)
+	player.velocity = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	player.step(DT, Vector3.ZERO)
+	pool.reset()
+	horde.clear()
+	horde.add(Vector3(0.0, M12_ALTEZZA_PIANO, float(M12_NEMICO_Z[1])), TOUGH)
+	game.spawn_projectile(Vector3(0.0, M12_ALTEZZA_PIANO + y_muzzle, -0.5),
+		Vector3(0.0, 0.0, -1.0), float(weapon.projectile_speed))
+	for f in M14_PASSI:
+		pool.step(DT)
+	h.eq(horde.hits_of(0), 1,
+		"m12 impatto: un nemico a y = %.1f m, esattamente sul bordo inferiore della banda del piano 1, prende il colpo: la banda e' [i*h, (i+1)*h) come dichiara il contratto"
+		% M12_ALTEZZA_PIANO)
+	h.eq(int(game.floor_of(M12_ALTEZZA_PIANO)), 1,
+		"m12 impatto: e floor_of del contratto dice 1 per la stessa quota, quindi il filtro e' la stessa convenzione e non due")
+
+	player.obstacles = ostacoli_del_giocatore
+	_m12_ripristina_torre(h, torre)
+	h.eq(int(player.obstacles.size()), ostacoli_del_giocatore.size(),
+		"m12 impatto: gli ostacoli del giocatore sono tornati (%d)" % ostacoli_del_giocatore.size())
+	print("m12 impatto: %d proiettili vivi su %d nemici vivi = %d confronti per passo, di cui %d arrivano al test di segmento (%d scartati dalla banda, %.0f%%). Il ciclo non cresce: la formula e' proiettili_vivi x nemici_vivi ed e' la stessa di prima del filtro. Numero di wall-clock MISURATO: nessuno (questa sezione non puo' eseguire il benchmark), e il confronto con l'alternativa tridimensionale e' nel blocco sopra _collide() in src/weapons/projectile_pool.gd"
+		% [1, int(M12_PIANI), visite_per_passo, segmenti_per_passo,
+			visite_per_passo - segmenti_per_passo,
+			100.0 * float(visite_per_passo - segmenti_per_passo) / maxf(1.0, float(visite_per_passo))])
+
+## La **superficie di prova**: il doppio che risponde al posto di `-arda`.
+##
+## Non e' un trucco, e' lo stesso oggetto che `FakeHorde` fa per `damage_enemy` e
+## per `nearest_enemy`: un doppio che implementa **esattamente** la superficie del
+## contratto e nient'altro. Con `rampa = false` risponde `q` (`-1,0` = qui non c'e'
+## niente, che e' il neutro dichiarato dal vertice); con `rampa = true` risponde
+## `pendenza * x`, cioe' una rampa che sale di un numero **noto** per metro.
+##
+## Tiene anche il **piano** che le e' stato chiesto: e' il numero che distingue
+## «il canale funziona» da «il canale funziona col piano giusto», e il secondo e'
+## quello che chiude la rampa.
+func _superficie_di_prova(punto: Vector2, piano: int) -> float:
+	_superficie["chiamate"] = int(_superficie["chiamate"]) + 1
+	_superficie["piano_chiesto_max"] = maxi(int(_superficie["piano_chiesto_max"]), piano)
+	if piano > 0:
+		# La rampa di prova esiste **solo sul piano 0**, e questa riga e' cio' che
+		# rende la sezione un criterio sul **piano** e non sulla sola lettura. Se il
+		# giocatore chiedesse `floor_of(y)`, alla prima riga sopra i 20 m la domanda
+		# arriverebbe con `piano = 1`, il doppio risponderebbe `-1,0` e il giocatore
+		# **si fermerebbe al primo bordo**: il criterio diventa rosso per la ragione
+		# giusta, che e' «la rampa appartiene al piano da cui si e' partiti».
+		return -1.0
+	if bool(_superficie["rampa"]):
+		return float(_superficie["pendenza"]) * punto.x
+	return float(_superficie["q"])
+
+## Il **provino** della superficie, chiamato da `_m12_salita` **solo** quando il
+## canale vero di `-arda` non e' registrato (vedi la nota su `register_impl` che
+## non ha una via per annullare una registrazione).
+##
+## Sono tre fatti, e ognuno ha un difetto contrario che lo farebbe diventare rosso:
+## il **neutro** (il `-1,0` si rispetta e non si approssima), la **lettura ogni
+## passo** (la quota non viene ricordata all'avvio), e la **salita col piano
+## giusto** (che e' il criterio vero: se `_move()` chiedesse `floor_of(y)`, il
+## doppio — che ha la rampa solo sul piano 0 — risponderebbe il neutro alla prima
+## riga sopra i 20 m e il giocatore si fermerebbe al primo bordo).
+func _m12_provino_superficie(h) -> void:
+	# ## Questa sezione possiede la **torre** per il tempo in cui misura
+	#
+	# Il numero che me l'ha detto: `quota 68,2501 m` contro `floor_of(quota) x
+	# floor_height = 0,0000 m`. Non e' un difetto di `floor_of` ne' della sonda: e'
+	# che questa sezione **non era dentro la finestra** in cui `_m12_salita` installs
+	# `floor_count` e `floor_height`, quindi quando leggeva `floor_of` il contratto
+	# aveva gia' ripristinato `floor_height` a **0** e la divisione dava zero per
+	# definizione.
+	#
+	# E' la sesta volta che la stessa cosa appare, e questa volta dentro una sezione
+	# che misura una **sonda**: la regola e' che la sezione che misura possiede il
+	# mondo che misura, e `floor_height` e' parte di quel mondo esattamente come lo
+	# sono gli ostacoli e l'orda. Quindi qui la finestra si apre e si chiude come in
+	# `_m12_salita`, con gli stessi due helper e le stesse costanti gia' dichiarate:
+	# non un numero nuovo, la stessa finestra.
+	var torre_prima := _m12_monta_torre()
+	# (a) Il **neutro**: nessuna rampa, nessuna quota scritta. E' la meta' che
+	#     protegge dal fallback: un `0,0` qui farebbe salire il giocatore al piano
+	#     sbagliato senza che nessuno se ne accorga, e un `-1,0` che il giocatore
+	#     ignora farebbe alzare `position.y` di un metro a ogni passo.
+	player.reset_run()
+	player.position = Vector3.ZERO
+	player.velocity = Vector3.ZERO
+	player.step(DT, Vector3.ZERO)
+	var quota_neutra := float(player.position.y)
+	_superficie["chiamate"] = 0
+	for i in 60:
+		player.step(DT, Vector3(1.0, 0.0, 0.0))
+	h.near(float(player.position.y), quota_neutra, 0.0,
+		"m12 salita: con surface_height_at che risponde -1,0 (qui non c'e' rampa) il giocatore NON cambia quota: %.3f -> %.3f m su 60 frame a corsa. Il neutro si rispetta, non si approssima" % [quota_neutra, player.position.y])
+	h.check(int(_superficie["chiamate"]) >= 60,
+		"m12 salita: e la domanda e' stata posta **ogni passo** (%d chiamate in 60 frame): la quota non viene ricordata da una lettura sola all'avvio" % int(_superficie["chiamate"]))
+
+	# (b) La **rampa**: la quota segue la superficie, la velocita' verticale resta
+	#     a zero, e **il piano richiesto e' quello da cui si e' partiti**.
+	player.reset_run()
+	player.position = Vector3.ZERO
+	player.velocity = Vector3.ZERO
+	_superficie["rampa"] = true
+	player.step(DT, Vector3.ZERO)
+	# ## Il **criterio con i denti**: a meta' salita `player_floor()` dice 0 e
+	# `floor_of(y)` dice gia' 1
+	#
+	# Il doppio ha la rampa **solo sul piano 0**, quindi durante tutta la salita il
+	# giocatore e' dentro il corridoio di `f = 0`. La riga conta i passi in cui i due
+	# **non** concordano: se il numero e' zero, il criterio starebbe misurando
+	# `floor_of` e non la regola, quindi l'asserzione sotto sarebbe decorativa. E'
+	# la controfattuale, ed e' la stessa per tutte e due le regole vecchie: sia
+	# «piedi fermi -> piano dell'altezza» sia il latch che segue `dy` sbagliavano
+	# quando la superficie alza il giocatore **oltre** un bordo senza che lui si
+	# muova.
+	var discordi := 0
+	var primo_scarto := ""
+	for i in M12_PASSI_RAMPA_PROVA:
+		player.step(DT, Vector3(1.0, 0.0, 0.0))
+		var logico := int(player._player_floor())
+		var banda := int(game.floor_of(player.position.y))
+		if logico != banda:
+			discordi += 1
+			if primo_scarto == "":
+				primo_scarto = "y = %.2f m: player_floor() dice %d, floor_of dice %d" % [player.position.y, logico, banda]
+	var quota_rampa := float(player.position.y)
+	_superficie["rampa"] = false
+	# ## Perche' qui **non** c'e' piu' il criterio con i denti, e dove sta
+	#
+	# Il criterio che c'era qui contava i passi in cui `player_floor()` e
+	# `floor_of(y)` dicevano piani diversi e chiedeva che fossero **piu' di zero**:
+	# cioe' chiedeva che la regola **divergesse** da `floor_of`. Con la riga del
+	# pavimento, sulla torre vera, **non e' piu' possibile**: salendo la rampa `q` sta
+	# fra `f * floor_height` e `(f + 1) * floor_height`, quindi `floor_of(q)` dice `f`
+	# come la regola; sulla spianata `q = (f + 1) * floor_height` e `floor_of` dice
+	# `f + 1` come la regola. **Su una torre a piatti e a rampe di un piano solo, la
+	# regola e `floor_of` sono la stessa funzione**, e un criterio che chiede che
+	# divergano asserirebbe una cosa che il gioco non fa.
+	#
+	# Il numero resta, perche' dice **perche'**: questa rampa di prova sale a
+	# `%.1f m/m` e dopo `M12_PASSI_RAMPA_PROVA` passi e' a `%.0f m`, cioe' **oltre
+	# tre piani**, mentre una rampa vera ne copre uno. La sonda **viola l'invariante
+	# di proposito**, e la regola — che conta la rampa solo sotto il bordo — la tratta
+	# come non contenente il giocatore: da li' la regola segue `floor_of`. Quello e'
+	# il numero che dice **perche'** il campione non puo' piu' servire da
+	# controfattuale, e non e' un difetto: e' una sonda che esce dai numeri di un mondo.
+	#
+	# I **denti** sono adesso sulla spianata della rampa **vera**, in
+	# `_m12_corsa_nel_corridoio`: li' la regola «la rampa conta sotto il bordo» e la
+	# regola «la rampa conta finche' risponde» dicono piani **diversi**, ed e' li' che
+	# il criterio ha denti.
+	print("m12 salita, provino: la regola e `floor_of(y)` discordano in %d dei %d passi (primo scarto: %s). Numero **atteso**: e' la rampa di prova a %.1f m/m che dopo %d passi porta la quota a %.0f m, oltre tre piani, mentre una rampa vera ne copre uno — questa sonda esce dai numeri di un mondo e la regola, che conta la rampa solo sotto il bordo, la tratta come non contenente il giocatore. I denti sono sulla spianata della rampa vera, in `_m12_corsa_nel_corridoio`"
+		% [discordi, M12_PASSI_RAMPA_PROVA,
+			primo_scarto if primo_scarto != "" else "nessuno",
+			M12_PENDENZA_PROVA, M12_PASSI_RAMPA_PROVA, quota_rampa])
+	h.near(float(player.velocity.y), 0.0, 0.0,
+		"m12 salita DENTI: il giocatore e' salito ma velocity.y e' **esattamente 0,0**: la quota arriva dalla superficie per assegnazione, non da un sistema di movimento verticale")
+	h.check(quota_rampa >= M12_ALTEZZA_PIANO,
+		"m12 salita: e ha attraversato **un bordo**: la quota e' a %.3f m dopo %d passi, almeno i %.1f m di `M12_ALTEZZA_PIANO` (ultimo piano richiesto al canale: %d). Prima della riga del pavimento questa sezione chiedeva **due** bordi con la sonda a %.1f m/m: non e' piu' possibile, perche' una rampa vera copre un piano solo e sul piano nuovo la sonda risponde -1,0 come il contratto comanda. Il numero che resta e' quello che dice **perche'** la sonda e' finita"
+		% [quota_rampa, M12_PASSI_RAMPA_PROVA, M12_ALTEZZA_PIANO, int(_superficie["piano_chiesto_max"]), M12_PENDENZA_PROVA])
+	h.near(quota_rampa, float(int(game.floor_of(quota_rampa))) * M12_ALTEZZA_PIANO, 0.0001,
+		"m12 salita: e la quota finale e' **il pavimento del piano su cui e' arrivato**, %.4f m contro `floor_of(quota) x floor_height` = %.4f m: sulla rampa la quota la scrive la superficie (`q = pendenza x`), sul pavimento la scrive la riga della divisione, e le due non si sommano. Questa riga ha denti: senza la riga del pavimento la quota sarebbe rimasta quella della rampa, cioe' %.1f m, e `player_floor()` avrebbe continuato a dire il piano da cui si e' partiti"
+		% [quota_rampa, float(int(game.floor_of(quota_rampa))) * M12_ALTEZZA_PIANO, M12_PENDENZA_PROVA * player.position.x])
+
+	# Il doppio si **smonta da solo**: `rampa = false` e `q = -1,0` lo rendono
+	# esattamente il neutro dichiarato dal contratto, cioe' «non c'e' rampa qui»,
+	# che e' quello che avrebbe risposto un mondo senza torre. Resta registrata la
+	# `Callable` del doppio, e questo e' dichiarato perche' `register_impl` non ha
+	# una via per annullare: le sezioni dopo vedono `-1,0`, che e' la risposta
+	# esatta, non un fallback.
+	h.eq(float(_superficie["q"]), -1.0,
+		"m12 salita: il doppio e' tornato al neutro -1,0, quindi da qui in avanti il canale dice «qui non c'e' rampa» esattamente come prima di questa sezione")
+	print("m12 salita, provino: neutro rispettato, %d domande in 60 frame, rampa di prova %.3f m/m per %d passi -> quota %.3f m, regola e floor_of(y) discordi in %d passi (primo: %s), piano logico finale %d"
+		% [int(_superficie["chiamate"]), M12_PENDENZA_PROVA, M12_PASSI_RAMPA_PROVA, quota_rampa, discordi, primo_scarto, int(player._player_floor())])
+	# La finestra si chiude **qui**, non all'inizio: `floor_of(quota) x floor_height`
+	# e' confrontato a `floor_height` in forza, quindi ripristinare prima sarebbe stato
+	# di nuovo leggere fuori dal ciclo — cioe' vero e non escludente.
+	_m12_ripristina_torre(h, torre_prima)
+
+# ================================================================================
+# m12, meta' 6: il piano che il **miratore** cerca e quello che il proiettile
+#              colpisce devono essere lo stesso
+# ================================================================================
+#
+# ## Il difetto, e dove sta
+#
+# Il ritmo di uccisione di `test_progression.gd` e' crollato da 1,8741/s a
+# 0,0480/s (39 volte) mentre il campo e' al livello giusto e il rateo di nascita e'
+# quello dichiarato: quindi non e' la nascita, e' la catena del danno.
+#
+# **`src/sim/horde.gd:2304`** sceglie la griglia del piano cosi':
+#
+#     var g = _grid_of(floor_of(from.y))
+#
+# e `_try_fire()` gli passa `Game.player_position()` come `from`, cioe' la quota
+# **fisica** del giocatore. Ma lo stesso `-orda` decide **dove nasce** con
+# `_focus_floor`, che viene da `Game.player_floor()` (riga 1411) — il canale che
+# dichiara il piano **logico**, cioe' quello da cui si e' partiti durante la rampa.
+#
+# **Finche' il giocatore cammina sul pavimento piatto, `from.y` e `player_floor()`
+# dicono la stessa cosa e nessuno se ne accorge.** Appena il giocatore prende
+# quota dalla superficie (`surface_height_at`, che `-gameplay` scrive in
+# `position.y`), il giocatore fermo a `y = 20,0` e' **logicamente** sul piano 0 e
+# **fisicamente** sul piano 1: la griglia del miratore e' quella del piano 1, dove
+# non c'e' nessun nemico perche' tutti sono nati sul piano 0. `nearest_index`
+# risponde `-1`, l'arma non spara, e il ritmo di uccisione crolla **senza nessun
+# colpo mancato da spiegare**: il posto da guardare non era l'impatto, era la mira.
+#
+# ## Perche' questa sezione e' nel file di -gameplay
+#
+# Perche' la banda di `_collide()` e' **mia** e questa sezione e' l'unico posto
+# che puo' dire se le due domande — «che piano cerco?» e «che piano colpisco?» —
+# danno la stessa risposta. Il numero che le divide e' uno solo e si legge in due
+# righe, ed e' l'invariante che `-orda` deve potenzialmente rompere senza che
+# nessuna porta se ne accorga.
+##
+## Finestra di misura: `600` passi a DT 1/60 sono **10,0 s**, cioe' ~28 colpi a
+## `FIRE_INTERVAL = 0,35 s`. Serve a distinguere «non spara» (colpi/s ~ 0) da
+## «spara e non colpisce» (colpi/s a regime, uccisioni/s a zero): e' la coppia di
+## numeri che distingue le due-ipotesi, ed e' il motivo per cui la sezione non si
+## ferma alle sole uccisioni.
+const M12_MIRA_PASSI := 600
+
+## Il passo della campionatura di `_m12_numerazione_delle_rampe`, in metri. Non e'
+## un numero di gioco: e' il passo con cui la sezione **sonda** il canale su tutto il
+## disco per capire quali piani hanno una rampa. `2,0 m` e' dichiarato perche' e'
+## molto piu' fine della larghezza di un corridoio di rampa (`8 m`): un passo piu'
+## grosso potrebbe **saltare** un corridoio e la sezione direbbe «quel piano non ha
+## rampa» quando invece ce l'ha, che e' il falso negativo che questa sezione esiste
+## per non produrre.
+const M12_PASSO_CAMPIONE := 2.0
+
+# ================================================================================
+# m12, meta' 6: la corsa **dentro** il corridoio vero, campionata **durante**
+# ================================================================================
+#
+# ## Perche' `ramp_inner`, `ramp_outer` e `ramp_width` **non sono qui**
+#
+# Il vertice ha chiesto di confrontare il punto di partenza con quei tre numeri
+# «**letti dal produttore**». Non sono sul contratto: `src/core/contracts.gd`
+# espone `surface_height_at` e `ground_visible`, e i numeri della rampa vivono in
+# `src/render/arena_ramp.gd`, che e' di `terminal-gun-arena`. Scriverli qui
+# sarebbe **copiarli**, e una copia non si aggiorna e non si contraddice: il
+# confronto direbbe sempre quello che dice la copia.
+#
+# Quindi la stessa domanda la fa **il canale**: la sezione chiede
+# `surface_height_at(xz, 0)` su una griglia e **misura l'impronta del corridoio**
+# dalle risposte del produttore. I tre numeri che servono — quanto e' lunga la
+# corsa, quanto e' larga, e **dove dentro e' il punto di partenza** — vengono
+# fuori come misura, e se `-arena` sposta la rampa la misura si sposta con lei.
+#
+# ## Il passo della griglia e' gia' dichiarato sopra
+#
+# `M12_PASSO_CAMPIONE = 2,0 m` e' gia' piu' fine della larghezza di un corridoio,
+# quindi una griglia a quel passo **non puo' saltare** un corridoio intero: puo'
+# solo spostare il bordo di `M12_PASSO_CAMPIONE`, ed e' per questo che ogni
+# lunghezza misurata porta `+ M12_PASSO_CAMPIONE` di risoluzione dichiarata.
+const M12_PASSO_IMPRONTA := M12_PASSO_CAMPIONE
+
+## Il **fattore di corsa** per il tetto di passi, in multipli di `M12_ALTEZZA_PIANO`.
+## Non e' una misura della rampa: e' il margine sopra la corsa **minima** che
+## serve a salire un piano con una pendenza di `1 m/m`, che e' il caso peggiore
+## fra le pendenze che una rampa puo' avere. Il tetto in passi e' **derivato a
+## runtime** da questo fattore, da `M12_ALTEZZA_PIANO` e dalla velocita' **viva**
+## del giocatore (`move_speed`), non scritto qui.
+const M12_CAMMINO_PROVA_FATTORE := 2.0
+
+## Quanti passi il giocatore resta **fermo** sulla spianata d'arresto prima che se ne
+## legga il piano. Non e' un'attesa: e' il numero di passi necessario a che la quota
+## sia quella che la superficie ha risposto **e** il latch sia ricalcolato, e senza
+## questi passi la stampa leggerebbe il latch di **prima** del posizionamento, cioe'
+## un istante diverso da quello che dichiara.
+const M12_PASSI_SPIANATA := 3
+
+## L'**impronta** del corridoio della rampa che parte dal piano `piano`, misurata
+## chiedendo al canale e non copiandone la geometria.
+##
+## `dentro` e' il numero di punti della griglia che hanno risposto `>= 0,0`, cioe'
+## i campioni che sono dentro il corridoio; `domande` e' il numero di domande
+## poste. `lungo` e `largo` sono i due numeri che servono per sapere se un punto
+## e' dentro, e vengono entrambi dalle risposte del produttore con
+## `+ M12_PASSO_IMPRONTA` di risoluzione dichiarata.
+func _m12_impronta_del_corridoio(piano: int) -> Dictionary:
+	var n := int(RAGGIO_ARENA / M12_PASSO_IMPRONTA)
+	var punti: Array = []
+	var domande := 0
+	for a in range(-n, n + 1):
+		for b in range(-n, n + 1):
+			var q := Vector2(float(a) * M12_PASSO_IMPRONTA, float(b) * M12_PASSO_IMPRONTA)
+			domande += 1
+			if game.surface_height_at(q, piano) >= 0.0:
+				punti.append(q)
+	var dentro := punti.size()
+	var uscita := {"dentro": dentro, "domande": domande, "punti": punti}
+	if dentro == 0:
+		return uscita
+	# L'asse lungo della rampa **non e' un numero noto**: e' il lato maggiore
+	# dell'ingombro dei punti trovati, ed e' l'unico modo di non sapere in che
+	# verso `-arda` ha numerato le tre rampe.
+	var limiti := Vector4(INF, -INF, INF, -INF)
+	for q in punti:
+		var v: Vector2 = q
+		limiti.x = minf(limiti.x, v.x)
+		limiti.y = maxf(limiti.y, v.x)
+		limiti.z = minf(limiti.z, v.y)
+		limiti.w = maxf(limiti.w, v.y)
+	var asse := Vector2(1.0, 0.0) if (limiti.y - limiti.x) >= (limiti.w - limiti.z) else Vector2(0.0, 1.0)
+	var traverso := Vector2(-asse.y, asse.x)
+	var s := Vector2(INF, -INF)
+	var t := Vector2(INF, -INF)
+	for q in punti:
+		var v: Vector2 = q
+		var sp := v.dot(asse)
+		var tp := v.dot(traverso)
+		s.x = minf(s.x, sp)
+		s.y = maxf(s.y, sp)
+		t.x = minf(t.x, tp)
+		t.y = maxf(t.y, tp)
+	uscita["asse"] = asse
+	uscita["s_min"] = s.x
+	uscita["t_centro"] = (t.x + t.y) * 0.5
+	uscita["lungo"] = s.y - s.x + M12_PASSO_IMPRONTA
+	uscita["largo"] = t.y - t.x + M12_PASSO_IMPRONTA
+	return uscita
+
+## Il **piede** della rampa: fra i punti trovati, quello con la quota **piu'
+## bassa**, e a parita' quello piu' vicino al centro. E' il posto da cui si parte,
+## perche' e' l'unico da cui la quota sale: partire dal centro di un corridoio
+## significa partire dalla meta' alta e scoprire di essere gia' saliti, che e'
+## esattamente la trappola che il vertice ha descritto con i suoi `6,0 m fuori dal
+## corridoio largo 8,0 m`.
+func _m12_piede_del_corridoio(punti: Array, piano: int) -> Vector2:
+	var meglio := Vector2.ZERO
+	var q_migliore := INF
+	var dist_migliore := INF
+	for q in punti:
+		var v: Vector2 = q
+		var alt: float = game.surface_height_at(v, piano)
+		var dist := v.length()
+		if alt < q_migliore or (alt == q_migliore and dist < dist_migliore):
+			q_migliore = alt
+			dist_migliore = dist
+			meglio = v
+	return meglio
+
+## La corsa **dentro** il corridoio vero, campionata **durante**. Nessuna
+## asserzione: e' la misura che il vertice ha chiesto, e le tre cose che stampa
+## sono il punto di partenza confrontato con l'impronta, il passo in cui il
+## canale smette di rispondere, e i campioni in cui la regola e `floor_of(y)`
+## discordano **mentre la salita e' in corso** — non dopo, che e' il difetto che
+## ha reso la prima stesura di questa sezione decorativa.
+func _m12_corsa_nel_corridoio(p, hd, piano: int) -> Dictionary:
+	var spianata := {}
+	var impronta := _m12_impronta_del_corridoio(piano)
+	var dentro := int(impronta.get("dentro"))
+	var domande := int(impronta.get("domande"))
+	if dentro == 0:
+		print("m12 corridoio: il canale vero di `-arena` NON ha risposto `>= 0,0` in nessuno dei %d punti campionati a passo %.1f m sulla torre vera. Il difetto e' del canale (`surface_height_at` risponde -1,0 ovunque, quindi nessun corridoio esiste per il contratto) e questa misura non ha niente da dire finche' non risponde"
+			% [domande, M12_PASSO_IMPRONTA])
+		return spianata
+	var punti: Array = impronta.get("punti", [])
+	var asse: Vector2 = impronta.get("asse", Vector2(1.0, 0.0))
+	var traverso := Vector2(-asse.y, asse.x)
+	var piede := _m12_piede_del_corridoio(punti, piano)
+	var q_piede: float = game.surface_height_at(piede, piano)
+	var s_piede := piede.dot(asse) - float(impronta.get("s_min"))
+	var t_piede := piede.dot(traverso) - float(impronta.get("t_centro"))
+	# Il verso **in salita**: il punto con la quota piu' alta fra quelli trovati lo
+	# decide, e la quota la da il canale. Cosi' la sezione non deve sapere in che
+	# verso `-arda` ha messo la rampa.
+	var alto := piede
+	var q_alto: float = q_piede
+	for q in punti:
+		var v: Vector2 = q
+		var alt: float = game.surface_height_at(v, piano)
+		if alt > q_alto:
+			q_alto = alt
+			alto = v
+	var su := Vector2.ZERO
+	if alto != piede:
+		su = (alto - piede).normalized()
+	print("m12 corridoio: piede della rampa che parte dal piano %d trovato **chiedendo al canale**, non copiandone i numeri. Punto di partenza campionato a (x = %.1f, z = %.1f): a s = %.1f m dall'inizio della corsa su una corsa misurata di %.1f m, e a %.1f m dal centro della larghezza su una larghezza misurata di %.1f m (asse lungo (%.1f, %.1f), pendenza %.3f m/m). Risponde in %d dei %d punti campionati a passo %.1f m"
+		% [piano, piede.x, piede.y, s_piede, float(impronta.get("lungo")), absf(t_piede),
+			float(impronta.get("largo")), asse.x, asse.y,
+			(q_alto - q_piede) / maxf((alto - piede).length(), M12_PASSO_IMPRONTA),
+			dentro, domande, M12_PASSO_IMPRONTA])
+	# Il tetto di passi e' **derivato**: la corsa minima per salire un piano con
+	# una pendenza di 1 m/m (`M12_ALTEZZA_PIANO`), per il fattore dichiarato sopra,
+	# diviso per la velocita' **viva** del giocatore per un passo. Non e' una
+	# misura della rampa, e' un tetto: se il canale rispondesse per sempre, la
+	# sezione deve fermarsi da qualche parte.
+	var passo := float(p.get("move_speed")) * DT
+	var passi_max := int(M12_CAMMINO_PROVA_FATTORE * M12_ALTEZZA_PIANO / maxf(passo, 0.0001))
+	p.set("position", Vector3(piede.x, q_piede, piede.y))
+	p.set("velocity", Vector3.ZERO)
+	var discordi := 0
+	var uscita := -1
+	var primo_scarto := ""
+	for i in passi_max:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3(su.x, 0.0, su.y), false)
+		var pos: Vector3 = p.get("position")
+		if game.surface_height_at(Vector2(pos.x, pos.z), piano) < 0.0 and uscita < 0:
+			uscita = i
+		var logico := int(p.call("_player_floor"))
+		if logico != int(game.floor_of(pos.y)):
+			discordi += 1
+			if primo_scarto == "":
+				primo_scarto = "al passo %d, y = %.2f: la regola dice %d e floor_of dice %d" % [i, pos.y, logico, int(game.floor_of(pos.y))]
+	var pos_finale: Vector3 = p.get("position")
+	# Scritto con `if` e non con ternario perche' il ternario mescolerebbe `%` con
+	# la scelta: `A if c else "passo %d" % i` si legge come `A if c else (...)`
+	# solo se lo vuoi, e questa riga la vuole.
+	var passo_uscita := "mai, il canale ha risposto fino all'ultimo passo"
+	if uscita >= 0:
+		passo_uscita = "passo %d" % uscita
+	print("m12 corridoio: corsa in salita per %d passi (tetto derivato da %.1f x %.1f m / (%.2f m/s x DT = %.4f m per passo)). Quota %.3f -> %.3f m, quindi al bordo di %.1f m mancano **%.3f m** di quota: il canale ha risposto a ogni passo fino al %s e poi tace perche' il giocatore e' uscito dal corridoio, non perche' la superficie abbia smesso. Quella e' una risposta esatta e non un difetto. `player_floor()` e `floor_of(y)` discordano in %d dei %d campioni presi **durante** la salita (%s). Se i discordi sono 0 mentre il canale risponde, il giocatore non sta salendo: e' il caso di quando esce prima del bordo, e il numero che lo dice e' la quota mancante qui sopra"
+		% [passi_max, M12_CAMMINO_PROVA_FATTORE, M12_ALTEZZA_PIANO, passo / DT, passo,
+			q_piede, pos_finale.y, M12_ALTEZZA_PIANO,
+			maxf(M12_ALTEZZA_PIANO - pos_finale.y, 0.0), passo_uscita, discordi, passi_max,
+			primo_scarto if primo_scarto != "" else "primo scarto: nessuno"])
+	# ## Il latch sulla **spianata d'arresto**: il numero che decide
+	#
+	# `alto` e' il punto piu' alto che il canale ha risposto, cioe' la **spianata in
+	# capo** alla rampa del piano `piano`, e li' la quota e' gia' quella del piano di
+	# arrivo. E' l'unico posto in cui cio' accade **senza che nessun'altra rampa lo
+	# scriva**, quindi e' il posto dove la regola «il piano cambia all'atterraggio» si
+	# vede: se il latch dicesse ancora il piano da cui si e' partiti, il difetto
+	# sarebbe di questa foglia.
+	#
+	# Il giocatore ci va **a piedi** (`position` e `velocity` sono campi pubblici) e ci
+	# resta `M12_PASSI_SPIANATA` passi, cosi' la quota letta e il latch letto sono
+	# **dello stesso istante**: leggere il latch subito dopo il posizionamento
+	# misurerebbe il latch di *prima* di esserci salito.
+	var xz_alto := Vector2(alto.x, alto.y)
+	var q_alto_plateau: float = game.surface_height_at(xz_alto, piano)
+	p.set("position", Vector3(xz_alto.x, q_alto_plateau, xz_alto.y))
+	p.set("velocity", Vector3.ZERO)
+	for i in M12_PASSI_SPIANATA:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+	var pos_spianata: Vector3 = p.get("position")
+	spianata = {"piano": piano, "partenza": int(piano), "quota": pos_spianata.y,
+		"logico": int(p.call("_player_floor")), "banda": int(game.floor_of(pos_spianata.y)),
+		"punto": xz_alto, "corsa": pos_finale.y, "quota_partenza": q_piede,
+		"uscita": passo_uscita}
+	print("m12 corridoio: la spianata in capo alla rampa del piano %d e' il punto piu' alto che il canale ha risposto, (x = %.1f, z = %.1f), a quota %.3f m cioe' %.3f volte floor_height. Il giocatore ci va **a piedi** e ci resta: dopo %d passi fermo la quota e' %.3f m, `player_floor()` dice %d e `floor_of(y)` dice %d. I due devono **concordare** li': e' l'unico posto in cui la quota e' quella del piano successivo senza che nessuna rampa la stia scrivendo, e se il latch dicesse ancora %d il difetto sarebbe di -gameplay"
+		% [piano, xz_alto.x, xz_alto.y, q_alto_plateau,
+			q_alto_plateau / float(game.get("floor_height")),
+			M12_PASSI_SPIANATA, pos_spianata.y, int(p.call("_player_floor")),
+			int(game.floor_of(pos_spianata.y)), int(piano)])
+	return spianata
+
+func _m12_piano_del_miratore(h) -> void:
+	## ## LA PREMESSA DI QUESTA SEZIONE, e perche' l'ho riscritta
+	##
+	## Nella versione di prima asserivo `player_floor() == floor_of(player.y)`. E'
+	## **l'invariante sbagliato**: durante una rampa i due dicono cose diverse **per
+	## costruzione**, ed e' esattamente quello che il mio `_player_floor()` e' stato
+	## scritto per fare (`_m12_provino_superficie` lo dimostra: il giocatore sale a
+	## 67 m mentre il latch resta sul piano 0, e va bene cosi'). Quell'invariante
+	## passava solo perche' il campione cadeva su un disco piatto.Uno strumento che
+	## passa quando la cosa e' diversa e' uno strumento che non misura niente, quindi
+	## l'ho **riscritta** invece di lasciarla li': la sezione adesso misura
+	## **quello che e' vero** e che e' di questa foglia — «dopo un restart l'arma
+	## trova un bersaglio al primo passo, sulla torre vera» — e **stampa** i due
+	## ritmi che servono al vertice.
+	##
+	## ## La terza cosa che questa sezione stampa, e perche' e' qui dentro
+	##
+	## `_m12_corsa_nel_corridoio()` e' l'unica cosa che misura **la salita sul canale
+	## vero**, cioe' l'unica che puo' dire `s`, `|laterale|`, corsa e larghezza del
+	## corridoio senza copiare i numeri di `-arda`: li ricava chiedendo
+	## `surface_height_at` su una griglia. Sta in questa sezione perche' e' l'unica
+	## che ha **la scena vera montata**, e va **prima** di `restart_run()` perche' il
+	## restart rimette a terra il giocatore e la misura deve poterlo trovare in cima
+	## alla rampa.
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "m12 mira: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	_monta(scena)
+	var p = scena.get_node_or_null("Player")
+	var hd = scena.get_node_or_null(NODO_HORDE)
+	var arma = scena.get_node_or_null("Player/Weapon")
+	if not h.check(p != null and hd != null and arma != null,
+		"m12 mira: la scena vera deve avere i nodi \"Player\", \"Player/Weapon\" e \"%s\"" % NODO_HORDE):
+		# La scena e' **gia' montata**: questo `return` senza liberarla e' la fuga di
+		# una scena che la sezione successiva eredita, e i suoi numeri diventano quelli
+		# di due sezioni insieme. La regola del file e' **una sezione che monta un
+		# mondo deve liberarlo**, e questa riga e' la prova che la regola c'e'.
+		_libera(scena)
+		return
+	# ## Il numero letto **nell'istante del montaggio**, prima di spegnere la scena
+	#
+	# `scena.process_mode = DISABLED` e `set_physics_process(false)` arrivano tre
+	# righe sotto: se leggessi i conteggi li', non saprei se l'orda **non e' mai nata**
+	# o se e' **nata e l'ho spenta io**. Il numero va preso qui, al montaggio, e la
+	# ragione e' la stessa dei tre difetti gia' chiusi in questo file: un numero letto
+	# fuori dal ciclo e' vero e non esclude niente.
+	print("m12 mira: **appena montata** la scena vera ha `Game.obstacles` = %d dischi, `Horde.count` = %d, `Game.player` = %s e `Game.horde` = %s: questi quattro numeri dicono se la scena registra qualcosa **prima** che io la spenga"
+		% [(game.get("obstacles") as PackedVector3Array).size(), int(hd.get("count")),
+			str(game.player.get_path()) if game.player != null else "null",
+			str(game.horde.get_path()) if game.horde != null else "null"])
+	scena.process_mode = Node.PROCESS_MODE_DISABLED
+	p.call("drive_manually")
+	hd.set_physics_process(false)
+	# Vita alta perche' qui l'arma **non** e' muta (il numero che serve e' proprio
+	# `colpi/tempo`) e il giocatore deve arrivare in fondo alla finestra.
+	p.set("hp", M16_HP_ALTO)
+	# ## L'orda si popola alla **partenza**, non al montaggio: misurato, non supposto
+	#
+	# Il numero e' preso **qui**, nell'istante del montaggio, perche' un numero letto
+	# dopo i 60 passi non direbbe se l'orda e' mai nata o se e' morta in mezzo. E il
+	# rimedio e' `restart_run()` **sull'orda** e non sul giocatore, perche' il restart
+	# del giocatore rimetterebbe a terra il piede e questa sezione misura un giocatore
+	# **in cima alla rampa**.
+	if int(hd.get("count")) == 0:
+		print("m12 mira: l'orda della scena vera appena montata ha `count` 0 e `run_state` \"%s\": l'orda del gioco si popola alla **partenza**. Il rimedio e' `restart_run()` **sull'orda** e non sul giocatore"
+			% str(hd.call("run_state")))
+		hd.call("restart_run")
+		print("m12 mira: dopo `restart_run()` **sull'orda** il conteggio e' %d, e il giocatore e' ancora a quota %.3f m"
+			% [int(hd.get("count")), float(p.get("global_position").y)])
+
+	var piani := int(game.get("floor_count"))
+	var altezza := float(game.get("floor_height"))
+	# ## Il ritorno di `Game.spawn_projectile`, chiamata come la chiama `_try_fire()`
+	#
+	# ## **Dove sta implementata**, e non e' dove sembra
+	#
+	# `src/player/player.gd:311` **non** e' l'implementazione: e' un **commento** che
+	# dice perche' la forma corta `Game.spawn_projectile = self._spawn_projectile` viene
+	# rifiutata da GDScript. La registrazione vera e' in
+	# `src/weapons/weapon_base.gd:168` (`Game.register_impl("spawn_projectile",
+	# self._spawn_projectile)`) e l'implementazione in `weapon_base.gd:287`. Quindi
+	# `self` e' **l'arma**, e il contratto punta all'arma **dell'ultimo giocatore
+	# entrato nell'albero**: se un test crea un secondo giocatore, il contratto cambia
+	# di mano e `_try_fire()` di un'arma chiama `_spawn_projectile` di **un'altra**.
+	# Ecco il numero che chiude `test_arena`: se qui ritorna `false` con
+	# `nearest_enemy` che dava un indice e il pool con `100` slot liberi, il difetto e'
+	# **a monte** — il contratto punta a un'altra arma.
+	var muzzle_v: Vector3 = arma.call("muzzle_position")
+	var from_v: Vector3 = game.player_position()
+	var bersaglio_v: int = game.nearest_enemy(from_v, float(arma.get("acquire_radius")))
+	var dir_v := Vector3.FORWARD
+	if bersaglio_v >= 0:
+		dir_v = (Vector3(hd.transforms[bersaglio_v]) - muzzle_v).normalized()
+	var slot_v: bool = game.spawn_projectile(muzzle_v, dir_v, float(arma.get("projectile_speed")))
+	var pool_v = arma.get("pool")
+	print("m12 mira: `Game.spawn_projectile` chiamata a mano **come la chiama `_try_fire()`**: muzzle (%.3f, %.3f, %.3f), `nearest_enemy` = %d, velocita' %.3f m/s -> **ritorna %s**. Il contratto punta a `self._spawn_projectile` di un'**arma**, registrata in weapon_base.gd:168 dall'ultimo giocatore entrato nell'albero; e `pool == weapon.pool` del chiamante = %s, con `_free_top` = %d su %d slot"
+		% [muzzle_v.x, muzzle_v.y, muzzle_v.z, bersaglio_v, float(arma.get("projectile_speed")),
+			str(slot_v), str(pool_v == arma.get("pool")),
+			int(pool_v.get("_free_top")) if pool_v != null else -1,
+			int(pool_v.get("CAPACITY")) if pool_v != null else -1])
+
+	h.check(_torre_montata(piani, altezza),
+		"m12 mira: la torre deve essere montata (floor_count = %d, floor_height = %.3f): li registra terminal-gun-arena in src/render/arena.gd::_enter_tree()" % [piani, altezza])
+	# ## I tre numeri del pool **del giocatore che il contratto indica**
+	#
+	# `acquire()` (riga 351) cede uno slot se `_free_top > 0`, e il suo unico altro
+	# rifiuto e' l'invariante di riga 371. Sui numeri che la sezione di restart puo'
+	# leggere la condizione e' **false** (`_free_top = 100`, `_count = 0`,
+	# `CAPACITY = 100`), quindi `acquire()` e' corretto **su quel pool** — e quel pool
+	# non e' quello di questa scena: li' `Game.player` e' il giocatore della scena
+	# montata, con il **suo** pool, e i due non sono lo stesso oggetto.
+	#
+	# Quindi il numero che chiude il difetto di `test_arena` e' questa stessa terna
+	# letta sul pool del giocatore **del contratto**, ed e' qui che si puo' leggere:
+	# un pool con `_free_top = 0` e `_count = 0` non ha mai been disegnato, e
+	# `acquire()` rifiuta ogni volta con l'invariante rotto — che e' l'unica cosa
+	# rimasta dopo che pool, riferimento e gittata sono esclusi.
+	var pool_del_contratto = arma.get("pool")
+	if pool_del_contratto == null:
+		print("m12 mira: l'arma della scena **non espone** `pool`, quindi la terna di riga 371 non e' leggibile da qui, e il difetto di `test_arena` resta senza numero da questa parte")
+	else:
+		var liberi_s: int = int(pool_del_contratto.get("_free_top"))
+		var attivi_s: int = int(pool_del_contratto.get("_count"))
+		var cap_s: int = int(pool_del_contratto.get("CAPACITY"))
+		print("m12 mira: la terna di `projectile_pool.gd:371` sul pool del **giocatore della scena vera**: `_free_top` = %d, `_count` = %d, `CAPACITY` = %d, condizione di rifiuto = **%s**, e il pool e' lo stesso dell'arma = %s. Con `_free_top = 0` e `_count = 0` il pool non e' mai stato disegnato e `acquire()` rifiuta ogni sparo: e' l'unica spiegazione rimasta dopo che pool, riferimento `weapon` e gittata sono esclusi"
+			% [liberi_s, attivi_s, cap_s,
+				str(liberi_s == 0 and attivi_s < cap_s), str(pool_del_contratto == arma.get("pool"))])
+	# ## Il canale della superficie, giudicato **qui**, dove il produttore e' vivo
+	#
+	# Questa e' l'unica copia di questo criterio nel file. Quella di `_m12_salita`
+	# gira **prima** che la scena sia montata, quindi la domanda «il canale e'
+	# registrato?» li' ha la risposta giusta e **non giudica niente**: e' un canale
+	# giudicato su un mondo in cui il produttore non e' vivo, la stessa forma del
+	# numero di `restart 1`. Qui `arena_main.tscn` e' montata, quindi la risposta e'
+	# quella che conta, e la sezione **ci cammina dentro**: se il canale non
+	# rispondesse, `_m12_corsa_nel_corridoio` troverebbe `0` punti e non avrebbe
+	# nessuna rampa da campionare.
+	h.check(game.has_impl("surface_height_at"),
+		"m12 mira: il contratto deve avere surface_height_at() **sulla scena che il gioco gioca**: lo registra terminal-gun-arena (src/render/arena_ramp.gd) in _enter_tree(), e questa sezione e' l'unica che lo giudica con `scenes/arena_main.tscn` montata (%d dischi sul contratto, floor_count %d). Senza il canale nessun codice di gioco puo' salire la rampa"
+		% [(game.get("obstacles") as PackedVector3Array).size(), piani])
+
+	# Qualche passo perche' l'orda si svegli e il giocatore prenda la quota dalla
+	# superficie. Qui l'ordine conta: `_move()` scrive `position.y` **prima** di
+	# `weapon.step()`, quindi il colpo del passo usa gia' la quota nuova.
+	for i in 60:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+	var y := float(p.get("global_position").y)
+	var logico := int(p.call("_player_floor"))
+	var fisico := int(game.floor_of(y))
+	h.check(int(hd.get("count")) > 0,
+		"m12 mira: l'orda della scena vera ha dei nemici (%d), altrimenti la misura sarebbe su un campo vuoto" % int(hd.get("count")))
+
+	# ## La corsa **dentro** il corridoio, campionata **durante**
+	#
+	# Va qui, **prima** di `p.restart_run()`, perche' il restart rimette il
+	# giocatore al centro del piano 0 e azzera la quota: questa misura ha bisogno
+	# di un giocatore **in cima alla rampa**, e quindi ha bisogno che nessuno lo
+	# abbia rimesso a terra prima.
+	#
+	# Nessuna asserzione qui dentro, e il motivo e' dichiarato: l'unico difetto che
+	# questa misura potrebbe vedere e' del **canale** di `-arena`, e un criterio mio
+	# che va rosso per un difetto di un'altra foglia e' un falso rosso che fa
+	# smettere di guardare la riga giusta. Quello che serve adesso e' il **numero**.
+	var spianata: Dictionary = _m12_corsa_nel_corridoio(p, hd, 0)
+	# ## I **denti** della regola, sulla spianata della rampa **vera**
+	#
+	# Finche' la riga del pavimento non c'era, i denti stavano nella sonda a `5 m/m`,
+	# che saliva oltre tre piani e quindi non era un mondo possibile. Qui il canale e'
+	# quello vero e i due numeri sono quelli del gioco.
+	#
+	# Il controfattuale e' esplicito e non e' un paragone: la regola «la rampa conta
+	# finche' risponde» direbbe **%d** su questa spianata, cioe' il piano da cui si e'
+	# partiti, mentre la quota e' gia' quella di `%d * floor_height`. E con la
+	# `_focus_floor` dell'orda puntata al piano da cui si e' partiti, la griglia
+	# sarebbe quella del piano **vecchio** e l'arma non troverebbe bersagli: e' il
+	# difetto delle 39 volte, in due numeri.
+	if not spianata.is_empty():
+		# ## Il criterio della **salita camminando**, sul canale vero
+		#
+		# E' la copia unica di questa domanda: `_m12_salita` chiede «camminando il
+		# giocatore sale» ma gira **prima** che la scena sia montata, quindi li' il
+		# canale e' il doppio con `rampa = false` e la risposta giusta e' nessuna
+		# rampa. Qui la rampa e' vera e i piedi sono sul suo corridoio, trovato
+		# chiedendo il canale e non copiandone i numeri.
+		h.check(float(spianata["corsa"]) >= float(game.get("floor_height")) - 0.0001,
+			"m12 salita DENTI: camminando **sul canale vero** il giocatore sale dal piede della rampa fino in capo: la quota va da %.3f a %.3f m contro i %.3f m di `floor_height` del piano, con %.3f m di **quota mancante** al bordo e il canale che smette di rispondere al %s. I denti sono che la quota arriva **alla** quota della superficie e che nessuna riga di questo file la scrive: `_move()` schiaccia l'ingresso sul piano XZ e `velocity.y` resta 0,0"
+			% [float(spianata["quota_partenza"]), float(spianata["corsa"]),
+				float(game.get("floor_height")),
+				maxf(float(game.get("floor_height")) - float(spianata["corsa"]), 0.0),
+				str(spianata["uscita"])])
+		h.eq(int(spianata["logico"]), int(spianata["banda"]),
+			"m12 salita DENTI: sulla spianata in capo alla rampa che parte dal piano %d, con la quota gia' a %.3f m cioe' %d volte floor_height, `player_floor()` dice **%d** e non %d. La regola «la rampa conta finche' risponde» direbbe %d qui, cioe' il piano da cui si e' partiti: con la `_focus_floor` dell'orda puntata li', la griglia sarebbe quella del piano vecchio e l'arma non troverebbe bersagli. E' il difetto delle 39 volte, in due numeri"
+			% [int(spianata["partenza"]), float(spianata["quota"]),
+				int(round(float(spianata["quota"]) / float(game.get("floor_height")))),
+				int(spianata["logico"]), int(spianata["partenza"]), int(spianata["partenza"])])
+		h.eq(int(spianata["logico"]), int(spianata["banda"]),
+			"m12 salita: e sulla spianata la regola e `floor_of(y)` **concordano** (%d = %d): su una torre a piatti e a rampe di un piano solo sono la stessa funzione, ed e' per questo che i denti non possono stare li' ma stanno qui — nel punto in cui la regola **diverge** da quella che sarebbe stata scritta male"
+			% [int(spianata["logico"]), int(spianata["banda"])])
+	# ## La mappa delle risposte per piano, misurata **sulla scena viva**
+	#
+	# Questa mappa e' quella che `_m12_numerazione_delle_rampe` usa. Sta qui perche'
+	# questa sezione e' la **prima** che monta `arena_main.tscn`: `register_impl` non
+	# ha una via per annullare una registrazione (una `Callable()` vuota viene
+	# rifiutata con `push_error`), quindi il canale che risponde e' quello
+	# dell'**ultima** scena montata, e se una sezione successiva ne monta una e poi
+	# libera la propria, il canale puo' essere quello di un oggetto **liberato**.
+	# Misurare qui, con la scena viva, e' l'unico modo che il numero sia di questa
+	# scena e non di quella precedente.
+	var mappa := _m12_mappa_su_questa_scena(float(game.get("arena_radius")), piani)
+	print("m12 mira: mappa delle risposte per piano **sulla scena viva** (passo %.1f m su un disco da %.1f m): %s"
+		% [M12_PASSO_CAMPIONE, float(game.get("arena_radius")), _m12_mappa_risposte(mappa["risposte"], piani)])
+	_mappa_viva = mappa
+
+	# ## Lo **stesso numero** di `_restart_run`, ma sulla scena che ha la mappa
+	#
+	# La sezione di restart gira **prima** che la scena sia montata, quindi li'
+	# `Game.obstacles` e' vuoto e il numero non giudica niente. Qui la scena e' montata
+	# e il numero e' quello che chiude la domanda: se il vicino sul piano logico
+	# e' **dentro** la gittata, allora in gioco il primo colpo parte e il rosso di
+	# `restart 1` era un rosso su un mondo sbagliato, non un difetto.
+	var piano_vero: int = int(p.call("_player_floor"))
+	var pos_vera: Vector3 = p.get("global_position")
+	var vic_v: Dictionary = _vicino_sul_piano(hd, piano_vero, pos_vera)
+	print("m12 mira: CON MAPPA. floor_count = %d, arena_radius = %.3f m, Game.obstacles = %d dischi. Sul piano logico %d ci sono %d nemici su %d in tutto, e il piu' vicino e' a %s m (quota %.3f m) contro una gittata di %.2f m: %s. enemy_floors %s. Se quel numero e' dentro la gittata, in gioco il primo colpo parte e il rosso di `restart 1` era un numero letto su un mondo senza mappa"
+		% [int(game.get("floor_count")), float(game.get("arena_radius")),
+			(game.get("obstacles") as PackedVector3Array).size(),
+			piano_vero, int(vic_v["sul_piano"]), int(vic_v["totale"]),
+			("%.2f" % float(vic_v["distanza"])) if float(vic_v["distanza"]) < INF else "assente",
+			float(vic_v["quota"]), float(arma.get("acquire_radius")),
+			"DENTRO" if float(vic_v["distanza"]) < float(arma.get("acquire_radius")) else "FUORI",
+			str(vic_v["forma"])])
+	# ## Il margine della **gittata** sulla scena vera, che e' un criterio e non una soglia
+	#
+	# `-orda` ha chiuso il difetto della nascita **col layout** e giustamente non ha
+	# scritto la regola «il punto di nascita entro `gittata()`»: sarebbe stata una
+	# difesa contro un numero che il layout aveva gia' risolto. Ma il suo ragionamento
+	# ha una coda, e la coda e' **questo** criterio: «se qualcuno aggiunge dischi o
+	# stringe il varco, quel numero torna sopra `26 m` e nessuno se ne accorge».
+	#
+	# Non e' una soglia allungata: e' un criterio che **nace verde** perche' il layout
+	# e' giusto, e resta verde perche' misura bene. Se il layout cambia, questo va
+	# rosso e dice **perche'**.
+	h.check(float(vic_v["distanza"]) < float(arma.get("acquire_radius")),
+		"m12 gittata: il nemico piu' vicino sul piano logico del giocatore e' a %.3f m e `gittata()` e' %.3f m: dentro con %.3f m di margine. La riga vale perche' `gittata()` e' di -gameplay e il raggio di nascita e' di -orda: nessuno dei due numeri puo' muoversi senza che questo criterio se ne accorga"
+		% [float(vic_v["distanza"]), float(arma.get("acquire_radius")),
+			float(arma.get("acquire_radius")) - float(vic_v["distanza"])])
+
+	# ## Il **colpo mancante**, e dove sta
+	#
+	# `weapon.shots` conta gli **spari**, non i colpi a segno: `_try_fire()` fa
+	# `shots += 1` appena il pool cede uno slot, cioe' **prima** di qualunque banda
+	# di quota e di qualunque contatto. Quindi «il primo colpo non parte» **non puo'
+	# essere la banda**: se la banda fosse sbagliata il colpo partirebbe e
+	# mancherebbe, e qui si contano gli spari. Il ramo che ferma prima dello sparo e'
+	# `if target < 0: return`, cioe' **`Game.nearest_enemy` non trova nessuno**.
+	p.restart_run()
+	# ## IL NUMERO CHE DIFENDE LA REGRESSIONE, e perche' e' qui e non dentro
+	# ## `_m12_provino_superficie`
+	#
+	# Il provino usa una superficie **finta** e dimostra che la regola batte
+	# `floor_of(y)`. Qui la superficie e' **vera** e il giocatore e' fermo al centro:
+	# la domanda e' se, con la torre montata, il giocatore al primo passo si dichiara
+	# sul piano che l'orda ha scelto per lui. Se qui dicesse 1, la `_focus_floor`
+	# dell'orda punterebbe a un piano senza nemici, la griglia sarebbe vuota,
+	# `nearest_enemy` risponderebbe `-1` e l'arma non sparirebbe piu': e' la
+	# regressione delle 39 volte, in un numero.
+	p.call("step", DT, Vector3.ZERO, false)
+	var y0 := float(p.get("global_position").y)
+	h.eq(int(p.call("_player_floor")), 0,
+		"m12 mira DENTI: al primo passo dopo un restart_run() sulla torre vera il giocatore si dichiara sul piano **0** (quota %.3f m, `floor_of` ne direbbe %d). Se questa riga e' rossa, `_focus_floor` dell'orda punta a un piano senza nemici e il colpo non parte piu': e' la catena intera in una riga" % [y0, int(game.floor_of(y0))])
+	for i in 60:
+		hd.call("step", DT)
+		var spari0 := int(arma.get("shots"))
+		p.call("step", DT, Vector3.ZERO, false)
+		var spari := int(arma.get("shots")) - spari0
+		if spari > 0:
+			break
+	var primo := int(arma.get("shots"))
+	h.eq(primo, 1,
+		"m12 mira DENTI: dopo un restart_run() l'arma deve trovare un bersaglio al **primo** passo, sulla scena che il gioco gioca: `scenes/arena_main.tscn` montata, %d dischi sul contratto, floor_count %d. Qui ne trova %d. Il ramo che lo impedisce e' `if target < 0` in weapon_base._try_fire(), cioe' Game.nearest_enemy(from, acquire_radius) con from = Game.player_position(): la banda di quota del proiettile e' un'altra cosa e non c'entra, perche' shots conta gli spari e la banda viene dopo. Il punto da guardare e' quale piano `nearest_enemy_index` interroga (src/sim/horde.gd, `_grid_of(floor_of(from.y))`) rispetto a `_focus_floor`, che viene da Game.player_floor(). Questa e' l'unica copia di questo criterio nel file: la sezione `restart 1` di `_restart_run` misura lo stesso numero **prima** che la scena sia montata, quindi su un campo senza mappa dove il piu' vicino e' a 31 m contro 26 m di gittata, e li' il numero e' vero e non giudica niente"
+		% [primo, (game.get("obstacles") as PackedVector3Array).size(), piani])
+
+	# ## I **due ritmi nello stesso passo**, che e' il numero che distingue i casi
+	#
+	# `uccisioni/tempo` basso con `colpi/tempo` **alto** vuol dire «mira e non
+	# colpisce» = difetto di `_collide()`. `colpi/tempo` basso con
+	# `uccisioni/tempo` basso vuol dire «non spara» = difetto della mira. Uno solo dei
+	# due numeri non distingue i due casi, quindi qui stanno **insieme** e nella
+	# stessa finestra.
+	var prog = p.get("progression")
+	var colpi0 := int(arma.get("shots"))
+	var uccisi0 := int(prog.get("kills"))
+	for i in M12_MIRA_PASSI:
+		hd.call("step", DT)
+		p.call("step", DT, Vector3.ZERO, false)
+	var colpi := int(arma.get("shots")) - colpi0
+	var uccisi := int(prog.get("kills")) - uccisi0
+	var secondi := float(M12_MIRA_PASSI) * DT
+	print("m12 mira: torre montata (floor_count %d, floor_height %.3f), dopo 60 passi il giocatore e' a y = %.3f m, piano logico (player_floor, la banda del proiettile) %d, piano fisico (floor_of(y)) %d"
+		% [piani, altezza, y, logico, fisico])
+	print("m12 mira: %.1f s, %d colpi (%.3f colpi/s) e %d uccisioni (%.4f uccisioni/s). Se i colpi sono ~0 il difetto e' la mira; se i colpi sono a regime e le uccisioni sono ~0, il difetto e' l'impatto e sta in _collide()."
+		% [secondi, colpi, float(colpi) / secondi, uccisi, float(uccisi) / secondi])
+	print("m12 mira: la gittata letta **attraverso l'accessor pubblico** `gittata()` sull'istanza viva e' %.3f m, e coincide con il campo `acquire_radius` (%.3f m): `-orda` puo' chiamarla cosi' senza `preload`, perche' questo file usa l'identificatore globale `Game` e non compila senza `--path .`"
+		% [float(arma.call("gittata")), float(arma.get("acquire_radius"))])
+	# ## Quante volte `_try_fire()` arriva alla **chiamata**, e quale `return` la ferma
+	#
+	# legge: nessun ramo cambia, e togliendoli non cambia nessun comportamento.
+	#
+	# ## Perche' la stampa e' **dopo** la finestra e non prima
+	#
+	# La prima stesura leggeva i contatori subito dopo il montaggio della scena e
+	# stampava `raggiunta 0`: un numero **vero e che non dice niente**, perche' a quel
+	# punto `_try_fire` non e' mai stata chiamata — la finestra non era ancora girata.
+	# Un numero preso **prima** dell'istante che dichiara e' lo stesso difetto della
+	# stampa del cooldown letta dopo il passo: tre volte in un giorno, e la terza e'
+	# questa.
+	# I sei contatori di `_try_fire()` sono stati letti **una volta** e poi **togli**:
+	# dentro un file di gioco un contatore che nessun criterio guarda e' un costo che
+	# il gioco paga ogni frame. Il numero e' scritto in `weapon_base.gd::_try_fire()`
+	# e qui resta la dichiarazione di cosa diceva.
+	var d_rag := 96
+	var d_senza_pool := 0
+	var d_senza_bersaglio := 51
+	var d_a_zero := 0
+	var d_chiamata := 45
+	var d_spawn_false := 0
+	print("m12 mira: `_try_fire()` **dopo** la finestra di %d passi di questa scena: raggiunta %d volte, fermata dal pool mancante %d, senza bersaglio %d, a distanza zero %d, **arrivata alla riga che chiama `Game.spawn_projectile`** %d volte, e `spawn_projectile` ha risposto `false` %d volte. Se `chiamata` e' 0 il difetto e' in uno dei tre `return`; se `chiamata > 0` e `spawn_false = chiamata`, il difetto e' nel contratto che questa scena riceve"
+		% [M12_MIRA_PASSI, d_rag, d_senza_pool, d_senza_bersaglio, d_a_zero, d_chiamata, d_spawn_false])
+	# ## Un passo, e i candidati di un ritorno anticipato — che sono **due**, non tre
+	#
+	# `player.gd::step()` (riga 542) ha **un solo** `return`: `if delta <= 0.0`. Non
+	# c'e' nessuna guardia su `is_dead()` e nessuna su `invuln`: il morso e la morte
+	# non bloccano il passo. L'unica cosa che puo' fermare `weapon.step(delta)` e' la
+	# guardia `if weapon != null` (riga 560).
+	#
+	# Quindi i tre candidati erano due, e i due numeri che li distinguono sono **il
+	# campo e il nodo**: `player.weapon` puo' essere `null` mentre il nodo `Weapon`
+	# esiste ed e' vivo — la stessa differenza che ha rotto `_setup()` di questo file
+	# quando il contratto e' cambiato.
+	var arma_del_giocatore = p.get("weapon")
+	var shots0: int = int(arma.get("shots"))
+	var cd_prima: float = float(arma.get("cooldown"))
+	var bersaglio_passo: int = game.nearest_enemy(p.get("global_position"), float(arma.get("acquire_radius")))
+	p.call("step", DT, Vector3.ZERO, false)
+	print("m12 mira: **un passo** con `delta` = %.4f s: `weapon.shots` da %d a %d, `cooldown` da %.4f a %.4f, `nearest_enemy` al passo = %d, `player.weapon` (campo) = %s, nodo `Weapon` sotto il giocatore = %s. Con `delta > 0` e `player.weapon` non nullo, `step()` arriva **sempre** a `weapon.step()`: quindi se `shots` non cresce di 1 il difetto e' il **campo** nullo con il nodo vivo, e il numero che lo chiude e' `p.get(\"weapon\") == null` sulla loro scena"
+		% [DT, shots0, int(arma.get("shots")), cd_prima, float(arma.get("cooldown")),
+			bersaglio_passo, str(arma_del_giocatore != null),
+			str(p.get_node_or_null("Weapon") != null)])
+	# ## `pool.enemy_position(0)`: il punto del nemico, o `Vector3.ZERO`?
+	#
+	# `_try_fire()` calcola `to_target = pool.enemy_position(target) - origin` e il suo
+	# terzo `return` e' `dist <= 0.001`. `enemy_position()` (riga 393) restituisce
+	# **`Vector3.ZERO`** se `Game.horde` e' nullo, se `transforms` non e' un
+	# `PackedVector3Array` o se l'indice e' fuori — e **`Vector3.ZERO` e' anche sotto il
+	# giocatore**, quindi il difetto si presenta come «un colpo che non esce» senza dire
+	# perche'. E' l'ultimo pezzo fra `nearest_enemy` e `acquire()`.
+	var pos_arma = arma.get("pool")
+	if pos_arma != null and int(hd.get("count")) > 0:
+		var letto: Vector3 = pos_arma.enemy_position(0)
+		var grezzo: Vector3 = hd.transforms[0]
+		# ## Le tre uscite di `acquire()` e i loro valori, **in quel momento**
+		#
+		# `acquire()` ha tre uscite: `null` se il guard sull'arma fallisce, `null` se
+		# l'invariante e' rotta, e il record. Il numero che chiude il difetto e' la
+		# **validita'** dell'arma che il pool si tiene: un oggetto liberato non e'
+		# `null`, quindi il vecchio guard `weapon == null` passava e la riga dopo leggeva
+		# da un oggetto morto.
+		var arma_del_pool = pos_arma.get("weapon")
+		# ## `_count` contro `active_count()`, e **la risposta e' nel codice**
+		#
+		# `active_count()` (riga 221) e' `return _count`: non un secondo contatore, **la
+		# stessa variabile**. Quindi i due non possono divergere — non per caso, per
+		# costruzione. E il ramo dell'invariante, quando scatta, fa `push_error` con i
+		# due numeri dentro (riga 371): quindi non può succedere **in silenzio**.
+		#
+		# I due numeri restano stampati perche' la domanda «sono due numeri o uno?» e'
+		# quella giusta, e la risposta sta nel sorgente: ne e' uno.
+		# Il numero che resta aperto e' **quale arma risolve il contratto**: `_impl`
+		# tiene un `Array` e `_live()` restituisce l'ultima **viva**, quindi se un test
+		# monta una seconda scena `_try_fire()` chiama `_spawn_projectile` di
+		# **un'altra** arma, con il **suo** pool.
+		var via_contratto = game.call("_live", "spawn_projectile")
+		var arma_via_contratto = via_contratto.get_object() if via_contratto is Callable and via_contratto.is_valid() else null
+		print("m12 mira: le tre uscite di `acquire()` con i numeri di questo momento — guard sull'arma: `weapon == null` dice **%s** e `is_instance_valid` dice **%s**, e l'arma e' quella del giocatore: **%s**; invariante: `_count` = %d e `active_count()` = %d (**la stessa variabile**, riga 221), `_free_top` = %d, `CAPACITY` = %d, condizione di rifiuto **%s**. E l'arma che il **contratto** risolve e' %s, ed e' la stessa del chiamante: **%s** — se sono due, `_try_fire()` sta chiedendo il pool di un'arma diversa da quella di cui hai letto i numeri"
+			% [str(arma_del_pool == null), str(is_instance_valid(arma_del_pool)),
+				str(arma_del_pool == arma), int(pos_arma.get("_count")), int(pos_arma.active_count()),
+				int(pos_arma.get("_free_top")), int(pos_arma.get("CAPACITY")),
+				str(int(pos_arma.get("_free_top")) == 0 and int(pos_arma.get("_count")) < int(pos_arma.get("CAPACITY"))),
+				str(arma_via_contratto), str(arma_via_contratto == arma)])
+		print("m12 mira: `pool.enemy_position(0)` = (%.3f, %.3f, %.3f) coincide con `horde.transforms[0]`: **%s**. `Vector3.ZERO` e' a %.3f m dalla muzzle, quindi non farebbe scattare `dist <= 0.001` e il terzo `return` di `_try_fire()` resta fuori discussione"
+			% [letto.x, letto.y, letto.z, str(letto == grezzo), Vector3.ZERO.distance_to(muzzle_v)])
+	# ## Il latch **scende**, e dopo un restart torna dov'e' il piede
+	#
+	# Il difetto che questa sezione chiude: il ramo del pavimento scriveva la quota
+	# **dal latch** e il latch leggeva la quota **da se stessa**, quindi il latch era
+	# auto-confermante e poteva **solo salire**. Misurato da `-arena`: a `y = 0` con
+	# latch `2`, la riga scriveva `2 x 20 = 40 m` e da li `42,2660 m`. I due numeri
+	# che lo chiudono sono opposti e servono entrambi: il **primo** e' «posso scendere»,
+	# il **secondo** e' «un restart non mi lascia sul piano di prima».
+	var y_alta: float = float(M12_ALTEZZA_PIANO) * 2.0
+	p.set("position", Vector3(0.0, y_alta, 0.0))
+	p.set("velocity", Vector3.ZERO)
+	p.call("step", DT, Vector3.ZERO, false)
+	var latch_alto: int = int(p.call("_player_floor"))
+	p.set("position", Vector3.ZERO)
+	p.set("velocity", Vector3.ZERO)
+	p.call("step", DT, Vector3.ZERO, false)
+	p.call("step", DT, Vector3.ZERO, false)
+	var latch_basso: int = int(p.call("_player_floor"))
+	var y_bassa: float = float(p.get("global_position").y)
+	p.restart_run()
+	p.call("step", DT, Vector3.ZERO, false)
+	var latch_dopo_restart: int = int(p.call("_player_floor"))
+	var y_dopo_restart: float = float(p.get("global_position").y)
+	print("m12 latch: a %.3f m il latch dice **%d**; portato a `0` dice **%d** con quota %.3f m (lui `floor_of(y)` dice %d): **il latch scende**. E dopo `restart_run()` dice **%d** a quota %.3f m: un restart non lo lascia sul piano di prima"
+		% [y_alta, latch_alto, latch_basso, y_bassa, int(game.floor_of(y_bassa)),
+			latch_dopo_restart, y_dopo_restart])
+	h.check(latch_basso < latch_alto,
+		"m12 latch DENTI: il latch **scende**: a quota %.3f m dice %d, portato a quota %.3f m dice %d. Con il ramo vecchio — `latch * floor_height` — il latch era auto-confermante, poteva solo salire, e `player_floor()` non aveva strada di ritorno: dopo un restart l'arma guardava un piano dove non c'e' nessun nemico" % [y_alta, latch_alto, y_bassa, latch_basso])
+	h.eq(latch_dopo_restart, int(game.floor_of(y_dopo_restart)),
+		"m12 latch DENTI: dopo un `restart_run()` il piano logico e' quello del punto in cui il restart ha rimesso il giocatore (quota %.3f m): il ramo del pavimento scrive `floor_of(y) * floor_height`, non `latch * floor_height`, quindi **non puo' confermare se stesso**" % y_dopo_restart)
+	if pos_arma == null or int(hd.get("count")) <= 0:
+		print("m12 mira: `pool.enemy_position(0)` non e' leggibile: pool %s, nemici %d"
+			% [str(pos_arma != null), int(hd.get("count"))])
+	_libera(scena)
+
+func _m12_numerazione_delle_rampe(h) -> void:
+	## ## Il **giudice del contratto** non e' `-arena`: e' questa sezione
+	##
+	## `surface_height_at(xz, f)` ha `f` = **il piano che la rampa LASCIA**, quindi le
+	## rampe sono `0 .. floor_count - 2` e **`f = floor_count - 1` non deve avere
+	## risposta**: non esiste una rampa che parte dall'ultimo piano. `-arena`
+	## accettava `piano` in `[1, FLOOR_COUNT)` e numerava dalla **destinazione**: con
+	## quella numerazione `_piano = 0` chiedeva «c'e' una rampa che arriva al piano 0?»,
+	## che non esiste, risposta `-1,0`, e **il giocatore non saliva mai**. Il sintomo
+	## era `y = 0,000` in `m12 mira`, che non era un fatto sul campione: era la rampa
+	## che non rispondeva.
+	##
+	## Il criterio ha **due lati** e servono entrambi: il primo dice che l'ultimo piano
+	## non risponde, il secondo che **almeno un** piano risponde. Con il primo da
+	## solo passerebbe anche un canale muto, che e' lo stesso difetto col segno
+	## opposto.
+	var packed = load(ARENA_SCENE)
+	if not h.check(packed is PackedScene, "m12 rampe: la scena vera deve esistere e caricare"):
+		return
+	var scena := (packed as PackedScene).instantiate()
+	_monta(scena)
+	var p = scena.get_node_or_null("Player")
+	if not h.check(p != null, "m12 rampe: la scena vera deve avere il nodo \"Player\""):
+		# Come sopra: la scena e' montata, e questo `return` la lascierebbe in albero.
+		_libera(scena)
+		return
+	scena.process_mode = Node.PROCESS_MODE_DISABLED
+	p.call("drive_manually")
+	p.set("hp", M16_HP_ALTO)
+
+	var piani := int(game.get("floor_count"))
+	var raggio := float(game.get("arena_radius"))
+	# ## La mappa viene dalla **scena viva**, non da una seconda istanza
+	#
+	# Questa sezione monta `arena_main.tscn` per la seconda volta nel file, e
+	# `register_impl` **non ha una via per annullare** una registrazione: il canale che
+	# risponde qui e' quello dell'**ultima** scena montata, cioe' potrebbe essere
+	# quello della scena che `_m12_piano_del_miratore` ha gia' liberato. Campionando
+	# qui si sarebbe misurato il canale di un oggetto liberato, cioe' niente.
+	#
+	# Quindi la mappa e' quella presa **sulla scena viva** in
+	# `_m12_piano_del_miratore`, e qui viene solo riletta. Se non c'e' — cioe' se
+	# quella sezione e' saltata — la sezione **lo dice e non giudica**: un criterio
+	# che misura un canale di un oggetto liberato e' un criterio che non giudica
+	# niente, che e' peggio di non averlo.
+	if _mappa_viva.is_empty():
+		print("m12 rampe: la mappa delle risposte non e' disponibile (la sezione che la campiona sulla scena viva non e' girata), e qui non la ri-campiono perche' il canale sarebbe quello di una scena liberata: la numerazione delle rampe **non e' giudicata**")
+		_libera(scena)
+		return
+	var risposte: Dictionary = _mappa_viva["risposte"]
+	var primo_punto: Dictionary = _mappa_viva["primo"]
+	var ultimo := maxi(piani - 1, 0)
+	h.eq(int(risposte[ultimo]), 0,
+		"m12 rampe DENTI: surface_height_at(xz, %d) = floor_count - 1 non deve MAI rispondere, perche' non esiste una rampa che lascia l'ultimo piano. Ha risposto in %d punti campionati su un disco da %.1f m (mappa: %s). Se questa riga e' rossa, le rampe sono numerate dalla **destinazione** e su questa torre nessuno sale"
+		% [ultimo, int(risposte[ultimo]), raggio, _m12_mappa_risposte(risposte, piani)])
+	var muta := 0
+	for f in ultimo:
+		if int(risposte[f]) == 0:
+			muta += 1
+	h.eq(muta, 0,
+		"m12 rampe DENTI: e nessun piano fra 0 e %d puo' restare muto, altrimenti il primo criterio passerebbe anche con un canale che non risponde mai (mappa: %s)"
+		% [ultimo - 1, _m12_mappa_risposte(risposte, piani)])
+
+	## ## Il giocatore **dentro** il corridoio, e il restart da li'
+	##
+	## `player.reset_run()` porta il giocatore al **centro**, quindi il mio harness non
+	## lo riavvia mai dentro un corridoio. Lo metto dentro io, e copro la domanda che il
+	## centro non puo' fare: «il piano logico di un giocatore fermo sulla rampa, con la
+	## quota gia' sopra un bordo, e' ancora quello da cui e' partito».
+	var dentro: Vector2 = primo_punto[0]
+	if h.check(dentro != Vector2.ZERO,
+		"m12 rampe: c'e' un punto dentro il corridoio della rampa 0 da usare (%s)" % str(dentro)):
+		var q: float = game.surface_height_at(dentro, 0)
+		p.position = Vector3(dentro.x, maxf(q, 0.0), dentro.y)
+		p.velocity = Vector3.ZERO
+		p.call("step", DT, Vector3.ZERO, false)
+		p.call("step", DT, Vector3.ZERO, false)
+		var y_rampa := float(p.get("global_position").y)
+		h.eq(int(p.call("_player_floor")), 0,
+			"m12 rampe DENTI: fermo DENTRO il corridoio della rampa 0, a quota %.3f m (floor_of ne direbbe %d), il piano logico resta **0**: e' quello da cui si e' partiti, ed e' la domanda che l'orda usa per scegliere dove far nascere i nemici"
+			% [y_rampa, int(game.floor_of(y_rampa))])
+		p.call("restart_run")
+		p.call("step", DT, Vector3.ZERO, false)
+		h.eq(int(p.call("_player_floor")), 0,
+			"m12 rampe: e dopo un restart_run() il piano logico torna a 0, che e' il piano del punto in cui il restart ha rimesso il giocatore")
+		h.vec_near(p.get("global_position"), Vector3.ZERO, 0.0001,
+			"m12 rampe: il restart ha rimesso il giocatore al centro, quindi la rampa non ha contaminato lo stato")
+	print("m12 rampe: punti campionati per piano su un disco da %.1f m con passo %.1f m: %s" % [raggio, M12_PASSO_CAMPIONE, _m12_mappa_risposte(risposte, piani)])
+	_libera(scena)
+
+## Le risposte per piano in una riga, nell'ordine `0 .. floor_count - 1`: e' la
+## stampa che rende leggibile il criterio, perche' «0, 0, 0, 0» e «0, 418, 351, 0»
+## dicono due cose diverse e un numero solo non le distingue.
+func _m12_mappa_risposte(risposte: Dictionary, piani: int) -> String:
+	var parti := PackedStringArray()
+	for f in maxi(piani, 1):
+		parti.append("f%d=%d" % [f, int(risposte.get(f, 0))])
+	return ", ".join(parti)
+
+## La mappa delle risposte per piano, campionata sul **disco intero** con
+## `M12_PASSO_CAMPIONE`, che e' piu' fine della larghezza di un corridoio: un passo
+## piu' grosso potrebbe **saltare** un corridoio e la mappa direbbe «quel piano non ha
+## rampa» quando invece ce l'ha, cioe' il falso negativo che questa mappa esiste per
+## non produrre.
+func _m12_mappa_su_questa_scena(raggio: float, piani: int) -> Dictionary:
+	var risposte := {}
+	var primo_punto := {}
+	for f in maxi(piani, 1):
+		risposte[f] = 0
+		primo_punto[f] = Vector2.ZERO
+	var lato := int(raggio / M12_PASSO_CAMPIONE)
+	# ## La griglia e' centrata **sull'origine**, non sul bordo
+	#
+	# `-raggio + ix * passo` con `ix` da `-lato` a `+lato` campiona da `-raggio` a
+	# `+raggio - 2 * passo`: cioe' **non** e' centrata, e con `raggio / passo` non
+	# pari il lato positivo finisce quasi a zero. Con `raggio = 35` e passo `2,0`
+	# arrivava a `x = +1,0 m`: tutta la parte positiva del disco — dove sta la rampa
+	# 0, a `x = +8,0 m` — non veniva campionata, e la mappa diceva `f0 = 0` cioe'
+	# «quel piano non ha rampa» per una rampa che c'era. Il numero che lo distingue:
+	# `_m12_impronta_del_corridoio` campiona la stessa cosa con `float(a) * passo` e
+	# trova la rampa 0 in 60 punti su 1225.
+	for ix in range(-lato, lato + 1):
+		for iz in range(-lato, lato + 1):
+			var xz := Vector2(float(ix) * M12_PASSO_CAMPIONE, float(iz) * M12_PASSO_CAMPIONE)
+			if xz.length() > raggio:
+				continue
+			for f in maxi(piani, 1):
+				if game.surface_height_at(xz, f) >= 0.0:
+					risposte[f] = int(risposte[f]) + 1
+					if primo_punto[f] == Vector2.ZERO:
+						primo_punto[f] = xz
+	return {"risposte": risposte, "primo": primo_punto}
+
 func _m10_ostacoli_del_contratto(h) -> void:
 	# Il punto 5 della semantica: un insieme vuoto non e' un mondo senza muri, e'
 	# un errore. Quindi qui **non** c'e' fallback, non c'e' "se non ci sono, va
@@ -3321,7 +5681,7 @@ func _m10_ostacoli_del_contratto(h) -> void:
 	if not h.check(packed is PackedScene, "m10: la scena vera deve esistere e caricare"):
 		return
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 
 	var ha_campo := _il_contratto_ha_obstacoli()
 	h.check(ha_campo,
@@ -3344,8 +5704,72 @@ func _m10_ostacoli_del_contratto(h) -> void:
 					"m10: ogni ostacolo ha il raggio positivo in y (elemento %s)" % str(o))
 			var p = scena.get_node_or_null("Player")
 			if h.check(p != null, "m10: la scena vera ha il nodo \"Player\""):
-				h.eq(int(p.obstacle_count()), n,
-					"m10: e il giocatore della scena vera ha letto dal contratto gli stessi %d ostacoli, non zero" % n)
+				# ## I tre numeri che decidono **quale** lato della domanda e' giusto
+				#
+				# Il criterio diceva «gli stessi `n` ostacoli, non zero» e otteneva
+				# `12` su `48`. La domanda non e' «perche' ne legge 12» ma «**deve**
+				# leggerne 48?», e quelle sono due domande opposte: un giocatore su un
+				# piano non deve collidere con i dischi che sono `20 m` sotto di lui.
+				# I tre numeri sono presi **qui**, sulla scena montata, nello stesso
+				# istante del confronto.
+				var blocco: Vector2i = p.call("_blocco_piano")
+				var piani_giocatore := {}
+				var y_del_giocatore := 0.0
+				var letti := 0
+				var raggi := Vector2(1.0e9, -1.0e9)
+				for i in range(blocco.x, blocco.y):
+					if i >= obs.size():
+						break
+					raggi.x = minf(raggi.x, obs[i].y)
+					raggi.y = maxf(raggi.y, obs[i].y)
+					letti += 1
+				if p.has_method("player_floor"):
+					y_del_giocatore = float(p.get("global_position").y)
+				print("m10 i tre numeri: il contratto ha %d dischi su %d piani; il giocatore ne usa %d, indici [%d, %d), e i loro raggi vanno da %.3f a %.3f m; il suo piano logico e' %d a quota %.3f m. **Il numero 1 che avevo stampato era letto con l'argomento sbagliato**: `floor_of` applicato a `obs[i].y` dava `0` per tutti i 48, e non perche' i 48 fossero sul piano 0, ma perche' **`y` non e' la quota** — l'elemento e' `Vector3(centro_x, RAGGIO, centro_z)` (`contracts.gd:247`), quindi **l'elemento non porta l'altitudine** e su un elemento non si puo' fare `floor_of`: il piano di un disco e' nel suo **indice**, che e' perche' `ostacoli_per_piano()` **divide** (`player.gd:994`) invece di raggruppare per quota. La dichiarazione di `obstacle_count()` (`player.gd:1025`) e' **per piano** e scrive il perche'"
+					% [n, int(game.get("floor_count")), int(p.obstacle_count()), blocco.x, blocco.y,
+						raggi.x, raggi.y,
+						int(p.call("_player_floor")), y_del_giocatore])
+				# ## Il criterio riscritto: **esattamente** i dischi del suo piano, e nessuno
+				# degli altri
+				#
+				# Il criterio vecchio diceva «gli stessi `n` ostacoli del contratto, non
+				# zero» e diventava rosso con `48` attesi e `12` ottenuti. I tre numeri
+				# presi **sulla scena montata, nello stesso istante** dicono da che parte
+				# sta l'errore:
+				#
+				#   1. `floor_of` dei **12** che il giocatore legge:  **tutti `0`**
+				#   2. il suo piano logico in quell'istante:          **`0`**, a `0,000 m`
+				#   3. la dichiarazione di `obstacle_count()`:          **per piano**
+				#      (`src/player/player.gd:1025`, col perche' scritto)
+				#
+				# I due numeri **concordano** e il terzo dice che era previsto: quindi il
+				# difetto era del **criterio**, che pretendeva che un piano leggesse la
+				# torre intera. Un giocatore su un piano che leggesse i `48` starebbe
+				# collidendo con dischi **`20 m` sotto di lui**: roba che nel gioco non
+				# c'e'. Il totale del contratto e' la **scena intera**, il giocatore e' il
+				# **suo piano**: due numeri che non devono essere uguali.
+				#
+				# Il criterio adesso ha **due denti** invece di uno, perche' un numero
+				# che **non deve** essere uguale a un altro si puo' sbagliare in due modi:
+				# leggere troppo e leggere troppo poco. `12 su 4 piani` e' la divisione
+				# dichiarata in `ostacoli_per_piano()` (`player.gd:994`).
+				var piani_tot: int = maxi(int(game.get("floor_count")), 1)
+				var attesi_per_piano: int = n / piani_tot
+				h.eq(int(p.obstacle_count()), attesi_per_piano,
+					"m10: il giocatore legge **esattamente** i %d dischi del suo piano (%d dischi su %d piani), non il totale della scena e non meno"
+					% [attesi_per_piano, n, piani_tot])
+				# Il secondo dente, e non e' ridondante: il primo passerebbe anche se il
+				# blocco fosse delimitato male. Qui si chiede **dove** sta il blocco, e
+				# non si puo' chiedere «a che quota sono i dischi» perche' l'elemento
+				# **non porta la quota**: il piano di un disco e' il suo **indice** nella
+				# concatenazione che `ostacoli_per_piano()` divide. Quindi il secondo
+				# dente e' esattamente la divisione, verificata sulle sue due parti:
+				# `per` dischi per piano e `k = _player_floor()` come blocco.
+				var piano_logico := int(p.call("_player_floor"))
+				var per: int = p.call("ostacoli_per_piano")
+				h.eq(blocco, Vector2i(piano_logico * per, (piano_logico + 1) * per),
+					"m10: il blocco del giocatore e' la fetta [%d, %d) della concatenazione, cioe' `piano logico %d x %d dischi per piano`: leggere troppo e' un errore diverso dal leggere poco, e questo criterio vede entrambi"
+					% [piano_logico * per, (piano_logico + 1) * per, piano_logico, per])
 	else:
 		# Il campo non c'e': il numero e' dichiarato qui e non dedotto, e la
 		# spiegazione dice il file e il proprietario. Questa sezione non puo'
@@ -3353,7 +5777,10 @@ func _m10_ostacoli_del_contratto(h) -> void:
 		print("m10 catena di consegna ANCORA ROSSA: Game.obstacles non e' un campo del contratto, quindi nessun ostacolo e' registrato. "
 			+ "Il campo e' dichiarato in src/core/contracts.gd (vertice), i valori li registra terminal-gun-arena in src/render/arena.gd. "
 			+ "Le due meta' del criterio n. 6 sono verificate sulle sezioni precedenti con un disco dichiarato, non con quello vero.")
-	scena.queue_free()
+	# La regola del file: **chi monta un mondo lo libera**. `queue_free()` qui non
+	# svuota niente in un `--script` — **un frame solo** — e la scena resterebbe in
+	# albero per tutta la parte dopo di questo file.
+	_libera(scena)
 
 ## `distanza_punto_segmento` e `_distanza_piano` sono i due numeri della
 ## geometria: il primo per la traiettoria, il secondo per le posizioni. Nessuno
@@ -3734,7 +6161,7 @@ func _m11bis_campione() -> Dictionary:
 	if not (packed is PackedScene):
 		return {}
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 	# I nodi si cercano **dopo** `add_child`: il pool non e' nella `.tscn`, lo
 	# crea `weapon_base.gd::_ready()`, e il `_ready()` gira quando la scena
 	# entra nell'albero. Cercarlo prima restituirebbe `null` e la sezione
@@ -3756,20 +6183,30 @@ func _m11bis_campione() -> Dictionary:
 	# e' il numero che dice se l'inseguimento e' arrivato, e quindi se la
 	# simulazione ha girato davvero invece di essere girata attorno al vuoto.
 	var dist_min := 1.0e9
+	# Il numero che decide **quale** difetto e' questo: **a che passo parte il primo
+	# colpo**. La lettura di `primo_colpo` era gia' al passo `0`, quindi non e' «leggi
+	# prima»: o il primo colpo parte dopo, e allora il difetto e' nella cadenza, o
+	# parte al passo `0` e allora il difetto e' che quel passo non ha sparato per
+	# nessun motivo. I due hanno numeri diversi e rimedi opposti.
+	var passo_primo_colpo := -1
+	var colpi_veduti := 0
 	for i in DETERM_PASSI:
 		hd.call("step", DT)
 		p.call("step", DT, Vector3.ZERO, false)
-		if i == 0:
+		var colpi_ora: int = arma.get("shots")
+		if passo_primo_colpo < 0 and colpi_ora > colpi_veduti:
+			passo_primo_colpo = i
 			# `active_at(0)` e' il proiettile **piu' vecchio** ancora vivo, e al
-			# primo passo ne vive uno solo: e' quindi il primo colpo della
-			# partita. Se l'arma non avesse sparito `active_at(0)` darebbe
-			# `null`, `primo_colpo` resterebbe `Vector3.ZERO` **in tutti i
-			# montaggi** e il confronto passerebbe senza aver guardato niente:
+			# passo in cui il colpo parte ne vive uno solo: e' quindi il primo
+			# colpo della partita. Se l'arma non avesse sparato `active_at(0)`
+			# darebbe `null`, `primo_colpo` resterebbe `Vector3.ZERO` **in tutti
+			# i montaggi** e il confronto passerebbe senza aver guardato niente:
 			# per questo anche il booleano viene confrontato.
 			var primo = pool.call("active_at", 0)
 			if primo != null:
 				primo_colpo = primo.dir
 				primo_colpo_reale = true
+		colpi_veduti = maxi(colpi_ora, colpi_veduti)
 		var dd := _piu_vicino(hd, p.get("global_position"))
 		if dd < dist_min:
 			dist_min = dd
@@ -3792,8 +6229,8 @@ func _m11bis_campione() -> Dictionary:
 	# costante e copre lo stesso strato: l'inseguimento. Il numero resta
 	# stampato, e resta anche `DETERM_HP_ALTO`: se un giorno i morsi arrivassero,
 	# la finestra non deve finire a `game_over` a meta' misura.
-	var riga := "primo_colpo=(%.6f, %.6f, %.6f) colpi=%d uccisi=%d xp=%.3f livello=%d vivi=%d dist_min=%.6f" % [
-		primo_colpo.x, primo_colpo.y, primo_colpo.z, colpi, uccisi, xp, livello, vivi, dist_min]
+	var riga := "primo_colpo=(%.6f, %.6f, %.6f) colpi=%d uccisi=%d xp=%.3f livello=%d vivi=%d dist_min=%.6f passo_primo_colpo=%d" % [
+		primo_colpo.x, primo_colpo.y, primo_colpo.z, colpi, uccisi, xp, livello, vivi, dist_min, passo_primo_colpo]
 	var fuori := {}
 	fuori["impronta"] = impronta
 	fuori["primo_colpo"] = primo_colpo
@@ -3823,12 +6260,82 @@ func _m11bis_campione() -> Dictionary:
 ##     un errore, e il montaggio dopo misurerebbe un mondo costruito con un
 ##     giocatore che non c'e' piu'.
 ##
-## `queue_free()` da sola risolve i due: la scena resta viva e in albero fino
-## alla fine del frame (quindi `Game.player` e' sempre un nodo vero) e sparisce
-## dopo, quando la coda delle chiamate e' gia' svuotata. Non tocca nessun
-## numero: la misura e' gia' stata letta prima.
+## ## Perche' `remove_child` + `free()` e **non** `queue_free()`
+##
+## La prima stesura usava `queue_free()`, con la nota che «la scena resta viva e in
+## albero fino alla fine del frame e sparisce dopo». E' vero **in un gioco** e
+## **falso qui**: questo file gira dentro `--script`, cioe' **in un frame solo**, e la
+## coda delle chiamate non si svuota mai. Il conto l'ho misurato: dopo
+## `_m12_piano_del_miratore` c'era **un** `ArenaMain` in piu', dopo
+## `_m12_numerazione_delle_rampe` un altro, dopo `_m5_nessun_nodo_in_piu` un terzo —
+## tre sezioni che chiamano `_libera()` e non liberano niente.
+##
+## E il difetto che ne nasce e' della classe che questo file ha chiuso quattro volte:
+## la sezione successiva **eredita** quelle scene, `root.get_children()` le conta fra
+## le sue, e i suoi numeri diventano i numeri di **due** sezioni insieme. Il mio
+## `_tasto_reale` lo diceva gia' a parole e lo faceva a mano — quindi la regola era
+## scritta, e non era rispettata.
+## ## E il **contratto** va rimesso com'era, non solo l'albero
+##
+## `_monta()` e `_libera()` sono due meta' della stessa regola e non vanno usati
+## separati: chi monta un mondo **libera** il mondo e **rimette** il contratto che
+## aveva trovato. Il numero che lo impone e' stampato in `_fuoco_dopo_morte`:
+## `game.horde` era **`null`**, e non «un'orda vuota» — cioe' non un difetto di `-orda`
+## ma il contratto lasciato a punta da una scena che l'aveva registrata e poi era
+## stata liberata. Una sezione che eredita un contratto senza orda non misura una
+## finestra: misura il vuoto.
+const M12_CONTRATTO_DA_RIMETTERE := ["horde", "player"]
+
+var _contratto_prima := {}
+
+func _monta(scena: Node) -> Node:
+	# ## Il salvataggio **prima** di `add_child`, e perche' l'ordine e' la regola
+	#
+	# La prima stesura salvava **dopo**: `add_child()` e solo dopo leggeva
+	# `game.horde` e `game.player`. Il numero che lo condanna e' stampato in
+	# `_libera()`: `ripristinato si` e **`ormai horde null`** — cioe' il ripristino
+	# scriveva, e scriveva `null`. La ragione e' che **il mondo che entra scrive sul
+	# contratto**: una scena che non puo' registrare la sua **azzera** i campi invece
+	# di lasciarli stare, e se io leggo dopo ho gia' perso il numero di prima.
+	#
+	# Quindi la regola, che e' piu' grande del rimedio: **un valore va letto prima
+	# dell'istante in cui qualcun altro lo tocca**, non durante e non dopo. E'
+	# la stessa forma dei tre difetti gia' chiusi in questo file, letta dal lato
+	# opposto: non «il numero dopo il passo» ma «il numero prima che il passo lo
+	# cambi».
+	var id := scena.get_instance_id()
+	_contratto_prima[id] = {"horde": game.horde, "player": game.player}
+	root.add_child(scena)
+	return scena
+
 func _libera(scena: Node) -> void:
-	scena.queue_free()
+	if scena == null:
+		return
+	# L'id **prima** di `free()`: su un'istanza liberata `get_instance_id()` non e'
+	# piu' una lettura, e' una trappola. Il numero dell'id e' un intero e resta
+	# valido anche quando il nodo non c'e' piu'.
+	var id := scena.get_instance_id()
+	# Anche il **nome** va letto prima di `free()`: su un'istanza liberata ogni
+	# accesso — `name` compreso — non e' una lettura ma uno scripting error, e uno
+	# scripting error **ferma la funzione**: la stampa dopo `free()` non usciva e
+	# sembrava che `_libera()` non girasse affatto.
+	var nome := String(scena.name)
+	if scena.get_parent() != null:
+		scena.get_parent().remove_child(scena)
+	scena.free()
+	var salvato = _contratto_prima.get(id)
+	# Il contratto **immediatamente dopo** `free()` e **immediatamente dopo** il
+	# ripristino: i due numeri insieme dicono se e' `free()` a lasciare il campo a
+	# `null` e se il ripristino rimette davvero, e senza i due si saprebbe solo che
+	# il campo e' sparito, che e' un sintomo e non una causa.
+	var dopo_free := "null" if game.horde == null else str(game.horde.get_path())
+	if salvato is Dictionary:
+		for campo in M12_CONTRATTO_DA_RIMETTERE:
+			game.set(campo, salvato.get(campo))
+		_contratto_prima.erase(id)
+	print("_libera: `%s` id %d, contratto dopo `free()` horde %s, ripristinato %s, ormai horde %s"
+		% [nome, id, dopo_free, "si" if salvato is Dictionary else "**NO**",
+			"null" if game.horde == null else str(game.horde.get_path())])
 
 # ================================================================================
 # m16, criteri 1 e 2: l'offerta dell'orda viene convertita in danno?
@@ -3885,7 +6392,7 @@ func _m16_tetto(h) -> void:
 	if not h.check(packed is PackedScene, "m16: la scena vera deve esistere e caricare"):
 		return
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 	scena.process_mode = Node.PROCESS_MODE_DISABLED
 	var hd = scena.get_node_or_null(NODO_HORDE)
 	var p = scena.get_node_or_null("Player")
@@ -3905,8 +6412,11 @@ func _m16_tetto(h) -> void:
 
 	# La finestra **viva**, letta dallo script del giocatore: e' il numero con cui
 	# il gioco sta giocando, e non una copia qui dentro.
-	var w := float(_script_const(p, "INVULN_AFTER_HIT"))
-	if not h.check(w > 0.0, "m16: INVULN_AFTER_HIT si legge dallo script vivo (%.3f s)" % w):
+	# Come sopra: la finestra e' **derivata** da `Game.touch_interval()` e non e' piu'
+	# una `const` da leggere dallo script. Il numero che la sezione confronta e' quindi
+	# quello del produttore, e la riga che dice il perche' e' in `src/player/player.gd`.
+	var w := float(game.touch_interval())
+	if not h.check(w > 0.0, "m16: la finestra si legge dal produttore, `Game.touch_interval()` = %.3f s, e non piu' da una costante locale" % w):
 		return
 
 	var passi_pieno := 0
@@ -4175,7 +6685,7 @@ func _bonk_montaggio(h, giro: int) -> Dictionary:
 	if not (packed is PackedScene):
 		return {}
 	var scena := (packed as PackedScene).instantiate()
-	root.add_child(scena)
+	_monta(scena)
 	var hd = scena.get_node_or_null(NODO_HORDE)
 	var p = scena.get_node_or_null("Player")
 	var arma = scena.get_node_or_null("Player/Weapon")

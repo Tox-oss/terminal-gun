@@ -1,7 +1,7 @@
 ---
 description: "Vertice di terminal-gun: legge il piano, esegue il bootstrap, lancia un'onda di agenti alla volta, pretende i contratti di output, committa e riporta il verdetto. Non scrive il codice del gioco."
 mode: primary
-model: opencode/space-bunny-free#max
+model: opencode/beam-free
 color: "#38bdf8"
 steps: 90
 permissions:

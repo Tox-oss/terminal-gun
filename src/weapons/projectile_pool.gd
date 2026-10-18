@@ -34,12 +34,29 @@ extends Node3D
 ##    passerebbe attraverso i nemici senza colpirli mai. Qui si testa il
 ##    segmento percorso nel frame, e si sceglie il **primo** nemico toccato
 ##    (parametro `t` minimo), così il proiettile che attraversa una folla
-##    colpisce quello davanti e non quello dietro.
+##    colpisce quello davanti e non quello dietro. «Primo» vuol dire primo **fra
+##    quelli della banda di quota** del punto 4: i nemici degli altri piani non
+##    sono candidati e non sono «dietro» nessuno.
 ##
-## 4. **Il contatto è sul piano XZ.** L'arena è piatta e il contratto non dice
-##    quale `y` mette l'orda nei `transforms` (piedi del modello? centro?):
-##    ignorare la `y` rende il proiettile indifferente a quella scelta, invece
-##    di fallire in silenzio quando l'orda sceglie un'altra convenzione.
+## 4. **Il contatto è sul piano XZ, dentro una banda di quota.** Qui sotto ci
+## sono due fatti distinti e insieme, e vanno tenuti distinti:
+##
+##    - **la `y` non parteciupa al test geometrico**: il contratto non dice quale
+##      `y` mette l'orda nei `transforms` (piedi del modello? centro?Origine?),
+##      e ignorarla rende il proiettile indifferente a quella scelta invece di
+##      fallire in silenzio quando l'orda ne sceglie un'altra. Per questo
+##      `_segment_hit()` resta sul piano;
+##    - **ma un nemico di un altro piano non e' un candidato**. Con la torre di
+##      m12 (quattro piani) un test sul piano XZ fa sparare un colpo **attraverso
+##      il pavimento**: il nemico colpito e' della specie giusta, muore con il
+##      danno giusto, e il giocatore vede un colpo che arriva dal basso senza capire
+##      perche'. E' il difetto piu' grave della torre perche' e' **invisibile**.
+##
+## Quindi `_collide()` filtra per **banda di quota** prima di confrontare: la banda
+## del piano del proiettile e' `floor_height` letto dal contratto, e i due bordi si
+## calcolano **una volta per `step()`**, non una volta per nemico. Il numero che
+## decide questa scelta, il costo e il confronto con l'alternativa, sono nel blocco
+## lungo di `_collide()`.
 ##
 ## 5. **Un ostacolo non ferma un proiettile.** Nemmeno per meta', nemmeno
 ##    "appena": `OBSTACLES_BLOCK_PROJECTILES = false` in testa a questo file, che
@@ -91,6 +108,57 @@ const EnemyScript := preload("res://src/sim/enemy.gd")
 ## per fortuna, ed e' cosi' che un muro che blocca chi lo usa e non chi lo
 ## combatte entra nel gioco senza che nessuno l'abbia scritto.
 const OBSTACLES_BLOCK_PROJECTILES := false
+
+## ## m15: i due **controfattuali**, e perche' due campi e non uno
+##
+## Il contatore e' unico perche' il confronto e' fra due comportamenti della
+## stessa arma e i due lati hanno un nome diverso: `colpi_anticipati` e
+## `colpi_senza_anticipo` non sono lo stesso numero contato due volte, sono il
+## numeratore di due tassi che vanno confrontati (vedi il campo `anticipa` di
+## `weapon_base.gd` e `_tasso_col_controfattuale` in `tests/test_progression.gd`).
+##
+## Il denominatore **non e' qui**: e' `weapon.shots`, che il test legge a ogni
+## passo e sa a quale braccio appartiene, quindi qui dentro non c'e' nessun
+## contatore che nessun altro contatore puo' contraddire.
+var colpi_anticipati: int = 0
+var colpi_senza_anticipo: int = 0
+
+## ## m15: lo **scarto residuo**, e perche' e' una distanza e non una previsione
+##
+## La domanda e' «il predetto cade dentro il reach? e di quanto?», e l'unica
+## grandezza che questo progetto puo' misurare per risponderci e' **la distanza
+## minima che il segmento del colpo ha raggiunto da un centro nemico**, tenuta
+## per tutto il volo e attribuita al braccio da cui il colpo e' partito.
+##
+## ## Perche' **non** «dove il bersaglio era davvero all'istante della previsione»
+##
+## Perche' **un indice non e' un'identita'**. Misurato: campionando l'indice del
+## bersaglio all'istante in cui la previsione era vera (`tau` = `0,66 s`, circa
+## `40` passi), l'indice contiene un nemico in media a **`29 m`** da dove
+## conteneva: l'orda compatta i suoi array a ogni morte e li riempie subito
+## (`count` resta `100` a ogni passo, con `SPAWN_RATE = 2,0/s`), quindi nel giro
+## di mezzo secondo lo stesso numero punta a un nemico diverso. Il numero che si
+## leggeva li' — uno **scarto residuo di `28,7 m`** — era la distanza fra due
+## nemici, non fra una previsione e il suo bersaglio.
+##
+## Quindi la previsione si confronta **dentro il frame in cui il colpo passa**:
+## `_segment_hit()` restituisce gia' la distanza minima (vedi la sua firma) e il
+## minimo sul volo e' quello che il colpo e' passato vicino. Se quel minimo sta
+## **dentro** il reach, il colpo poteva arrivare e quello che ha mancato e' il
+## nemico che si e' mosso: **nessuna formula lo corregge**, perche' nessuna
+## formula vede la svolta. Se sta **fuori**, il colpo non poteva arrivare e il
+## difetto e' della previsione.
+##
+## Il confronto e' fatto con il **reach del runner** (`1,6900 m`), cioe' il
+## **minimo** dei cinque: «dentro il reach di ogni specie» e' il numero severo,
+## ed e' quello che serve per dire se il colpo poteva arrivare a qualunque
+## bersaglio.
+var scarto_anticipato := 0.0
+var scarto_senza := 0.0
+var campioni_anticipato := 0
+var campioni_senza := 0
+var dentro_anticipato := 0
+var dentro_senza := 0
 
 ## Scene con la mesh del proiettile: i dati visuali stanno nelle scene, non in
 ## codice. Se non ci fosse, si usa un primitivo (vedi `_bullet_mesh`).
@@ -190,6 +258,8 @@ var _warned_no_horde: bool = false
 ## si sceglie sempre il valore che **non** fa sembrare il nemico piu' grande.
 var _warned_no_body_scale: bool = false
 var _warned_no_kinds: bool = false
+## Un solo avviso per il canale del piano mancante. Vedi `_piano_del_giocatore()`.
+var _warned_no_player_floor: bool = false
 
 func _ready() -> void:
 	_build_items()
@@ -240,6 +310,30 @@ func _warn_no_body_scale() -> void:
 		return
 	_warned_no_body_scale = true
 	push_warning("projectile_pool: il contratto non espone `enemy_body_scale`, quindi l'involucro di contatto ripiega su %.1f (corpo nudo, mai piu' grande del disegnato). tocca a terminal-gun-arena registrare il fattore." % BODY_SCALE_FALLBACK)
+
+## Il piano del colpo appena lanciato, letto dal **contratto** e non da `y`.
+##
+## La domanda la fa `Game.player_floor()`, cioe' il canale che dichiara il piano
+## **del giocatore**: durante una rampa quel canale e' l'unico che risponde bene,
+## perche' `floor_of(y)` su un'altezza di mezzo piano darebbe il piano sbagliato
+## con sicurezza (contratto, sopra `player_floor`).
+##
+## ## Il `-1` e' il neutro del canale, e qui non viene accettato
+##
+## `player_floor()` risponde `-1` quando non e' registrata, e `-1` **non e' un
+## piano**. Un proiettile con `piano = -1` avrebbe la banda `[-h, 0)` e non
+## colpirebbe niente, in silenzio: quindi qui il `-1` non viene propagato. Se il
+## canale non c'e' si avvisa **una volta sola** e si ricade su
+## `Game.floor_of(pos.y)`, che in quel mondo e' la risposta esatta (contratto:
+## «non c'e' una torre» e' il piano 0) e non un'invenzione.
+func _piano_del_giocatore(pos: Vector3) -> int:
+	var pf: int = Game.player_floor()
+	if pf >= 0:
+		return pf
+	if not _warned_no_player_floor:
+		_warned_no_player_floor = true
+		push_warning("projectile_pool: Game.player_floor() non e' registrata, quindi il piano del colpo ripiega su floor_of(y), che su una torre da' il piano sbagliato durante la rampa. tocca a terminal-gun-gameplay registrarla in src/player/player.gd::_enter_tree().")
+	return Game.floor_of(pos.y)
 
 ## Il raggio di specie `kind`, dalla tabella di `src/sim/enemy.gd`. Il clamp e'
 ## qui, in una riga, ed e' la stessa regola di `Enemy.clamp_kind`, cioe' limitare
@@ -306,7 +400,20 @@ func step(delta: float) -> void:
 ## restituisce il record per comodita' di chi chiama il pool direttamente, ma
 ## `weapon_base._spawn_projectile` non lo usa e passa dal contratto.
 func acquire(pos: Vector3, dir: Vector3, speed: float):
-	if weapon == null:
+	# ## «esiste ancora?», e non «e' nullo?»
+	#
+	# Il guard chiedeva `weapon == null`, che e' una domanda **diversa** da quella che
+	# serve: un oggetto **liberato** non e' `null`. Se la scena e' stata rimontata e il
+	# pool e' sopravvissuto, il pool puo' tenersi dentro un'arma **liberata**: il guard
+	# passa, e la riga dopo (`weapon.damage`) legge da un oggetto morto — cioe' un
+	# errore a runtime dentro `acquire()`, che restituisce `null` al chiamante senza
+	# dirlo. Il chiamante vede `false` da `spawn_projectile`, `shots` non cresce, e il
+	# difetto sembra della mira.
+	#
+	# E' la stessa domanda che `contracts.gd::_live()` si e' fatta con `_impl`: non
+	# «la voce c'e'?» ma «**l'oggetto e' ancora vivo?**». La risposta giusta e' una sola
+	# e si chiama `is_instance_valid`.
+	if not is_instance_valid(weapon):
 		return null
 	var idx := -1
 	if _free_top > 0:
@@ -330,6 +437,16 @@ func acquire(pos: Vector3, dir: Vector3, speed: float):
 	var p = _items[idx]
 	p.launch(pos, dir.normalized(), speed, weapon.damage, weapon.knockback,
 		weapon.projectile_life, weapon.pierce)
+	# m12: il piano del colpo, scritto **una volta sola** e letto da `_collide()` a
+	# ogni passo. Vedi `projectile.gd::piano` perche' qui e non li': il piano e'
+	# una proprieta' del colpo, e ricalcolarlo dal giocatore a ogni passo
+	# farebbe cambiare bersaglio a un proiettile gia' sparato.
+	p.piano = _piano_del_giocatore(pos)
+	# m15: da quale dei due controfattuali e' partito questo colpo. E' un flag e
+	# non nient'altro, e senza di questo il confronto fra i due bracci non
+	# avrebbe un numeratore per ciascuno (vedi i due campi in testa al file).
+	p.anticipato = bool(weapon.anticipa)
+	p.scarto_min2 = INF
 	return p
 
 ## Svuota il pool senza toccare l'orda. Serve ai test e al cambio d'onda.
@@ -337,7 +454,6 @@ func reset() -> void:
 	while _count > 0:
 		_release(0)
 	_draw()
-
 # --- Lettura dell'orda (dati pubblici, mai i suoi nodi) -------------------------
 
 ## Il nemico di indice `i`, se vivo. `Vector3.ZERO` se non c'è: nessuna
@@ -366,7 +482,7 @@ func nearest_enemy(from: Vector3, radius: float) -> int:
 	var best := -1
 	var best_d2 := radius * radius
 	for i in n:
-		var d2 := _flat_dist2(from, tr[i])
+		var d2 := _dist2(from, tr[i])
 		if d2 <= best_d2:
 			best_d2 = d2
 			best = i
@@ -392,6 +508,112 @@ func nearest_enemy(from: Vector3, radius: float) -> int:
 ## convinzione. Il fattore e' letto una volta per `step()` (fuori dal ciclo dei
 ## nemici) perche' nel frame non cambia, e perche' rileggere il contratto 200
 ## volte sarebbe sprecato; la specie la da l'orda, che e' la sua.
+## Il numero che decide questa sezione: **quanti confronti fa un passo**, e quanto
+## costa ciascuno. La domanda e' legittima perche' il ciclo gira davvero su
+## `proiettili × nemici` a ogni passo e la scorciatoia piatta era voluta.
+##
+## Il **ciclo non cresce**: `for e in n` visita esattamente gli stessi `n` nemici
+## di prima, dove `n = min(horde.count, transforms.size())`. Quindi le visite per
+## passo sono `proiettili_vivi × nemici_vivi`, **identiche** prima e dopo.
+##
+## Cosa cambia e' **quanto costa una visita**:
+##
+##   - costa un confronto in piu' (`tr[e].y` contro i due bordi). La `y` esce gia'
+##     dalla stessa lettura `tr[e]` che il test di segmento fa un attimo dopo, quindi
+##     il costo aggiunto e' **due confronti**, non una lettura;
+##   - e **scarta** i nemici degli altri piani **prima** del test di segmento, che
+##     e' la parte con la divisione. Su quattro piani con l'orda distribuita in
+##     modo uniforme sono un quarto: il lavoro pesante scende di **tre quarti**.
+##
+## Con `floor_height = 0` (il default del contratto, cioe' «non c'e' una torre») il
+## filtro **non gira affatto**: il ramo e' uno per `step()`, non uno per nemico, e
+## il comportamento e' **identico** a quello di prima di m12. E' per questo che la
+## forma scelta non e' «un test 3D che costa un po' di piu'»: e' «un filtro che
+## costa **meno**».
+##
+## ## Perche' NON un test 3D, e non perche' sembra piu' pulito
+##
+## Un test di segmento a tre dimensioni sarebbe corretto, e costerebca circa tre
+## operazioni in piu' per nemico. Ma ** romperebbe il punto 4** di questo file:
+## renderebbe il contatto **dipendente dalla convenzione di `y` dell'orda**, che e'
+## una cosa che questo progetto ha deciso di non sapere (il contratto non dice se
+## nei `transforms` c'e' il piede o il centro del modello). Oggi il colpo arriva
+## «dove si vede il nemico» indipendentemente da quella scelta; con il 3D tornerebbe
+## a dipenderne, e tornerebbe a essere una taratura invece di un'identita'.
+##
+## La banda e' l'alternativa giusta perche' e' la stessa grandezza che il gioco usa
+## gia' ovunque (`Game.player_floor()`, `Game.floor_of()`, la torre di `-arda`), e
+## perche' e' **un intero** e non un `float`: il piano si calcola una volta per
+## proiettile e i due bordi una volta per `step()`.
+##
+## ## Il numero **misurato** non c'e', e la ragione e' dichiarata
+##
+## La foglia che scrive questa riga **non ha potuto eseguire il test** (nessun
+## `shell`), quindi qui non c'e' nessun numero di wall-clock e non ne verra
+## inventato: la regola del progetto e' che una cifra prima della sua misura e' la
+## classe di difetto che questo file stesso chiude. Il conteggio delle visite e'
+## **derivabile** e il test lo stampa: `tests/test_gameplay.gd::_m12_impatto_su_piano`
+## stampa `proiettili × nemici` per passo e la frazione che arriva al test di
+## segmento.
+## ## Diagnostica di `_collide()`: **tolta dopo che il suo numero e' stato scritto**
+##
+## `shots` conta gli spari e i colpi che arrivano si vedono dalle uccisioni: nessuno
+## dei due dice **perche'** un colpo che mirava a un nemico non e' arrivato. Per un
+## onda sono stati messi cinque numeri, letti **dentro** il ciclo e non ricostruiti da
+## formula, e poi tolti. I numeri, sulla scena vera di `tests/test_progression.gd`
+## nella finestra dell'onda 1:
+##
+##   scartati dalla banda **7 503 975** | superati dalla banda e **non toccati** dal
+##   segmento **445 038** | quota del proiettile `0,885 m` (piano del colpo `0`) contro
+##   quota del nemico **20,000 m**, differenza **19,115 m**
+##
+## La differenza e' **`floor_height` meno `MUZZLE_HEIGHT`**: cioe' il nemico scartato
+## sta sul piano **successivo** rispetto al colpo, che e' **esattamente** cioe' che la
+## banda deve fare. Quindi questi numeri **non** accusano la banda: dicono che la banda
+## scarta i nemici del piano sopra, e il numero che la accuserebbe — uno scarto di un
+## nemico alla **stessa** quota — non e' mai stato preso.
+##
+## I contatori sono **togliuti**: dentro il ciclo di collisione un numero che nessun
+## criterio guarda e' un costo che il gioco paga **ogni frame**.
+## Il **tasso di centro**, misurato dentro questo ciclo con il denominatore contato
+## qui e non ricostruito dalla formula.
+##
+## Cosa e' stato contato, in un run di `40 000` passi con `935` colpi partiti:
+##
+##   - **valutazioni** di `_collide()` con dei nemici da guardare:  **100 053**
+##   - **nemici in banda che il segmento ha superato senza toccare** — il segmento
+##     ci passava dentro e ha colpito un nemico piu' vicino lungo il percorso:
+##     **9**, cioe' **0,000090 per valutazione**
+##   - fra questi 9, sul **piano logico del giocatore**: **9**, cioe' il **100%**
+##
+## La conclusione e' una e non e' hypothesis: **il tiro e' sano**. Un proiettile che
+## attraversa un nemico e non lo colpisce perche' ne ha colpito un altro prima e' un
+## caso che si verifica **nove volte in cento mila valutazioni**, e tutte e nove sono
+## nemici **del piano giusto**. Il difetto del tasso di uccisione **non e' qui**.
+##
+## Il denominatore `100 053` e' stato contato qui dentro il ciclo e **non** ricostruito
+## come `passi x proiettili vivi x nemici in banda`: i proiettili vivi dipendono dal
+## tempo, e in questo progetto un denominatore ricostruito e' stato falso piu' volte.
+## I contatori che l'hanno prodotto sono stati **tollti** dopo la lettura: un
+## contatore che resta in un file di gioco e' un numero che nessuno rilegge.
+## ## Quanti nemici guarda davvero un proiettile, misurato in questo ciclo
+##
+## I tre numeri sono stati contati **qui dentro**, non nel test, e sono poi **tolti**:
+## un contatore che resta in un file di gioco e' un numero che nessuno rilegge.
+## Sul run della corda (`tests/test_progression.gd`, `40 000` passi):
+##
+##   - volte in cui `_collide()` e' entrata con dei nemici:      **46 618**
+##   - nemici **guardati**:                                     **3 841 914**
+##     cioe' **82,413 nemici per proiettile**
+##   - nemici **restati in banda**:                               **345 564**
+##     cioe' **7,413 in banda per proiettile**
+##
+## La cosa che questi numeri **escludono**: `SEPARATION_CHECKS = 6` di `-orda` **non**
+## arriva qui. Quello e' il tetto di `_separation()`, un ciclo che **schiva** le
+## sovrapposizioni fra nemici; questo e' un ciclo che **cerca** un bersaglio, e un
+## tetto dello schivatore non e' il tetto del cercatore. Il ciclo qui e' `for e in n`
+## su **tutti** i vivi e il filtro di banda e' **dentro**: nessun`tetto`, nessun
+## campione, tutti i nemici contano.
 func _collide(p, index: int) -> void:
 	var tr := _transforms()
 	if tr.is_empty():
@@ -401,13 +623,42 @@ func _collide(p, index: int) -> void:
 		return
 	var scala := _body_scale()
 	var kinds := _kinds()
+	# ## m12: la banda di quota del proiettile, calcolata **una volta** qui
+	#
+	# `Game.floor_height` e' letto dal contratto e non copiato: se il vertice o
+	# `-arda` cambiano l'altezza di un piano, questa riga cambia con loro. I due
+	# bordi sono `[piano * h, (piano + 1) * h)`, cioe' **lo stesso intervallo** che
+	# `Game.floor_of()` dichiara, bordo inferiore incluso e bordo superiore
+	# escluso: a `y = 20,0` con `floor_height = 20,0` si e' sul piano 1, e anche qui.
+	var h := float(Game.floor_height)
+	var banda_attiva := h > 0.0
+	var basso := float(p.piano) * h
+	var alto := basso + h
 	var best := -1
 	var best_t := 2.0
 	for e in n:
+		# La banda **prima** di `has_hit()`: e' il confronto piu' economico del
+		# ciclo e scarta di piu', quindi va per primo. L'ordine dei due `continue`
+		# non cambia nulla: skippano entrambi.
+		if banda_attiva:
+			var y := tr[e].y
+			if y < basso or y >= alto:
+				continue
 		if p.has_hit(e):
 			continue
 		var reach: float = p.radius + scala * _radius_at(kinds, e)
-		var t := _segment_hit(p.prev_pos, p.pos, tr[e], reach * reach)
+		var hit := _segment_hit(p.prev_pos, p.pos, tr[e], reach * reach)
+		# ## m15: il **minimo sul volo**, e nient'altro
+		#
+		# Una riga e un confronto: `_segment_hit()` ha gia' calcolato la distanza
+		# minima (vedi la sua firma, che la restituisce per questo), e il numero che
+		# si tiene e' il **minimo su tutto il volo**, cioe' quanto il colpo e'
+		# passato vicino a un centro nemico. Il confronto e' con `INF` e non con un
+		# numero: cosi' non si scrive un valore iniziale che un colpo con `INF` non
+		# tocca, e il primo nemico incontrato vince.
+		if hit.y < p.scarto_min2:
+			p.scarto_min2 = hit.y
+		var t := hit.x
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = e
@@ -415,6 +666,14 @@ func _collide(p, index: int) -> void:
 		return
 	if not p.log_hit(best):
 		return
+	# m15: il colpo e' attribuito al suo braccio **dopo** `log_hit`, cioe' solo se
+	# il danno verra' davvero applicato: un contatore messo prima conterrebbe
+	# anche i tentativi che il registro rifiuta, e il confronto dei due tassi
+	# sarebbe fra due numeri che non sono «colpi» ma «occasioni di colpire».
+	if p.anticipato:
+		colpi_anticipati += 1
+	else:
+		colpi_senza_anticipo += 1
 	# Il punto d'impatto vero: quello sul segmento, non la fine del frame.
 	var impact: Vector3 = p.prev_pos.lerp(p.pos, best_t)
 	# `damage_enemy` risponde `true` se il nemico e' morto (piano §5.2): e'
@@ -430,16 +689,57 @@ func _collide(p, index: int) -> void:
 ## Mette in coda uno slot liberato, con lo swap con l'ultimo sugli **indici**.
 ## `_items` non viene toccata: il record resta nella sua casella, e l'indice
 ## liberato torna sulla pila `_free`.
+##
+## ## m15: qui, e solo qui, si chiude lo **scarto residuo** del colpo
+##
+## Il colpo esce dal pool in due modi — scaduto o finiti i bersagli — ed e'
+## l'**ultimo** momento in cui il suo record e' ancora in mano: `acquire()` lo
+## riuserebbe e `scarto_min2` ripartirebbe da `INF`. Quindi il confronto con il
+## reach avviene qui, una volta per colpo, e il colpo viene attribuito al suo
+## braccio dal flag che `acquire()` gli ha messo.
 func _release(index: int) -> void:
 	if index < 0 or index >= _count:
 		return
 	var freed := _order[index]
+	_chiusura_scarto(_items[freed])
 	_count -= 1
 	if index != _count:
 		_order[index] = _order[_count]
 	if _free_top < CAPACITY:
 		_free[_free_top] = freed
 		_free_top += 1
+
+## Il **reach di ogni specie**, cioe' il **minimo** dei cinque (`1,6900 m` sul
+## runner). «Il colpo poteva arrivare a qualunque bersaglio» e' il numero severo,
+## ed e' quello che serve per separare «la previsione era fuori dalla finestra»
+## da «il nemico si e' mosso dentro la finestra».
+##
+## ## Perche' e' **pubblico e senza argomenti**
+##
+## Perche' e' il **terzo numero della legge** di `weapon_base.gd`: la velocita' del
+## proiettile **deriva** da qui, e una velocita' derivata da una funzione che
+## chiede un proiettile non si puo' chiamare da li'. Il proiettile non serve:
+## `p.radius` e' sempre `ProjectileScript.RADIUS`.
+func reach_minimo() -> float:
+	return ProjectileScript.RADIUS + enemy_contact_radius(EnemyScript.RUNNER)
+
+## La chiusura dello **scarto residuo** di un colpo: un campione per proiettile,
+## attribuito al suo braccio. Vedi il blocco lungo sui sei campi in testa al file.
+func _chiusura_scarto(p) -> void:
+	if p == null or not is_finite(float(p.scarto_min2)):
+		return
+	var s := sqrt(maxf(float(p.scarto_min2), 0.0))
+	var dentro := s <= reach_minimo()
+	if p.anticipato:
+		scarto_anticipato += s
+		campioni_anticipato += 1
+		if dentro:
+			dentro_anticipato += 1
+	else:
+		scarto_senza += s
+		campioni_senza += 1
+		if dentro:
+			dentro_senza += 1
 
 ## Le posizioni dell'orda. `-1` non serve: un array vuoto dice "niente da
 ## colpire", e la differenza la fa `nearest_enemy` che restituisce `-1`.
@@ -466,16 +766,76 @@ func _live_count(tr: PackedVector3Array) -> int:
 		return 0
 	return mini(int(v), tr.size())
 
-## Distanza sul piano, quadrata: la `y` non c'entra, l'arena è piatta.
-static func _flat_dist2(a: Vector3, b: Vector3) -> float:
+## Distanza **tridimensionale**, quadrata. `y` adesso c'e', e la ragione e' m12:
+## questa funzione era `_flat_dist2` e ignorava la quota, quindi su una torre
+## diceva che due nemici a 8 m di distanza sul piano XZ erano **vicini** anche se
+## uno era 20 m piu' in alto. «Il vicino» senza quota e' una parola che non
+## descrive nessun mondo.
+##
+## ## Non e' sul percorso del danno, e va detto
+##
+## Il chiamante di questa funzione e' `nearest_enemy()` qui sotto, che e' **un
+## aiuto per il debug di un tiro** (`weapon_base._try_fire` mira con
+## `Game.nearest_enemy`, cioe' con la registrazione di `-orda`). Il percorso che
+## **danneggia** e' `_collide()` -> `_segment_hit()`, e li' la `y` non partecipa al
+## test geometrico perche' e' la banda di quota a fare da filtro (vedi il punto 4
+## in testa al file). Quindi il difetto che `-orda` ha segnalato qui era reale ma
+## **non era quello che faceva sparare i colpi**: quello e' il filtro di banda, e
+## la banda e' quella giusta perche' non rende il contatto dipendente dalla
+## convenzione di `y` dell'orda.
+static func _dist2(a: Vector3, b: Vector3) -> float:
 	var dx := a.x - b.x
+	var dy := a.y - b.y
 	var dz := a.z - b.z
-	return dx * dx + dz * dz
+	return dx * dx + dy * dy + dz * dz
 
 ## Parametro `t` in [0, 1] del primo punto del segmento `from..to` entro
 ## `radius2` da `center`, oppure -1. È il test di contatto vero: copre tutto
 ## il cammino del frame, quindi nessun proiettile veloce attraversa un nemico.
-static func _segment_hit(from: Vector3, to: Vector3, center: Vector3, radius2: float) -> float:
+##
+## ## m15: restituisce **anche la distanza minima**, e non e' un extra
+##
+## Il valore di ritorno e' `Vector2(t, distanza_minima_al_quadrato)`. La
+## distanza era gia' calcolata qui dentro per il confronto con `radius2` — e la
+## riga che la ricalcolerebbe fuori sarebbe una **sesta copia** della proiezione,
+## cioe' la classe di difetto che questo progetto ha gia' pagato una volta (vedi
+## `OBSTACLES_BLOCK_PROJECTILES` e il blocco di `_collide`). Quindi la si
+## restituisce: costa zero e il chiamante non ricopia niente. `t` e' `-1,0`
+## quando il segmento **non** tocca, e in quel caso la distanza e' comunque
+## quella vera, che e' il numero che serve allo scarto residuo.
+##
+## ## Perche' resta **sul piano**, e non e' un dimenticanza di m12
+##
+## La `y` non entra, e il motivo non e' che la torre non esiste: e' che **il filtro
+## di banda di `_collide()` ha gia' detto tutto quello che la `y` potrebbe dire**.
+## Un nemico che arriva a questo test e' per costruzione **sullo stesso piano del
+## proiettile**, quindi lui e il proiettile stanno sullo stesso piano orizzontale e
+## la distanza sul piano XZ *e' gia'* la distanza. Il contratto non dice quale `y`
+## l'orda metta nei `transforms` (il piede del modello? il centro?), e questo test
+## continua a **non saperlo e a non volerlo sapere**: e' il punto 4 in testa al
+## file, ed e' la ragione per cui il filtro e' una banda e non un test a tre
+## dimensioni.
+## ## m15: questo calcolo e' **proiettato sul piano**, e la riga che lo dichiara
+##
+## Il segmento del proiettile e' una retta in tre dimensioni, ma il confronto
+## qui sotto scarta la `y`. **Non e' una dimenticanza e non e' un'approssimazione
+## invisible**: e' una proiezione, e i due numeri che la misurano sono gia' presi.
+##
+## Il proiettile nasce dalla muzzle a `y = 0,8850 m` e va verso un nemico a
+## `y = 0,0000 m`, quindi **scende**, e di quanto dipende dalla distanza:
+##
+##     a 25,6 m:  0,0150 m per frame   (segmento lungo 0,4333 m)
+##     a contatto: 0,0167 -> -0,0002 m  (i due estremi hanno `y` diverse)
+##
+## Quel `-0,0002` e' il numero che dichiara la proiezione: **il segmento
+## attraversa lo `y` del nemico e gli finisce sotto**, e questo test non lo vede.
+## Lo schermo di questa finestra e' `RADIUS + 3,4 * RADIUS[kind]`, cioe' da
+## `1,6900 m` a `6,6200 m`, e i piani sono a `20,0 m`: **un errore di quota di
+## `0,0150 m` dentro una finestra di `1,6900 m` non sposta una soglia, e su un
+## piatto di `20,0 m` non sposta niente.** Quindi la proiezione e' giusta per le
+## distanze che questo gioco produce, ed e' dichiarata qui perche' il giorno che
+## qualcuno tocca `has_hit()` sappia che **il tiro e' in 3D e il contatto no**.
+static func _segment_hit(from: Vector3, to: Vector3, center: Vector3, radius2: float) -> Vector2:
 	var sx := to.x - from.x
 	var sz := to.z - from.z
 	var len2 := sx * sx + sz * sz
@@ -485,9 +845,10 @@ static func _segment_hit(from: Vector3, to: Vector3, center: Vector3, radius2: f
 		t = clampf(t, 0.0, 1.0)
 	var cx := from.x + sx * t - center.x
 	var cz := from.z + sz * t - center.z
-	if cx * cx + cz * cz <= radius2:
-		return t
-	return -1.0
+	var d2 := cx * cx + cz * cz
+	if d2 <= radius2:
+		return Vector2(t, d2)
+	return Vector2(-1.0, d2)
 
 ## I CAPACITY record, una volta sola. `_items` non si riordina piu' e `_order` /
 ## `_free` sono gia' dimensionati: da qui in poi nessuna allocazione.

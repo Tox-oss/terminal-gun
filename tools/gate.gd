@@ -40,6 +40,47 @@ const PREFIX := "test_"
 const TEST_TIMEOUT_MS := 120000
 const POLL_MS := 5
 
+## Scadenza **per file**, per gli unici due che hanno una misura che lo richiede.
+## Un tetto unico per otto file di dimensioni diverse lega sull'unico file grosso
+## e non vincola nessun altro, e il modo in cui si era risolto — tagliare i campioni
+## — **abbassa la risoluzione invece di alzare il tetto**: e' la soglia spostata per
+## far verde, che questo progetto vieta. Quindi qui la scadenza **scende solo dove
+## e' dichiarata e derivata**, e resta `TEST_TIMEOUT_MS` per tutto il resto.
+##
+## ## `test_orda`: `140 s`, e la derivazione e' qui, non nel file di test
+##
+## Il legame fra tempo e risoluzione e' una sola riga e non si negozia: **in un
+## ciclo di campionamento il tempo e' proporzionale ai campioni, e sigma e'
+## proporzionale a `1/sqrt(campioni)`**, quindi `sigma` e' proporzionale a
+## `1/sqrt(tempo)`. Per raddoppiare sigma costa **quattro volte** il tempo.
+##
+## Il caso debole e' il `grunt`, e i numeri sono due esecuzioni dello stesso file:
+##
+## ```
+##   2400 campioni per cammino   scarto 0,022 = 1,7 sigma      falso allarme ~1,4% per lato
+##   1200 campioni per cammino   scarto 0,022 = 1,2 sigma      falso allarme ~6%   per lato
+##   sigma 0,0129 -> 0,0183, rapporto 1,42 = sqrt(2):  la legge e' verificata, non assunta
+## ```
+##
+## A `1,2 sigma` il caso debole **e' una moneta**: un test che sbaglia da una parte
+## e dall'altra sei volte su cento **non e' una porta, e' un rumore**. E **non esiste
+## una terza via**: tornare a `1,7 sigma` vuol dire `2408` campioni, cioe'` i `2400`
+## di prima, e il tempo torna a **`115,4 + 4,7 = 120,1 s`** piu' i `13,5 s` di
+## `M10_WINDOW` riportato a `1800` — che serve perche' a finestra `900` le due
+## asserzioni `M10_ARRIVO_MAX = 900` e `M10_META_MAX = 3600` diventano tautologiche
+## e valgono «qualcuno arriva» e basta.
+##
+## ```
+##   115,4 s (misurato, 16600 asserzioni, PASS)  +  4,7 s (miscela)  +  13,5 s (M10_WINDOW)
+##   = 133,6 s richiesti, contro i 120 s del tetto unico
+## ```
+##
+## `140 s` non e' `133,6 s` arrotondato per comodo: e' `133,6` piu' il margine che
+## il file si era guadagnato da solo nei run scarichi, cioe' il margine che la porta
+## deve avere **su una macchina carica** — che e' l'unica macchina su cui un gate
+## viene guardato per decidere qualcosa.
+const BUDGETS := {"test_orda": 140000}
+
 ## I test che il piano (docs/piramide/piano.md §6) prevede. Un file scritto da
 ## una foglia e non qui dentro viene comunque eseguito: questa lista serve solo
 ## a poter dire SKIP su un test che non è ancora stato scritto.
@@ -85,8 +126,14 @@ func _initialize() -> void:
 			skipped.append(name)
 			continue
 
+		# La scadenza e' **per file**: `TEST_TIMEOUT_MS` per tutti, e il valore
+		# dichiarato in `BUDGETS` solo dove c'e' una derivazione scritta accanto.
+		# Il messaggio di timeout deve dire **la scadenza che valeva davvero**:
+		# un timeout che annuncia `120 s` quando ne valevano `140` e' un rosso che
+		# dice una cosa e ne subisce un'altra, che e' la peggiore forma di rosso.
+		var budget: int = int(BUDGETS.get(name, TEST_TIMEOUT_MS))
 		var output: Array = []
-		var result := _run(path, output)
+		var result := _run(path, output, budget)
 		var code: int = result[0]
 		var timed_out: bool = result[1]
 		var lines := _lines(output)
@@ -97,7 +144,7 @@ func _initialize() -> void:
 		if timed_out:
 			# Un test che si blocca è un FAIL dichiarato, non un gate congelato:
 			# il figlio è stato ucciso e il motivo è il timeout, non il codice.
-			reason = "timeout: il test non e' terminato entro %.1f s, processo ucciso" % (TEST_TIMEOUT_MS / 1000.0)
+			reason = "timeout: il test non e' terminato entro %.1f s, processo ucciso" % (budget / 1000.0)
 		elif not errors.is_empty():
 			# Un errore di GDScript in un test è un FAIL anche se il test ha
 			# stampato PASS ed è uscito 0: l'errore runtime aborta il resto della
@@ -155,9 +202,10 @@ func _plan() -> Array[String]:
 ## stderr del figlio (un SCRIPT ERROR su stderr deve finire nel motivo di un FAIL).
 ##
 ## Restituisce `[codice_uscita, scaduto]`. `scaduto` è vero solo se il figlio ha
-## superato `TEST_TIMEOUT_MS` ed è stato ucciso: in quel caso il codice di uscita
+## superato **la scadenza che valeva per lui** — `budget_ms`, cioè la dichiarata in
+## `BUDGETS` o `TEST_TIMEOUT_MS` — ed è stato ucciso: in quel caso il codice di uscita
 ## non significa niente e il ciclo principale deve usare il timeout come motivo.
-func _run(path: String, output: Array) -> Array:
+func _run(path: String, output: Array, budget_ms: int) -> Array:
 	var exe := OS.get_executable_path()
 	var args := PackedStringArray([
 		"--headless",
@@ -188,7 +236,7 @@ func _run(path: String, output: Array) -> Array:
 	var out_pipe: FileAccess = handle["stdio"]
 	var err_pipe: FileAccess = handle["stderr"]
 	var raw := PackedByteArray()
-	var deadline := Time.get_ticks_msec() + TEST_TIMEOUT_MS
+	var deadline := Time.get_ticks_msec() + budget_ms
 	var timed_out := false
 	var alive := true
 

@@ -1,7 +1,7 @@
 ---
 description: "terminal-gun-ui: barra XP, contatore di onda e schermata di game over. È l'unico che scrive in src/ui/ dopo il passaggio di m2."
 mode: subagent
-model: opencode/space-bunny-free#max
+model: opencode/beam-free
 color: "#a78bfa"
 steps: 55
 hidden: true

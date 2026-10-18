@@ -179,7 +179,10 @@ static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0, MORTAR_WEI
 ##
 ## Nessun altro numero si e' mosso: le altre tre specie pesano come prima, e i
 ## 27 dischi, `MAX_ENEMIES = 200`, `SPAWN_RATE = 8.0`, `TOUCH_REACH`, `GRID_CEILING`,
-## `arena_radius = 60.0`, `POP_BASE = 25` e `POP_STEP` restano quelli di prima.
+## `POP_BASE = 25` e `POP_STEP` restano quelli di prima. (`arena_radius` era in questa
+## lista a `60.0` ed e' passato a `35.0` con la torre di m12: non e' un numero di
+## questo file, e la sua sorgente resta `src/render/arena.gd` — la riga resta qui per
+## dire che il passaggio e' avvenuto **fuori** da qui, non che qui sia rimasto fermo.)
 ##
 ## `static var` e non `const`: non perche' il numero sia provvisorio, ma perche'
 ## `tests/test_orda.gd` deve poter rimettere **3,0** qui dentro, misurare i boss
@@ -214,14 +217,78 @@ static var BOSS_WAVE1 := 0.0
 ## raggio del **nemico piu' grosso**: e' il raggio che garantisce che nessuna
 ## specie nasca dentro, per tutte e quattro e non solo per quella che si e' capita
 ## di pescare. Il criterio e' dichiarato sul minimo dei tre, non sul massimo.
+## ## m12-sesta: **nessuna nascita dentro il raggio di morso**, e la quarta clausola
+##
+## La legge di nascita aveva **tre** clausole — dentro l'arena, non dentro un disco,
+## mai `Vector3.ZERO` — e tutte e tre sono rispettate da uno spawn a `30 cm` dal
+## giocatore. Il buco di `LAYOUT_INNER` e' un buco **intorno all'origine**, e
+## l'origine non e' il giocatore: coincidono solo finche' `player.gd` riparte da
+## `Vector3.ZERO` (`player.gd:504`). La legge escludeva una posizione degenere e
+## lasciava passare quella che blocca il gioco: misurato da `-gameplay` con il
+## giocatore inchiodato, il nemico piu' vicino sta fra **0,0275 m** e **0,8522 m**,
+## cioe' **dentro** la portata di morso (`6,91 m` a `body_scale = 3,4`) in
+## `39 937` passi su `40 000`.
+##
+## Quindi qui sotto nasce la **quarta clausola**, e la sua forma e' una
+## **disuguaglianza fra due numeri**: il minimo delle distanze di nascita dal
+## giocatore **sta sopra** la portata di morso. Non «nessuno nasce addosso», che e'
+## una frase: la disuguaglianza si puo' sbagliare in due modi — il punto troppo
+## vicino, oppure la portata sbagliata — invece che in uno.
+##
+## `gap` e `focus` sono **parametri obbligatori** e non opzionali con undefault:
+## un valore di default (`0.0`, `Vector3.ZERO`) lascerebbe la clausola **sparire in
+## silenzio** in un call site che l'avesse dimenticata, e una clausola che sparisce
+## senza rumore non e' una clausola.
 static func layout_point(radius: float, i: int, count: int, rng: RandomNumberGenerator,
-		obstacles: PackedVector3Array = PackedVector3Array(), skin: float = 0.0) -> Vector3:
+		focus: Vector3, gap: float, obstacles: PackedVector3Array = PackedVector3Array(),
+		skin: float = 0.0) -> Vector3:
 	var t := 0.0 if count <= 1 else float(i) / float(count - 1)
 	var inner := minf(LAYOUT_INNER, radius * 0.45)
 	var rr := inner + (radius - inner) * sqrt(1.0 - clampf(t, 0.0, 1.0))
 	rr = clampf(rr + rng.randf_range(-1.0, 1.0) * radius * 0.05, inner, radius)
 	var a := rng.randf() * TAU
-	return free_point(Vector3(cos(a) * rr, 0.0, sin(a) * rr), obstacles, skin, radius)
+	var q := free_point(Vector3(cos(a) * rr, 0.0, sin(a) * rr), obstacles, skin, radius)
+	return lontano_da(q, focus, gap, obstacles, skin, radius)
+
+## La quarta clausola applicata: `p` sta ** fuori** dal cerchio di raggio `gap`
+## centrato sul giocatore. Sul piano logico (`x`, `z`): la quota la mette
+## `horde.gd::_populate` dopo, e a quell'altezza il giocatore e' un punto diverso.
+##
+## Il punto viene spinto **lungo la direzione che lo allontana dal giocatore**, e
+## il risultato passa di nuovo da `free_point`: spingere puo' buttare dentro un
+## disco, e un punto di nascita dentro un disco e' il difetto che il criterio n. 5
+## chiude. Il margine `SPAWN_GAP_MARGIN` esiste perche' la legge e' «**dentro** il
+## raggio di morso», e il criterio e' `min > raggio`: senza margine il punto
+## nascerebbe sul bordo e una disuguaglianza stretta lo dichiarerebbe dentro.
+static func lontano_da(p: Vector3, focus: Vector3, gap: float,
+		obstacles: PackedVector3Array = PackedVector3Array(), skin: float = 0.0,
+		arena_radius: float = 0.0) -> Vector3:
+	if gap <= 0.0:
+		return p
+	var fuori := gap + SPAWN_GAP_MARGIN
+	var q := p
+	for _giro in 3:
+		var dx := q.x - focus.x
+		var dz := q.z - focus.z
+		var d := sqrt(dx * dx + dz * dz)
+		if d >= fuori:
+			return q
+		# Il punto e' **sul** giocatore: la direzione di allontanamento non
+		# esiste, e senza questa riga la divisione darebbe NaN.
+		if d < 0.0001:
+			dx = 1.0
+			dz = 0.0
+			d = 1.0
+		q = Vector3(focus.x + dx / d * fuori, q.y, focus.z + dz / d * fuori)
+		q = free_point(q, obstacles, skin, arena_radius if arena_radius > 0.0 else 1.0e6)
+	return q
+
+## Margine con cui un punto di nascita viene tenuto **oltre** la portata di morso.
+## Non e' una tolleranza di comodo': e' la differenza fra «dentro» (`<`) e «fuori»
+## (`>=`) del raggio, resa visibile cosi' che il criterio `min > raggio` sia
+## stretto senza essere ambiguo. Un centimetro: due numeri grandi, una clausola che
+## si puo' sbagliare in due modi.
+const SPAWN_GAP_MARGIN := 0.05
 
 ## Spinge `p` fuori da ogni disco che lo contiene, con `skin` di margine, e lo
 ## riporta dentro l'arena. Due passaggi perche' due dischi vicini possono
@@ -275,10 +342,14 @@ static func free_point(p: Vector3, obstacles: PackedVector3Array, skin: float,
 	return q
 
 ## Riempie `out[0..count-1]` con una disposizione ad anelli.
+##
+## `focus` e `gap` passano come in `layout_point`, e sono **obbligatori** anche
+## qui: `fill_layout` non ha chiamanti oggi, e un giorno che ne avesse uno senza
+## quei due numeri deve accorgersene alla compilazione e non in partita.
 static func fill_layout(radius: float, count: int, rng: RandomNumberGenerator,
-		out: PackedVector3Array) -> void:
+		focus: Vector3, gap: float, out: PackedVector3Array) -> void:
 	for i in count:
-		out[i] = layout_point(radius, i, count, rng)
+		out[i] = layout_point(radius, i, count, rng, focus, gap)
 
 ## Punto casuale **uniforme in area** dentro il disco: `sqrt` sul raggio, non un
 ## raggio uniforme (che addenserebbe tutto al centro).

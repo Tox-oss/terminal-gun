@@ -45,6 +45,24 @@ extends MultiMeshInstance3D
 ##     si confonda con la tinta di una specie nemica: con duecento nemici in
 ##     campo la lettura deve essere «massa» e non «dettaglio».
 const OBSTACLE_HEIGHT := 2.4
+## ## m12: IL PIANO DI UN DISCO E' LA **POSIZIONE NELL'ARRAY**, e non `floor_of()`
+##
+## `y` e' il **raggio** (2,275 m al raggio di oggi) e non la quota, quindi
+## `floor_of(element.y)` vale `0` per **tutti** i dischi di **tutti** i piani: una
+## torre che mettesse i quattro piani alla stessa quota avrebbe i muri dei piani
+## 1, 2 e 3 **appesi a mezz'aria**, e il campo di percorrenza di ogni piano
+## avrebbe ostacoli che il giocatore incontra venti metri piu' in la'.
+##
+## Il taglio e' per **indice**, ed e' lo stesso per tre foglie:
+## `OBST.per_floor(n, floors)` di `-orda` — che e' anche la funzione che
+## `slice_floor()` usa per tagliare l'array — e `size() / floor_count` di
+## `-gameplay`. Qui sotto si chiama **quella**, e non se ne scrive una quarta.
+##
+## Il **perche'** conta: due foglie che tagliano lo stesso array in punti diversi si
+## evitano ostacoli del piano sbagliato. E' la classe di difetto delle copie, e la
+## difesa qui e' **una funzione sola**, non quattro righe che concordano finche'
+## nessuno le tocca.
+const OBST := preload("res://src/sim/obstacles.gd")
 const RADIAL_SEGMENTS := 12
 const OBSTACLE_COLOR := Color(0.88, 0.84, 0.76)
 
@@ -54,6 +72,23 @@ const OBSTACLE_COLOR := Color(0.88, 0.84, 0.76)
 ## difetto di z-fighting dal basso della camera. Il fondo affondato e' invisibile e
 ## il bordo resta **esattamente** sul raggio che blocca.
 const OBSTACLE_SINK := 0.25
+## ## `0,25` NON E' IL RAGGIO DEL DISCO NE' MEZZA `TILE`, ED E' MISURATO
+##
+## Misurato il 2026-10-17 sulla torre: `tests/test_arena.gd::_torre_ostacoli` ha
+## misurato uno scarto **costante di `0,2500 m` su tutti e 76 i dischi**, e la
+## costante e' questa. Il criterio confrontava per errore `fondo == suolo`, cioe'
+## pretendeva che il disco appoggiasse **a quota** invece che affondato sotto: la riga
+## era sbagliata, non il posizionamento. Uno scarto **costante su tutti i dischi**
+## non e' un errore di piano — quello sarebbe di `20`, `40` o `60` metri — ma una
+## cosa unica: e' il modo in cui il numero si fa riconoscere.
+##
+## Perche' la riga non si e' limitata ad **allargare la tolleranza**: un quarto di
+## metro di banda avrebbe lasciato passare un disco affondato di due metri, cioe' un
+## disco che sporge sotto un altro pavimento. Il criterio **rilegge questo numero** dalla
+## mappa delle costanti di questo file e confronta contro di lui, quindi se il produttore
+## cambiasse l'affondamento il criterio inseguirebbe il numero nuovo e continuerebbe a
+## distinguere «affondato di quanto dichiarato» da «appoggiato al piano sbagliato» —
+## che e' il difetto che la sezione cerca.
 
 ## Le trasformazioni **scritte nel buffer**, tenute per la verifica.
 ##
@@ -106,8 +141,17 @@ func build(list: PackedVector3Array) -> void:
 	# sbagliato qui taglia gli ostacoli senza dire niente (la stessa lezione
 	# scritta accanto a `_fit_aabbs()` in `arena_ground.gd`).
 	custom_aabb = _aabb(list)
+	var floors := maxi(floor_count(), 1)
+	var per := OBST.per_floor(n, floors)
+	var height := maxf(floor_height(), 0.0)
 	for i in n:
-		var t := obstacle_transform(list[i])
+		# ## m12: LA QUOTA VIENE DALL'INDICE, non dall'elemento
+		#
+		# `per == 0` (insieme vuoto) e `floors <= 1` (mondo piatto) danno tutti e due
+		# `piano 0`: il comportamento di prima di m12, quindi nessun numero di questa
+		# sezione cambia senza la torre.
+		var piano := 0 if per <= 0 else i / per
+		var t := obstacle_transform(list[i], float(piano) * height)
 		mm.set_instance_transform(i, t)
 		_written.append(t)
 	mm.visible_instance_count = n
@@ -138,16 +182,31 @@ func _material() -> StandardMaterial3D:
 	m.metallic = 0.0
 	return m
 
-## La scatola che il motore usa per decidere se disegnare, **derivata dai dischi**.
+## La scatola che il motore usa per decidere se disegnare, **derivata dai dischi**
+## e dalla torre.
+##
+## Il riquadro di prima era alto `OBSTACLE_HEIGHT` e partiva da `y = 0`: su una
+## torre di 80 m avrebbe cullato **tutti** i dischi dei piani 1, 2 e 3, e in
+## headless nessuna asserzione lo avrebbe visto, perche' un `MultiMesh` cullata
+## continua a riportare il numero di istanze che le e' stato scritto. Quindi
+## l'estensione verticale arriva fino a `floor_count * floor_height` — la stessa
+## regola di `_fit_aabbs()` in `arena_ground.gd`.
 func _aabb(list: PackedVector3Array) -> AABB:
+	var su := _tower_height()
 	if list.is_empty():
 		return AABB(Vector3(-1.0, 0.0, -1.0), Vector3(2.0, OBSTACLE_HEIGHT, 2.0))
-	var lo := Vector3(INF, INF, INF)
-	var hi := Vector3(-INF, -INF, -INF)
-	for e in list:
+	var lo := Vector3(INF, INF, 0.0)
+	var hi := Vector3(-INF, -INF, su)
+	var floors := maxi(floor_count(), 1)
+	var per := OBST.per_floor(list.size(), floors)
+	var height := maxf(floor_height(), 0.0)
+	for i in list.size():
+		var e := list[i]
 		var r: float = maxf(e.y, 0.0)
-		lo = Vector3(minf(lo.x, e.x - r), 0.0, minf(lo.z, e.z - r))
-		hi = Vector3(maxf(hi.x, e.x + r), OBSTACLE_HEIGHT, maxf(hi.z, e.z + r))
+		var piano := 0 if per <= 0 else i / per
+		var y := float(piano) * height
+		lo = Vector3(minf(lo.x, e.x - r), minf(lo.y, y - OBSTACLE_SINK), minf(lo.z, e.z - r))
+		hi = Vector3(maxf(hi.x, e.x + r), maxf(hi.y, y + OBSTACLE_HEIGHT), maxf(hi.z, e.z + r))
 	return AABB(lo - Vector3(1.0, 0.0, 1.0), hi - lo + Vector3(2.0, 0.0, 2.0))
 
 ## ## LA TRASFORMAZIONE DI UN OSTACOLO: pubblica e pura
@@ -163,11 +222,23 @@ func _aabb(list: PackedVector3Array) -> AABB:
 ## disegnato e' quello che blocca). Un raggio nullo qui produce una istanza
 ## schiacciata e **non viene tollerato**: e' un invariante del contratto (punto 3)
 ## e il chiamante lo rifiuta prima di arrivare.
-func obstacle_transform(entry: Vector3) -> Transform3D:
+##
+## ## `base`: LA QUOTA DEL PIANO, E PERCHE' E' UN PARAMETRO
+##
+## Il secondo parametro e' **la quota del piano su cui il disco sta**, e non
+## l'indice del piano, perche' il chiamante la calcola col produttore unico
+## (`OBST.per_floor`) e la formula del pavimento resta **qui dentro, in un posto**.
+## Il default `0.0` e' il mondo di prima di m12: chiamata con un solo argomento la
+## funzione si comporta **esattamente** come si comportava, e il test che la chiama
+## con un disco finto continua a misurare la stessa cosa.
+##
+## Perche' `base` e non `piano * FLOOR_HEIGHT`: perche' `FLOOR_HEIGHT` non e' scritto
+## qui dentro. E' un numero del contratto, e questo file non lo possiede.
+func obstacle_transform(entry: Vector3, base: float = 0.0) -> Transform3D:
 	var r: float = maxf(entry.y, 0.0)
 	var h := OBSTACLE_HEIGHT + OBSTACLE_SINK
 	return Transform3D(Basis.IDENTITY.scaled(Vector3(r, h, r)),
-		Vector3(entry.x, h * 0.5 - OBSTACLE_SINK, entry.z))
+		Vector3(entry.x, base + h * 0.5 - OBSTACLE_SINK, entry.z))
 
 # --- Lettura (per il test e per il debug) -------------------------------------
 
@@ -186,6 +257,62 @@ func drawn_radius(i: int) -> float:
 ## Quanti ostacoli sono stati messi sul serio nel buffer.
 func drawn_count() -> int:
 	return _written.size()
+
+## Quanti piani ha la torre, **dal contratto**. Il ripiego e' **`1`**, cioe' il
+## **default dichiarato del contratto**, e non `-1`.
+##
+## ## PERCHE' `-1` ERA IL NEUTRO SBAGLIATO, E COME SI VEDE
+##
+## Questa funzione restituiva `-1` quando il contratto non era raggiungibile, e il
+## conto che ne segue e' silenzioso: `maxi(-1, 1) = 1`, quindi `build()` leggeva
+## «un piano solo» da un valore che **non e' un piano solo**, e `per_floor(n, -1)`
+## avrebbe diviso per `maxi(-1, 1)`. Un disco finito su un nodo **fuori dall'albero**
+## ha prodotto cosi' `written_transform(0) == Transform3D.IDENTITY`: non un crash, non
+## un errore, una trasformata identica in un riquadro che ne conteneva gia' una vera.
+##
+## `-1` non e' «non lo so» per un numero che ha un default: e' un valore che **non
+## esiste in nessun mondo**, e un chiamante che lo clampa lo trasforma in un mondo
+## che non e' quello che pensava. In un mondo senza contratto la risposta vera e' il
+## mondo piatto di prima di m12: un piano, quota zero.
+##
+## Il punto in cui questo si vede non e' un crash ma un **test**: `tests/test_arena.gd`
+## costruisce un `MultiMeshInstance3D` con `set_script()` e non lo mette in albero,
+## quindi per definizione non ha contratto, e il ripiego e' l'unica risposta che
+## vedra'. Se il ripiego restituisse `-1`, il criterio passerebbe o fallirebbe per un
+## motivo che non ha niente a che fare con il disegno del disco.
+func floor_count() -> int:
+	var game := _contract()
+	if game == null:
+		return 1
+	var v = game.get("floor_count")
+	if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT:
+		return maxi(int(v), 1)
+	return 1
+
+## L'altezza di un piano, **dal contratto**. Il ripiego e' **`0,0`**, il default
+## dichiarato, per la stessa ragione di `floor_count()` sopra: `-1,0` qui diventava
+## `maxf(-1,0, 0,0)` dentro `_tower_height()`, cioe' gia' `0,0`, ma il chiamante che
+## legge il grezzo vedeva un'altezza negativa e non poteva distinguerla da un difetto.
+func floor_height() -> float:
+	var game := _contract()
+	if game == null:
+		return 0.0
+	var v = game.get("floor_height")
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return 0.0
+
+## L'altezza della torre, cioe' `floor_count * floor_height`, con i due valori
+## negativi **clampati a zero**: quando il contratto non dichiara i campi non
+## esiste nessuna torre e la quota giusta dei dischi e' `0,0`, cioe' il mondo di
+## prima di m12. Non e' un silenzio: e' il caso in cui il vertice ha tolto i campi
+## e `tests/test_arena.gd` va rosso sul valore registrato.
+func _tower_height() -> float:
+	var floors := maxi(floor_count(), 1)
+	var height := floor_height()
+	if height <= 0.0:
+		return 0.0
+	return float(floors) * height
 
 ## I dischi che questo nodo deve disegnare: dal contratto, e **non** dalla scena.
 ##
@@ -211,7 +338,25 @@ func obstacles() -> PackedVector3Array:
 func _contract() -> Node:
 	if _contract_cache != null and is_instance_valid(_contract_cache):
 		return _contract_cache
-	var tree := get_tree()
-	if tree != null:
-		_contract_cache = tree.root.get_node_or_null("Game")
+	# ## `get_tree()` QUI E' UN **ERRORE**, NON UN `null`
+	#
+	# `tests/test_arena.gd::_forma_del_disegno()` costruisce un
+	# `MultiMeshInstance3D` con `set_script()` e non lo mette nell'albero, per non
+	# sporcare la scena. Su un nodo **fuori dall'albero** `get_tree()` non restituisce
+	# `null`: chiama `get_data()` su un `SceneTree` che non c'e' e il motore stampa
+	# `ERROR: Parameter "data.tree" is null` **dodici volte** in una sola sezione.
+	#
+	# Il sintomo peggiore e' che l'errore **non interrompe**: `get_tree()` restituisce
+	# comunque `null`, quindi il fallback scattava e il numero tornava lo stesso che
+	# con la strada buona. Quindi la riga si poteva anche non aggiungere e nessuna
+	# porta sarebbe caduta — e il log si riempiva di rumore che nessuno poteva
+	# attribuire, perche' la sezione che lo produceva era **verde**.
+	#
+	# `Engine.get_main_loop()` funziona anche fuori dall'albero, e su un nodo
+	# nell'albero restituisce esattamente lo stesso `SceneTree`. Vedi la stessa scelta
+	# in `arena_ramp.gd::ramp_angle()`, che per lo stesso motivo non puo' usare
+	# `Game` come identificatore.
+	var loop := Engine.get_main_loop() as SceneTree
+	if loop != null and loop.root != null:
+		_contract_cache = loop.root.get_node_or_null("Game")
 	return _contract_cache

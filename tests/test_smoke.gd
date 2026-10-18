@@ -82,21 +82,47 @@ func _autoload_is_registered(h) -> void:
 	if not h.check(game != null, "l'autoload Game non e' stato istanziato: i test delle altre foglie non possono usarlo"):
 		return
 	h.eq(game.get_script().resource_path, CONTRACTS_PATH, "Game deve essere src/core/contracts.gd")
-	## Il 60.0 qui e' un PERNO e resta scritto a mano (piano §1.12-bis, m9).
+	## Il 35.0 qui e' un PERNO e resta scritto a mano (piano §1.12-bis, m9).
 	## Non leggerlo dal contratto ne' da arena.gd: letto dalla fonte non puo'
 	## piu' fallire, e un test che non puo' fallire non e' un test (§11.11).
 	## Il criterio diverso — "le copie del raggio non divergono" — sta in
 	## tests/test_arena.gd, perche' e' di -arena e puo' solo confrontarle fra loro.
 	##
 	## Questa riga e' una COPIA, non la sorgente. Il proprietario del numero e'
-	## il vertice, su src/core/contracts.gd; portato da 46.0 a 60.0 su misura
-	## (docs/piramide/probe_survive.gd, piano sez. 1.14-quinque: il caso peggiore
-	## di uno schivatore passa da 55.33 s a 146.72 s, fattore 2.65; a 75 m
-	## sarebbe 156.33 s, fattore 1.07, e il ginocchio e' a 60 m). Chi cambia la
-	## sorgente cambia anche qui nello stesso colpo: una copia lasciata sul
-	## vecchio valore non diventa un rosso in piu', diventa una prova che dice
-	## PASS mentre conferma un numero morto.
-	h.near(game.arena_radius, 60.0, 0.0001, "arena_radius di default")
+	## il vertice, su src/core/contracts.gd, che a sua volta e' la copia
+	## dichiarata della fonte unica `src/render/arena.gd:ARENA_RADIUS`.
+	##
+	## **Il numero e' sceso due volte, e solo il secondo motivo e' ancora vivo.**
+	## 46.0 -> 60.0 su misura (docs/piramide/probe_survive.gd, piano sez.
+	## 1.14-quinque: il caso peggiore di uno schivatore passa da 55.33 s a
+	## 146.72 s, fattore 2.65; a 75 m sarebbe 156.33 s, fattore 1.07, e il
+	## ginocchio di quei giorni era a 60 m). Quel 60.0 **non e' piu' il valore di
+	## oggi**: e' il numero che la torre di quattro piani ha fatto scendere, e
+	## la misura della schivata non c'entra — resta aperta sul lavoro della rampa
+	## delle onde (src/core/contracts.gd:126-129).
+	##
+	## **R = 60 m -> R = 35 m: perche'.** Il vincolo non e' il campo di visione,
+	## e' il **PASSAGGIO fra gli anelli di ostacoli**, che e' **rasterizzato** e
+	## quindi non perdona. Ogni disco viene gonfiato di `RADIUS[BOSS] + SKIN`
+	## prima di finire nella griglia, e fra due anelli l'inflazione si paga
+	## **due volte**, una per lato; resta poi `Flow.CELL` da riservare:
+	##
+	##     0,26 R  >  2 x (0,065 R + RADIUS[BOSS] 1,90 + SKIN 0,35)   [R in m]
+	##
+	## Il `0,26` e' il salto fra anelli che si aveva allora (`0,59 - 0,33`) e
+	## dice perche' i due anelli di oggi sono stati spostati: a `R = 35` quella
+	## disuguaglianza tiene per **0,05 m**, e a `R = 60` aveva margine larghissimo.
+	## Con `RING_RADII = [0,36, 0,78]` e `RING_COUNTS = [6, 13]` il salto e' di
+	## `0,42 R` e il varco fra anelli vale **5,65 m**; sotto questo numero i due
+	## anelli si toccano e la rastrelliera diventa un muro. La soglia e la misura
+	## sono di -orda e stanno alla fonte: `src/sim/obstacles.gd:142-195` (la
+	## tabella dei tre layout) e `src/sim/flow_field.gd:31-42` (le quattro
+	## righe del criterio). Qui il perno ripete il **numero**, non la prova.
+	##
+	## Chi cambia la sorgente cambia anche qui nello stesso colpo: una copia
+	## lasciata sul vecchio valore non diventa un rosso in piu', diventa una
+	## prova che dice PASS mentre conferma un numero morto.
+	h.near(game.arena_radius, 35.0, 0.0001, "arena_radius di default")
 	h.check(game.player == null, "player deve partire da null: nessuna foglia e' ancora registrata")
 	h.check(game.horde == null, "horde deve partire da null: nessuna foglia e' ancora registrata")
 
@@ -111,11 +137,12 @@ func _autoload_is_registered(h) -> void:
 ## false non è un uccisione: sono valori che non possono creare un falso bersaglio.
 func _stubs_are_neutral(h) -> void:
 	var probe = CONTRACTS.new()
-	## Stessa copia del perno sopra, portata da 46.0 a 60.0: e' il default
-	## dichiarato nella classe, non un valore che questa sezione tocchi. Due
-	## copie nello stesso file vanno aggiornate insieme, o il test si mette a
-	## contraddire da solo.
-	h.near(probe.arena_radius, 60.0, 0.0001, "arena_radius di default su un'istanza nuova")
+	## Stessa copia del perno sopra, portata con lui da 60.0 a 35.0 quando e'
+	## sceso il default (la ragione della discesa e' al perno sopra, non qui):
+	## e' il default dichiarato nella classe, non un valore che questa sezione
+	## tocchi. Due copie nello stesso file vanno aggiornate insieme, o il test
+	## si mette a contraddire da solo.
+	h.near(probe.arena_radius, 35.0, 0.0001, "arena_radius di default su un'istanza nuova")
 
 	var nearest := probe.nearest_enemy(Vector3(5.0, 0.0, 5.0), 10.0)
 	h.eq(nearest, -1, "nearest_enemy non registrato deve dare -1 (nessun nemico), non crashare")

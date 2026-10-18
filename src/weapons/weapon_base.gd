@@ -18,6 +18,11 @@ extends Node3D
 ## `preload`. Del giocatore non sa nemmeno il tipo.
 
 const PoolScript := preload("res://src/weapons/projectile_pool.gd")
+## Le tabelle delle specie, **lette**: `SPEED` e' la tabella delle velocita' dei
+## cinque nemici e il suo massimo e' il `|v|` che la legge sotto usa. Leggerla
+## non e' scriverci — il difetto sarebbe una **copia** di un numero che `-orda`
+## puo' cambiare, non il fatto che la tabella stia li'.
+const EnemyScript := preload("res://src/sim/enemy.gd")
 
 ## Il suono dell'impatto. Se il file non c'è nessun rumore e nessun errore:
 ## un test non deve fallire perché manca un asset.
@@ -29,10 +34,64 @@ const SFX_IMPACT := "res://assets/sfx/bonk.wav"
 const FIRE_INTERVAL := 0.35
 ## Danno per proiettile.
 const DAMAGE := 10.0
-## Velocità del proiettile, in m/s. A 60 Hz sono 0.43 m per frame: il test di
-## contatto è sul segmento del frame, altrimenti il proiettile "salta" i nemici.
-const PROJECTILE_SPEED := 26.0
-## Vita del proiettile, in secondi: a 26 m/sCopre 36 m, tutta l'arena.
+## ## m18: la velocita' del proiettile **non e' un numero**, e' una legge
+##
+## Il valore di prima era `const PROJECTILE_SPEED := 26.0`, scritto a mano. La
+## legge del vertice (2026-10-18) e':
+##
+## > **durante il volo del proiettile il bersaglio non deve spostarsi piu' di una
+## > finestra di centro.**
+##
+## Il tempo di volo e' `d / v_proiettile` e lo spostamento del bersaglio e'
+## `|v| * d / v_proiettile`, quindi:
+##
+##     |v| * d / v_proiettile  <=  reach      <=>      v_proiettile  >=  |v| * d / reach
+##
+## e la velocita' **minima** che rispetta la legge e' quella che e' uguale al
+## limite. Con i tre numeri **gia' dichiarati** — il `|v|` massimo della tabella
+## delle specie (`6,6 m/s`, il runner), la gittata `ACQUIRE_RADIUS` (`26,0000 m`)
+## e la finestra di centro `pool.reach_minimo()` (`1,6900 m`) — la velocita'
+## richiesta e':
+##
+##     6,6 * 26,0000 / 1,6900  =  **101,538 m/s**
+##
+## cioe' **15,4 volte** il runner, contro le `26,0 m/s` di prima che ne erano
+## `3,9`. I due errori che quei `26,0 m/s` producevano sono entrambi **derivati**
+## da quello: con `26 m/s` il bersaglio medio si sposta `4,6263 * 17,0818 / 26 =
+## 3,0394 m` durante il volo, cioe' **una volta e mezzo la finestra di centro**, e
+## con un tempo di volo cosi' lungo l'anticipo da solo non puo' essere vero.
+##
+## ## Perche' **derivata** e non scritta
+##
+## Perche' i tre numeri da cui dipende sono gia' dichiarati e **nessuno dei tre
+## verra' scritto diversamente per caso**: se `-orda` cambia una velocita', se un
+## potenziamento allarga la gittata o se `-arda` cambia il fattore di corpo, la
+## velocita' richiesta cambia **da sola**. Una velocita' scritta a mano e' un
+## numero che aspetta di divergere dalle tre cose da cui dipende — ed e' esattamente
+## quello che e' successo con i `26,0 m/s`.
+##
+## Quindi qui sotto **non c'e' nessun numero**: il campo parte da
+## `PROIETTILE_NON_DERIVATA` come «non ancora derivata» e la derivazione sta in
+## `_deriva_velocita()`, chiamata da `_ready()` (il posto in cui il pool esiste) e
+## da `reset()` (il posto in cui tutta la regolazione torna alla sua regolazione di
+## partenza, e quindi anche questa). Un potenziamento che moltiplica
+## `projectile_speed` continua a funzionare: la derivazione e' la **regolazione di
+## partenza**, non il valore corrente.
+##
+## ## Il caso peggiore dichiarato, e perche' non e' quello usato
+##
+## Qui si usa il massimo di `Enemy.SPEED` (`6,6 m/s`, il runner). Esiste un
+## numero piu' grande e dichiarato: `Enemy.SPEED_MAX = 18,0 m/s`, che e' il
+## **tetto della velocita' combinata** (inseguimento + spinta + separazione). Se la
+## legge volesse davvero il caso peggiore di un nemico spinto, la velocita'
+## richiesta sarebbe `18,0 * 26,0 / 1,6900 = 276,9 m/s`. Chi legge sappia che il
+## numero qui e' il **massimo delle velocita' dichiarate per specie**, non il tetto
+## della velocita' effettiva.
+const PROIETTILE_NON_DERIVATA := 0.0
+## Vita del proiettile, in secondi: con la velocita' **derivata** copre tutta
+## l'arena e anche piu' (`101,5 m/s * 1,4 s = 142 m`), quindi la vita non e' il
+## limite di nessuna legge — e il numero resta dichiarato perche' i proiettili
+## vivi sono `vite * 60` e il pool ne tiene `100`.
 const PROJECTILE_LIFE := 1.4
 ## Spinta data al nemico colpito, **in m/s**, non un vettore normalizzato.
 ## `Game.damage_enemy` deve sommarla alla velocita' del nemico e non
@@ -116,11 +175,90 @@ const NOME_SFX := "Sfx"
 # --- Stato. Tutto qui è un campo perché sono cose che i potenziamenti cambiano.
 var damage := DAMAGE
 var fire_interval := FIRE_INTERVAL
-var projectile_speed := PROJECTILE_SPEED
+## La velocita' del proiettile, **in m/s, DERIVATA** dalla legge sopra: qui parte
+## da `PROIETTILE_NON_DERIVATA` e `_ready()` la calcola. Vedi il blocco lungo e
+## `_deriva_velocita()`.
+var projectile_speed := PROIETTILE_NON_DERIVATA
 var projectile_life := PROJECTILE_LIFE
 var knockback := KNOCKBACK
 var pierce := PIERCE
 var acquire_radius := ACQUIRE_RADIUS
+## ## m15: l'arma **anticipa** il bersaglio, e questo campo e' l'interruttore
+##
+## La legge e' del vertice (2026-10-18) e non una scelta di gusto: e' aritmetica,
+## e i numeri che la impongono sono gia' scritti in questo file.
+##
+## Il tempo di volo di un colpo, alla gittata dell'arma:
+##
+##     tempo_di_volo = distanza / PROJECTILE_SPEED = 26,0 m / 26,0 m/s = 1,00 s
+##
+## e in quei `1,00 s` il nemico piu' veloce (runner, `6,6 m/s`) si sposta di
+## `6,6 m`, mentre il reach del colpo e' `1,6900 m`: il bersaglio **e' uscito dal
+## reach 3,9 volte prima** che il proiettile arrivi. Percio' un proiettile che
+## guarda dove il nemico **e'** invece che dove **sara'** puo' colpire solo a
+## contatto, e la misura lo conferma: `t = 1,0000` in tutte le candidate
+## campionate, cioe' il punto d'impatto considerato e' **la fine del segmento**,
+## il colpo arriva dove il bersaglio non c'e' piu'.
+##
+## ## La formula, e **la correzione che il controfattuale ha imposto**
+##
+## La prima stesura era `v * d / PROJECTILE_SPEED`, cioe' la velocita' del
+## bersaglio per il **tempo di volo**. Il controfattuale di
+## `tests/test_progression.gd::_tasso_col_controfattuale` l'ha falsificata in
+## cinque esecuzioni su cinque: tasso di centro **0,0477 - 0,0531** con
+## anticipo contro **0,0592 - 0,0725** senza, differenza **negativa in 5 su 5**,
+## `sigma` fino a **3,77**. Il termine sbagliato e' `d / PROJECTILE_SPEED`:
+## quello e' il tempo di **volo**, non il tempo di **intercettazione**, e sono
+## due numeri diversi perche' il bersaglio **insegue e chiude** invece di starsi
+## fermo. Quindi:
+##
+##     tempo_di_intercettazione = distanza / (velocita' del proiettile + |velocita' del bersaglio|)
+##     anticipo = velocita' del bersaglio * tempo_di_intercettazione
+##
+## ## La correzione e' vera, e **non basta**: i numeri che lo dicono
+##
+## Misurati sugli stessi colpi della finestra del controfattuale, dentro
+## `_try_fire()` (sonda poi tolta, numeri dichiarati in `tests/test_progression.gd`):
+##
+##     tempo di volo           `v * d / 26`          ->  **3,2192 m**
+##     tempo di intercettazione `v * d / (26 + |v|)`  ->  **2,6798 m**
+##
+## La correzione toglie **`0,5394 m`** ed e' la differenza giusta. **Ma il
+## predetto non cade dentro il reach**: `2,6798 m` contro `1,6900 m` di finestra
+## di centro, fuori di **`0,9898 m`**, cioe' del **`58,6%`** della finestra. E il
+## controfattuale, riletto con la formula corretta, e' **ancora rosso e ancora
+## negativo**: `0,0476 - 0,0531` contro `0,0634 - 0,0684`, sigma **2,12 - 3,26**
+## in cinque esecuzioni su cinque.
+##
+## Il numero che dice **perche'** e' lo **scarto residuo** stampato dal test: i
+## colpi passano in media a **`6,5 m`** da un centro nemico contro i `1,6900 m`
+## del reach, e solo **`2,9%`** dei campioni passa dentro la finestra. Cioe' lo
+## scarto residuo e' **quattro volte la finestra di centro**, e **non e' un
+## difetto di formula**: dentro quei `0,6104 s` di volo il nemico cambia
+## direzione, e nessuna formula vede la svolta.
+##
+## Nota su un numero che e' stato preso e buttato: `1,4319 m` era la stima
+## dell'anticipo corretto ricavata come `|v|` medio per `d` medio. **La media di
+## un prodotto non e' il prodotto delle medie** e `|v|` e `d` sono anticorrelati
+## (i bersagli lontani sono i piu' lenti, quelli addosso i piu' veloci), quindi
+## quel numero era **derivato e sbagliato** — due volte la differenza dal
+## misurato. E' scritto qui perche' la lezione e' gia' stata pagata una volta.
+##
+## La velocita' del bersaglio **non e' copiata qui**: e' `horde.velocities`,
+## array parallelo a `horde.transforms` e letto dal contratto come gli altri due
+## (vedi `_velocita()`).
+##
+## ## Perche' un campo e non una costante
+##
+## Perche' il **controfattuale** e' una misura, e una misura che non puo'
+## spegnere la cosa che misura non e' una misura: `tests/test_progression.gd`
+## spara a ogni passo alternando questo campo e mette i due bracci a confronto
+## **sullo stesso passo, alla stessa distanza** (vedi `_tasso_col_controfattuale`).
+## Il numero che verifica il rimedio e' `tasso di centro con l'anticipo contro
+## tasso senza`, e quel numero non si sposta: una disuguaglianza fra due
+## comportamenti della stessa arma resta quella che e' anche se una soglia
+## assoluta si abbassa.
+var anticipa := true
 ## Countdown del proiettile successivo. Parte a `0.0`: il primo colpo esce al
 ## primo `step()`.
 var cooldown := 0.0
@@ -160,6 +298,13 @@ func _ready() -> void:
 	pool.name = "Pool"
 	add_child(pool)
 	pool.weapon = self
+	# ## m18: la velocita' si deriva **qui**, e non in `_ready()` per caso
+	#
+	# `_deriva_velocita()` ha bisogno del pool per `reach_minimo()`, e il pool
+	# esiste solo da questo momento. Quindi questo e' l'unico posto dove la
+	# derivazione puo' girare prima del primo colpo, ed e' il posto giusto: dopo
+	# questa riga `projectile_speed` e' un numero per tutte le ragioni.
+	projectile_speed = _deriva_velocita()
 	_sfx = _costruisci_pool()
 	_sfx_scadenza.resize(_sfx.size())
 	# Piano §5.1: i metodi si registrano con `register_impl`, mai con
@@ -194,13 +339,21 @@ func _ready() -> void:
 func reset() -> void:
 	damage = DAMAGE
 	fire_interval = FIRE_INTERVAL
-	projectile_speed = PROJECTILE_SPEED
 	projectile_life = PROJECTILE_LIFE
 	knockback = KNOCKBACK
 	pierce = PIERCE
 	acquire_radius = ACQUIRE_RADIUS
+	anticipa = true
 	cooldown = 0.0
 	shots = 0
+	# ## m18: la velocita' torna alla **derivazione**, non a un numero scritto
+	#
+	# `reset()` e' «la regolazione di partenza», e la regolazione di partenza della
+	# velocita' **e' la legge**: quindi qui si rideriva, e non si rimette un
+	# letterale. Il vantaggio si vede subito: se un potenziamento aveva alzato
+	# `acquire_radius`, qui torna a `ACQUIRE_RADIUS` e la velocita' si ricalcola di
+	# conseguenza — una velocita' scritta a mano sarebbe restata al valore vecchio.
+	projectile_speed = _deriva_velocita()
 	_sfx_gap = 0.0
 	# Gli slot del pool di `bonk` tornano a zero come gli altri numeri della
 	# partita: uno slot occupato da un suono della partita che è finita
@@ -260,6 +413,36 @@ func _morto() -> bool:
 ## Il bersaglio si chiede al contratto con `nearest_enemy(from, radius) -> int`
 ## (piano §5.2: un indice, non un nodo) e l'indice e' lo stesso che
 ## `damage_enemy` accetta.
+##
+## ## m15: il punto che si mira e' **dove il bersaglio sara'**, non dove e'
+##
+## `pool.enemy_position(target)` dice dove il nemico **e' adesso**; il colpo arriva
+## dopo `tempo_di_volo`, e a quel punto quel nemico si e' spostato. Quindi il
+## vettore `to_target` qui sotto e' la posizione **di partenza** del tiro, non la
+## sua direzione: la direzione e' quella di `mira - origin`, e `mira` passa da
+## `_anticipo()`. Senza quel passaggio il colpo e' una retta e il bersaglio una
+## curva: e' il difetto che i numeri del campo `anticipa` descrivono.
+## ## Diagnostica di `_try_fire()`: **tolta dopo che il suo numero e' stato scritto**
+##
+## Un passo che «non spara» ha tre `return` e un solo contatore, `shots`, che conta
+## **soli** i casi in cui il pool ha ceduto lo slot: `shots` fermo non dice quale dei
+## tre abbia fermato, dice che qualcosa ha fermato. Per un'onda sono stati messi sei
+## contatori, incrementati nei quattro punti **senza cambiare alcun ramo**, e letti una
+## volta sola. I numeri, sulla scena vera di `tests/test_gameplay.gd` dopo la finestra
+## di `600` passi:
+##
+##   raggiunta **96** | pool mancante 0 | senza bersaglio 51 | a distanza zero 0
+##   **arrivata alla riga che chiama `Game.spawn_projectile` 45** | risposta `false` **0**
+##
+## `96 = 51 + 45`: gli altri due `return` non sparano mai e il contratto non risponde
+## mai `false`. Quindi su quella scena la catena e' sana, e il numero che chiude un
+## difetto di sparo e' **`player.weapon == null`**: `step()` (riga 542) ha **un solo**
+## `return`, `if delta <= 0.0` — non c'e' guardia su `is_dead()` ne' su `invuln` — e
+## `weapon.step(delta)` e' protetto **solo** da `if weapon != null` (riga 560).
+##
+## I contatori sono **togliati**: un contatore che nessun criterio guarda, dentro un
+## file di gioco, e' un costo che il gioco paga ogni frame. Una sonda si toglie
+## **dopo** che il suo numero e' stato scritto, non prima.
 func _try_fire() -> void:
 	if pool == null:
 		return
@@ -269,16 +452,153 @@ func _try_fire() -> void:
 	if target < 0:
 		return
 	var origin := muzzle_position()
-	var to_target: Vector3 = pool.enemy_position(target) - origin
+	var dove_ora: Vector3 = pool.enemy_position(target)
+	var to_target: Vector3 = dove_ora - origin
 	var dist := to_target.length()
 	if dist <= 0.001:
 		return
+	# Il tempo di intercettazione e' la distanza **di adesso** divisa per la
+	# velocita' di chiusura: vedi `_tempo_intercettazione`.
+	var mira := dove_ora + _anticipo(target, dist)
 	# Si passa per il contratto e non per una chiamata diretta al pool: il
 	# percorso che il gioco usa è lo stesso che il test e le altre foglie
 	# verificano con `Game.spawn_projectile`.
-	if Game.spawn_projectile(origin, to_target / dist, projectile_speed):
+	if Game.spawn_projectile(origin, (mira - origin).normalized(), projectile_speed):
 		shots += 1
 	cooldown = fire_interval
+
+## ## m15: il tempo di **intercettazione**, e la sua formula scritta una volta sola
+##
+##     tempo_di_intercettazione = distanza / (velocita' del proiettile + |velocita' del bersaglio|)
+##
+## Il denominatore e' la **velocita' di chiusura**: il proiettile corre verso il
+## bersaglio e il bersaglio corre verso il proiettile, quindi i due si avvicinano
+## **sommando** e non sottraendo. E' la correzione che il controfattuale ha
+## imposto: col denominatore a `velocita' di chiusura` il predetto scende da
+## **`3,2192 m`** a **`2,6798 m`** misurati sugli stessi colpi (vedi il campo
+## `anticipa`).
+##
+## La distanza e' quella **di adesso**, non quella anticipata: la forma e' chiusa
+## e non un'iterazione, e il numero che dice se basta e' lo **scarto residuo**
+## stampato dal test — cioe' quanto il colpo e' passato lontano da un centro
+## nemico, `6,5 m` contro i `1,6900 m` della finestra di centro. Quello scarto
+## **nessuna formula puo' correggerlo**, perche' dentro quei `0,6104 s` di volo il
+## nemico cambia direzione e non lo dichiara.
+##
+## `anticipa == false` dà `dist / PROJECTILE_SPEED`: e' il **controfattuale**,
+## cioe' il comportamento di prima della legge, ed e' l'unico modo di misurare
+## che il rimedio cambi qualcosa (vedi il campo `anticipa`).
+func _tempo_intercettazione(indice: int, dist: float) -> float:
+	var den := projectile_speed
+	if anticipa:
+		den += _velocita(indice).length()
+	return dist / maxf(den, 0.001)
+
+## L'anticipo: **dove il bersaglio sara'** quando il colpo arriva. Il secondo
+## fattore e' il tempo di intercettazione (vedi sopra); il primo e' quanto il
+## bersaglio si sposta in quel tempo.
+##
+## `anticipa == false` dà `Vector3.ZERO`: e' il controfattuale.
+func _anticipo(indice: int, dist: float) -> Vector3:
+	if not anticipa:
+		return Vector3.ZERO
+	return _velocita(indice) * _tempo_intercettazione(indice, dist)
+
+## La velocita' del nemico `indice`, **letta dal contratto** e non copiata: e'
+## `horde.velocities`, array parallelo a `horde.transforms`, cioe' lo stesso canale
+## che `_try_fire` legge gia' per la posizione e che `projectile_pool.gd` legge per
+## le specie.
+##
+## ## Il ripiego e' `ZERO`, e perche' questo e' il ripiego che **non mente**
+##
+## Se il contratto non espone `velocities` (un'orda montata senza autoload) il
+## canale non e' arrivato, e `ZERO` significa **«nessun anticipo»**: il
+## comportamento di prima della legge. E' l'unico ripiego che non dichiara un
+## numero che nessuno ha misurato — un ripiego che stimasse «quanto corre un
+## nemico» scriverebbe qui una velocita' inventata, e i numeri che se ne
+## ricavassero sarebbero inventati con lei. Avvisa **una volta sola**.
+func _velocita(indice: int) -> Vector3:
+	var horde: Node = Game.horde
+	if horde == null:
+		_avis_velocita()
+		return Vector3.ZERO
+	var v: Variant = horde.get("velocities")
+	if not (v is PackedVector3Array):
+		_avis_velocita()
+		return Vector3.ZERO
+	var vv: PackedVector3Array = v
+	if indice < 0 or indice >= vv.size():
+		return Vector3.ZERO
+	return vv[indice]
+
+var _warned_no_velocities := false
+
+func _avis_velocita() -> void:
+	if _warned_no_velocities:
+		return
+	_warned_no_velocities = true
+	push_warning("weapon_base: l'orda non espone `velocities`, quindi l'arma **non anticipa** e spara dove il bersaglio e' adesso, non dove sara'. tocca a terminal-gun-orda esporre l'array parallelo a `transforms`.")
+
+## ## m18: la velocita' richiesta dalla legge, e la formula per intero
+##
+##     v_proiettile  =  |v|_massimo  x  gittata  /  finestra_di_centro
+##
+## I tre numeri vengono **letti**, non scritti:
+##
+##   - `|v|_massimo` = massimo di `Enemy.SPEED`, la tabella delle velocita' delle
+##     cinque specie (`6,6 m/s`, il runner). Il caso peggiore dichiarato e' un
+##     altro e non e' questo: `Enemy.SPEED_MAX = 18,0 m/s`, il tetto della
+##     velocita' combinata; con quello la velocita' richiesta sarebbe `276,9 m/s`.
+##   - `gittata` = `acquire_radius`, il **campo** e non la costante, perche' un
+##     potenziamento puo' allargarla e la legge deve accorgersene.
+##   - `finestra_di_centro` = `pool.reach_minimo()`, cioe'
+##     `RADIUS del proiettile + Game.enemy_body_scale * Enemy.RADIUS[runner]`: la
+##     **minima** delle cinque finestre, perche' la legge vale per qualunque
+##     bersaglio e non solo per il piu' grosso.
+##
+## ## Il ripiego, e perche' e' **il massimo dei tre** e non una costante
+##
+## Se un numero non e' leggibile il risultato sarebbe `0,0` — e `0,0` e' una
+## velocita' che non esiste, cioe' un'arma che non spara mai. Quindi il ripiego
+## prende **il massimo dei tre ingressi che sono arrivati**: e' l'unico valore che
+## non dichiara un numero che nessuno ha misurato, e resta comunque una velocita'
+## che il gioco puo' usare.
+func _deriva_velocita() -> float:
+	var v_max := velocita_massima_nemico()
+	var gittata := acquire_radius
+	var finestra := finestra_di_centro()
+	if v_max <= 0.0 or gittata <= 0.0 or finestra <= 0.0:
+		return maxf(v_max, maxf(gittata, finestra))
+	return v_max * gittata / finestra
+
+## Il massimo della tabella delle velocita' delle specie, **letto**. `-1,0` =
+## la tabella non e' leggibile: e' il sentinel del canale, non una velocita'.
+##
+## ## Perche' e' pubblico
+##
+## Perche' e' uno dei **tre numeri della legge** e il test deve poterli leggere
+## senza ricalcolarli da un'altra parte: un numero della legge che il test
+## ricopia e' una copia che invecchia. Stessa ragione di `gittata()`.
+func velocita_massima_nemico() -> float:
+	var tabella: Variant = EnemyScript.SPEED
+	if not (tabella is PackedFloat32Array):
+		return -1.0
+	var sp: PackedFloat32Array = tabella
+	if sp.is_empty():
+		return -1.0
+	var massimo := 0.0
+	for v in sp:
+		massimo = maxf(massimo, float(v))
+	return massimo
+
+## La **finestra di centro**, cioe' il reach del nemico piu' piccolo: la chiede al
+## pool, che e' l'unico che sa la meta' del proiettile e quella del nemico, e che la
+## legge `Game.enemy_body_scale`. `-1,0` = il pool non c'e' ancora. Pubblica per lo
+## stesso motivo di `velocita_massima_nemico()`.
+func finestra_di_centro() -> float:
+	if pool == null or not is_instance_valid(pool):
+		return -1.0
+	return float(pool.call("reach_minimo"))
 
 ## Implementazione di `Game.spawn_projectile` (piano §5.1, forma lunga).
 ## Restituisce `bool` dal §5.2: `true` se il pool ha ceduto uno slot. Non
@@ -292,6 +612,32 @@ func _spawn_projectile(pos: Vector3, dir: Vector3, speed: float) -> bool:
 ## Da dove esce il colpo.
 func muzzle_position() -> Vector3:
 	return global_position + Vector3(0.0, MUZZLE_HEIGHT, 0.0)
+
+## ## m12: la **gittata** come numero pubblico, e perche' `-orda` ne ha bisogno
+##
+## `ACQUIRE_RADIUS` (26,0 m) e' la gittata dell'arma, e **il punto di nascita dei
+## nemici sul piano logico del giocatore deve stare dentro quel raggio**: altrimenti
+## il giocatore spara verso il vuoto e la partita finisce a `14,77 s` invece che a
+## `154 s`. Misurato sulla torre vera: `31,39 - 31,90 m` il nemico piu' vicino sul
+## piano che l'arma interroga, `0` nemici entro `26,00 m`, `3,05 uccisioni/s` a
+## regime, e `45` uccisioni in `886` passi prima che `hp` arrivi a `0`.
+##
+## Il numero **non** era leggibile da `-orda`: questo file usa l'identificatore
+## globale `Game` (riga 168), che esiste solo con `--path .`, quindi
+## `preload("res://src/weapons/weapon_base.gd")` da un test gira **senza progetto** e
+## non compila. Per lo stesso motivo **non** c'e' un accessor `static`: se lo script
+## non si carica, nessuna sua funzione si chiama. L'unica strada che resta e'
+## l'**istanza viva**, ed e' la strada giusta per un'altra ragione: quello che serve
+## a `-orda` e' la gittata **con cui l'arma spara davvero**, cioe' il campo
+## `acquire_radius`, che un potenziamento puo' cambiare — la costante no.
+##
+## ## Perche' il nome non e' `acquire_radius()`
+##
+## Il campo `acquire_radius` (riga 123) occupa gia' quel nome, e in GDScript una
+## funzione e un campo non possono omonimi: il nome che il vertice aveva ipotizzato
+## non compila. Questo e' il nome da usare: **`gittata()`**.
+func gittata() -> float:
+	return acquire_radius
 
 ## Chiamato dal pool su ogni impatto: qui è il momento del "bonk".
 func on_impact(_where: Vector3) -> void:

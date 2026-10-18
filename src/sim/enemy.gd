@@ -242,6 +242,24 @@ static func bite_range_of(kind: int, body_scale: float) -> float:
 static func bite_range_for(radius: float, body_scale: float) -> float:
 	return body_scale * radius + TOUCH_REACH
 
+## La portata di morso **peggiore** fra le specie: il numero con cui una legge di
+## nascita puo' promettere che nessuno nasce addosso al giocatore.
+##
+## ## Perche' serve, e perche' il massimo e non uno medio
+##
+## Una legge di nascita e' **anteriore** alla scelta della specie: il punto e'
+## deciso prima di sapere chi ci nascera'. Quindi l'unico numero che rende la
+## clausola **dimostrabile** su ogni onda e' il peggiore dei casi, non quello
+## dell'onda 1 (`brute`, 3,85 m a `body_scale = 3,4`) e non una media.
+##
+## Con `body_scale = 3,4` il numero e' **6,91 m** (boss), e viene da
+## `RADIUS` e da `TOUCH_REACH` per costruzione: nessun numero scritto qui dentro.
+static func bite_range_max(body_scale: float) -> float:
+	var peggiore := 0.0
+	for r in RADIUS:
+		peggiore = maxf(peggiore, bite_range_for(r, body_scale))
+	return peggiore
+
 ## Danno di un morso di runner, e da dove viene questo numero.
 ##
 ## Il primo tentativo era **2.0** ed era **troppo forte**: misurava 6.40 s da fermo

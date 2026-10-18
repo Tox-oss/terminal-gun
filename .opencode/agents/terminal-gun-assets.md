@@ -1,7 +1,7 @@
 ---
 description: "terminal-gun-assets: modelli low-poly generati con Blender headless e SFX retro sintetizzati con Python stdlib. Produce file riproducibili, non immagini importate a mano."
 mode: subagent
-model: opencode/muse-spark-1.3-contributor-free#high
+model: opencode/beam-free
 color: "#a855f7"
 steps: 55
 hidden: true

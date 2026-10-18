@@ -4804,6 +4804,126 @@ che aveva misurato. Ogni volta che e' successo, la foglia lo ha trovato da sola 
 girare da sola — e tre di queste volte il numero che lo chiudeva era gia' in una riga che non
 guardavo.
 
+#### La scadenza della porta diventa **per file**, e la prova e' una riga (2026-10-18)
+
+L'utente ha chiesto se la cosa fosse **testabile**, e lo e'. Il conflitto fra la dimensione di
+`test_orda.gd` e il tetto di `120 s` si chiude con **una legge**, non con un preferenza:
+
+```
+in un ciclo di campionamento  tempo ~ campioni     e     sigma ~ 1/sqrt(campioni)
+percio'  sigma ~ 1/sqrt(tempo):  raddoppiare sigma costa QUATTRO volte il tempo
+```
+
+E i due numeri di `-orda` **verificano** la legge invece di assumerla:
+
+```
+2400 campioni per cammino   scarto 0,022 = 1,7 sigma   falso allarme ~1,4% per lato
+1200 campioni per cammino   scarto 0,022 = 1,2 sigma   falso allarme ~6%   per lato
+sigma 0,0129 -> 0,0183, rapporto 1,42 = sqrt(2)
+```
+
+**Il rapporto `1,42` e' `sqrt(2)`**: quindi i due tagli compravano **mezzo sigma** a `-8,7 s`.
+E a `1,2 sigma` **il caso debole e' una moneta**: un test che sbaglia sei volte su cento
+**non e' una porta, e' un rumore**. **Non esiste una terza via** fra tempo e risoluzione.
+
+**La decisione, presa dall'utente e dal vertice**:
+
+```
+TEST_TIMEOUT_MS resta 120000 e resta il tetto di TUTTI gli altri file
+BUDGETS := {"test_orda": 140000}    solo dove la derivazione e' scritta accanto
+    115,4 s (misurato)  +  4,7 s (miscela 1200 -> 2400)  +  13,5 s (M10_WINDOW 900 -> 1800)
+  = 133,6 s richiesti  +  6,4 s di margine per una macchina carica  =  140,0 s
+```
+
+E **misurato dopo**: `test_orda.gd` in **`107,266 s`** dei `140 s`, `PASS` con `16 704` asserzioni,
+`12,7 s` di margine. **La scadenza annuncia quella che valeva davvero**: un timeout che dice
+`120 s` quando ne valevano `140` e' un rosso che dice una cosa e ne subisce un'altra.
+
+**Il secondo ripristino non e' opzionale, e il motivo e' scritto nel codice**: a finestra `900`,
+`t_primo` **non puo' superare `899`**, quindi `M10_ARRIVO_MAX = 900` valeva «qualcuno arriva» e
+basta — **una soglia che non puo' fallire non e' una soglia**. I due tetti ora sono
+`M10_WINDOW / 2` e `M10_WINDOW * 2`: **il valore non si e' mosso** (`900` e `3600` come prima,
+nessuna soglia toccata), cambia **da dove viene**, quindi se la finestra si dimezza di nuovo il
+tetto la segue e **non puo' piu' diventare tautologico**. E' la stessa lezione della banda
+`5,52-90,00 s`, detta in un altro modo: **un numero che puo' diventare tautologico senza che
+nessuno se ne accorga e' un numero che aspetta di essere confrontato con qualcosa.**
+
+#### La domanda che due foglie hanno fatto, e la risposta che e' la stessa
+
+`src/core/contracts.gd` teneva **una sola `Callable` per API**: l'ultima registrazione vinceva,
+e se il provider veniva liberato la voce restava punta a un oggetto morto — e **dopo la
+cancellazione non poteva registrarsi nessuno**, quindi il contratto restava uno stub per il
+resto della partita, **in silenzio**. Ora `_impl` tiene un **`Array` di `Callable`** e `_live()`
+restituisce **l'ultima viva**, scartando le morte.
+
+`projectile_pool.acquire()` guardava `weapon == null`, e **un oggetto liberato non e' `null`**:
+il guard passava e la riga dopo leggeva da un oggetto morto. Ora e' `is_instance_valid(weapon)`.
+
+**La domanda giusta e' la stessa nei due posti: «esiste ancora?».** E la lezione e' che **un
+guard che chiede `== null` non chiede se l'oggetto esiste**: chiede se la variabile contiene il
+valore speciale `null`, che e' una delle tre cose diverse da «morto» — le altre due sono
+«liberato» e «non ancora inizializzato».
+
+#### **«Un'onda» è uccidere mentre ci si muove** (utente, 2026-10-18)
+
+La domanda che chiudeva l'ultimo rosso di `test_progression` — **«uccidere restando fermi o uccidere muovendosi?»** — l'ha risolta **l'utente**: **mentre ci si muove**. E la misura che la rendeva necessaria e' tutta di `-gameplay`:
+
+```
+l'orda offre 65 morsi, intervallo minimo 0,1667 s
+il giocatore ne accetta 36, intervallo minimo 0,3167 s
+INVULN_AFTER_HIT = 0,2500 s   morso 2,286 hp   barra 100 hp
+TOUCH_INTERVAL  = 0,150 s     morso 2,286 hp   barra 100 hp
+    100 / 2,286 = 43,7 morsi x 0,150 s = 6,56 s     un giocatore FERMO muore in 6,56 s
+il test guida il giocatore con input = Vector3.ZERO
+PLAYER_SPEED = 13,65 m/s   brute = 2,3 m/s      il giocatore e' 5,9 volte piu' veloce
+```
+
+**Quindi `INVULN_AFTER_HIT = 0,25 s` non e' una costante di bilanciamento: e' il cerotto che tiene in piedi un mondo che il gioco non produce.** Rifiuta il `55%` delle offerte e trasforma la finestra da **anti-doppio-conteggio** in **limitatore di frequenza**. **Era la settima istanza della stessa regola**, e la piu' costosa: un criterio che misura un giocatore fermo in mezzo a venticinque bruti e gli chiede `200` uccisioni in `65,6 s`.
+
+**Le due conseguenze, e sono entrambe legge:**
+
+1. **Il criterio muove il giocatore**, e lo muove come un giocatore: **si allontana dal nemico piu' vicino alla velocita' del giocatore**, cioe' `PLAYER_SPEED`, che e' gia' scritto. Non «lo muove in modo che sopravviva»: **si muove perche' e' quello che il gioco fa quando il giocatore e' accerchiato.**
+2. **`INVULN_AFTER_HIT` non e' piu' una costante libera: e' derivata da `TOUCH_INTERVAL`.** Perche' il suo unico compito e' **non contare due volte lo stesso morso**, e l'intervallo con cui l'orda morde **e' gia' dichiarato**. **Due numeri che devono dire la stessa cosa e sono due costanti non si difendono: divergono** — ed e' esattamente quello che e' successo: `0,25 s` contro `0,150 s`, cioe' il primo **piu' lungo** del secondo, che e' la direzione sbagliata per un antidoppio-conteggio.
+
+**E il principio, che e' il piu' generale di questi giorni:**
+
+> **una costante che compie una funzione se non ce n'e' un'altra sola non deve essere libera.** `INVULN_AFTER_HIT` esiste perche' `TOUCH_INTERVAL` esiste; se le due sono indipendenti, allora ognuna può essere giusta e insieme sbagliate.
+
+#### La forma del ritiro: **girare**, e perche' le altre due sono escluse dall'arena (2026-10-18)
+
+L'utente ha deciso la legge — **«un'onda» e' uccidere mentre ci si muove** — e la legge ha tre forme possibili. **`-gameplay` ne ha misurate due, e la terza si esclude con l'aritmetica dell'arena, non con un parere.**
+
+```
+fuga dal nemico piu' vicino      misurata   0,0030 uccisioni/s,  distanza massima 28,3970 m
+                                                    contro gittata 26,0000 m
+ritiro tangenziale al piu' vicino misurata  0,0112 di move_speed,  52,1 m in 666,67 s
+                                                    cioe' inchiodato
+```
+
+**Le due esclusioni, e sono numeri:**
+
+1. **La fuga esce dalla gittata.** Il giocatore e' `7,0 m/s` e scappa dal nemico piu' vicino: arriva a **`28,3970 m`**, mentre l'arma raggiunge **`26,0000 m`**. **Quindi scappa per uscire dal raggio dell'arma.** Non e' una regola di gioco, e' un difetto di direzione: si scappa dal nemico piu' vicino e si finisce lontani da **tutti**, perche' l'orda e' ammassata.
+2. **Il tangenziale si cancella.** La perpendicolare al nemico piu' vicino, in un'orda di `25` che sta intorno, **punta verso il secondo nemico**: la direzione si ribala a ogni passo e lo spostamento si annulla. **La forma che conserva la distanza giusta conserva anche l'immobilita'.**
+
+**E la terza forma si esclude con l'arena:**
+
+```
+arena_radius 35,0 m,  move_speed 7,0 m/s   =>  attraversare l'arena costa 5,0 s
+il segmento e' 154 s   =>  ritirarsi per il segmento richiederebbe 1.078 m di corsa in un disco da 35 m
+```
+
+**Quindi il ritiro non puo' durare un'onda: l'arena e' piu' piccola del ritiro.** L'unico movimento sostenuto e' **girare**, e il giro e' un numero:
+
+```
+2 * PI * 35,0 m = 219,9 m per giro   a 7,0 m/s   =  31,4 s per giro   =  4,9 giri in 154 s
+```
+
+**La decisione del vertice: si gira.** E la conseguenza va detta, perche' non e' gratis:
+
+> **il giocatore a `7,0 m/s` e' piu' veloce di ogni nemico che lo insegue** — `runner 6,6`, `grunt 4,0`, `brute 2,3`, `boss 1,7`. **Quindi un giocatore che gira non viene mai morso**, e la legge del morso non descrive l'onda: **descrive cosa succede quando l'orda ti chiude addosso perche' ti sei fermato.** Sono due leggi diverse, ed e' giusto che lo siano.
+
+**E i due numeri che ne conseguono, e che vanno dichiarati insieme**: `200` uccisioni restano, perche' **`200` e' una durata travestita** — `200 / 1,30 = 154 s` dentro il segmento da `180 s` — e **la durata non cambia se cambia la forma del movimento**, perche' la durata e' della legge e la forma e' del criterio.
+
 ## 11. Politica delle risorse
 
 `sudo` è attivo su questa macchina (Windows 11, `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Sudo\Enabled = 1`, `sudo 1.0.1`). Questa sezione dichiara **cosa possono fare gli agenti quando servono risorse**, e cosa fanno quando **non** sanno.

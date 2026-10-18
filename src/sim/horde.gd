@@ -135,6 +135,32 @@ const SEPARATION_CHECKS := 6
 const SEPARATION_FORCE := 11.0
 ## Dalla zona dei colpi dello sparo, un nemico non deve arrivare addosso.
 const MIN_SPAWN_GAP := 12.0
+
+## Il buco di nascita della **disposizione iniziale**, in metri dal giocatore.
+##
+## ## Perche' non e' `MIN_SPAWN_GAP`, e perche' non e' un numero qui dentro
+##
+## `MIN_SPAWN_GAP = 12,0` e' lo scarto che lo spawn degli **uccisi** rispetta, e
+## vale per il ritmo di riempimento: nessuno arriva addosso al giocatore perche' il
+## campo e' troppo lento, non perche' la legge glielo vieti. La **disposizione
+## iniziale** e' un'altra domanda, e la sua risposta non puo' essere un numero
+## ereditato da un'altra misura.
+##
+## La domanda e' una sola, ed e' di `-gameplay`: **il giocatore puo' trovarsi dentro
+## il raggio di morso dalla nascita?** Il numero che lo dice e' **la portata di
+## morso peggiore fra le specie**, e viene da `enemy.gd::bite_range_max(body_scale)`
+## — cioe' da `RADIUS` e da `TOUCH_REACH` per costruzione. Il valore di oggi, con
+## `body_scale = 3,4`, e' **6,91 m** (boss). Nessuna copia: se la tabella delle
+## specie o il fattore corpo cambiano, il buco cambia con loro.
+##
+## **Il buco dell'origine resta `Spawner.LAYOUT_INNER = 12,0`** e non si tocca: quello
+## e' geometria dell'arena (dove il nemico non nasce, indipendentemente da chi e' il
+## giocatore), questo e' una clausola **sul giocatore**. Con il giocatore al centro
+## i due coincidono e **nessun numero si muove**: il criterio che accompagna la
+## clausola resta verde perche' la legge e' vera, non perche' il numero sia
+## cambiato.
+func _spawn_gap() -> float:
+	return E.bite_range_max(body_scale)
 ## Popolazione viva **contemporaneamente** dell'onda corrente. **Non e' una
 ## costante**: e' uno specchio di `Run.population_of(run.wave)`, tenuto allineato
 ## da `_sync_population()` negli stessi punti in cui cambia `wave` (vedi il
@@ -244,6 +270,88 @@ var flow_problem: String = ""
 ## Quante volte il campo e' stato ricostruito in questo processo. La telemetria
 ## che rende verificabile «da fermo il campo non costa niente».
 var flow_rebuilds: int = 0
+
+# --- m12: la torre --------------------------------------------------------------
+#
+# ## Cosa cambia e perche' qui dentro, e non in `enemy.gd`
+#
+# La torre e' **quattro piani di raggio `arena_radius`**, ognuno con i suoi ostacoli,
+# il suo campo di percorrenza e la sua griglia dei vicini. Tre cose erano **una** e
+# diventano **una per piano**:
+#
+#     obstacle   ->  la felta degli ostacoli di quel piano
+#     campo      ->  il campo costruito su quella felta
+#     griglia    ->  i vicini di quel piano
+#
+# **La griglia per piano e' la scelta che rende le altre due gratis.** Una griglia
+# sola tiene `Vector2i -> PackedInt32Array`: con quattro piani che si sovrappongono
+# in XZ, la stessa cella contiene nemici di quattro piani diversi e ogni query
+# controllerebbe quattro volte i nemici che non le interessano — e, peggio, il
+## `BUCKET_SLOTS` (32) si consumerebbe con quattro volte la densita' vera, cioe'
+# con il traboccamento che la sezione di `tests/test_arda.gd` asserisce a `false`.
+# Con quattro griglie ogni cella contiene **solo** nemici del suo piano e la
+# densita' per cella resta **quella che e' stata misurata** a `m3`.
+#
+# ## I tre numeri non sono qui
+#
+# `floor_count`, `floor_height` e `floor_of(y)` sono **del contratto**: sono
+# aritmetica pura e nessuna foglia deve rifarla, perche' tre implementazioni
+# concordano finche' non c'e' una torre e cioe' finche' nessuno ci fa caso
+# (`src/core/contracts.gd`). Qui sotto vengono **letti**, non scritti: `_floor_count`
+# e `_floor_height` sono la copia per passo di due campi che l'hanno registrati
+# `-arda` in `_enter_tree()` prima di qualunque `_ready()` (§5.1).
+#
+## Quanti piani ha la torre, letto dal contratto a ogni passo. **1** quando il
+## contratto non c'e' ancora o non dichiara il campo, e 1 e' la risposta **esatta**
+## per il mondo di prima di m12 (un piano solo), non un ripiego silenzioso.
+var _floor_count: int = 1
+## Quanto e' alto un piano, in metri. **0.0** quando la torre non c'e': e' il
+## valore che il contratto dichiara come «non c'e' una torre», e `floor_of()` lo
+## tratta come tale.
+var _floor_height: float = 0.0
+## Il piano logico del giocatore in questo passo: quello che `step()` ha letto da
+## `Game.player_floor()`. E' un **indice**, non un'altezza.
+##
+## ## Perche' un piano "logico" esiste, e quando i due numeri sono diversi
+##
+## `floor_of(y)` e' **aritmetica**: divide l'altezza per `floor_height` e risponde
+## «a che fascia questa quota sta». Il giocatore, invece, sale su una **rampa**, e
+## mentre sale e' fra due piani con la quota a meta' fra i due: `floor_of()` su
+## meta' fascia risponderebbe con sicurezza sbagliata. Per questo il contratto
+## dichiara `player_floor()`, che e' `-gameplay` che risponde — col **latch**, cioe'
+## cambiando piano all'atterraggio e non durante la salita.
+##
+## **I due numeri coincidono sul pavimento e divergono sulla rampa**, ed e' per
+## quello che esistono: se coincidessero sempre, il latch sarebbe inutile e
+## `floor_of()` basterebbe. Divergono **apposta**, e il punto sotto spiega chi dei
+## due deve usare quale.
+var _focus_floor: int = 0
+## `enemy_floors[i]` = il piano del nemico `i`, con lo stesso indice degli altri
+## array paralleli. Vive e muove negli stessi quattro punti (`_resize_arrays`,
+## `_apply_spawn` via `_populate`/`_spawn_one`, `_kill`, e da li' `restart_run` e
+## `reseed`) e `tests/test_orda.gd` asserisce `enemy_floors.size() == count` per la
+## stessa ragione per cui lo fa su `radii`: un array parallelo disallineato e' un
+## nemico che insegue col campo di un altro.
+var enemy_floors: PackedInt32Array = PackedInt32Array()
+## **Un campo di percorrenza per piano.** La forma non cambia: `Flow` e' un
+## `RefCounted`, non un nodo, quindi `node_count` non si muove e l'ordere resta in
+## tre nodi (criterio n. 7 di m10). Con `floor_count == 1` c'e' un elemento solo e
+## il comportamento e' quello di m9/m10 voce per voce.
+var flow_fields: Array = []
+## La felta di ostacoli di ciascun piano, nello stesso ordine di `flow_fields`:
+## sono gli stessi array che `Flow::build` riceve, quindi la domanda «il nemico
+## evita gli ostacoli **del suo** piano?» ha una risposta che non dipende da come
+## e' stata tagliata la fetta.
+var _obs_slices: Array = []
+## La griglia dei vicini e' **una per piano**, e quindi non e' un campo singolo:
+## sta con gli altri campi interni, in fondo al file, accanto a `_grid_extent` che
+## e' il suo numero gemello.
+## Telemetria della separazione dell'ultimo passo: quanti vicini entro
+## `SEPARATION_RADIUS` sono stati trovati in tutto, e quanti nemici hanno
+## **saturato** `SEPARATION_CHECKS`. Sono i due numeri che dicono se il tetto e'
+## diventato il vincolo, e `tests/test_orda.gd` li stampa a ogni lanzo.
+var sep_neighbours_last: int = 0
+var sep_saturated_last: int = 0
 
 # --- Dati per nemico: array paralleli, tutti lunghi `count` --------------------
 
@@ -451,7 +559,7 @@ var kills: int = 0
 ## ## Questo numero e' un FALLBACK DICHIARATO, non una fonte (m9)
 ##
 ## Il numero che vale davvero e' quello del contratto, e la sua fonte e'
-## `src/render/arena.gd:ARENA_RADIUS` (**60.0**), che la registra sul contratto in
+## `src/render/arena.gd:ARENA_RADIUS` (**35.0**), che la registra sul contratto in
 ## `_enter_tree()`; da li' `_contract_radius()` la rilegge a ogni passo, quindi in
 ## partita questa riga **non viene mai usata**. Vive per il caso in cui il
 ## contratto non c'e' ancora (i processi di test lanciati con `--script`, e
@@ -475,14 +583,37 @@ var kills: int = 0
 ##     fattore e' **1,07**, quindi il ginocchio e' a circa 60 m e oltre non si
 ##     compra niente.
 ##
-## Nessuna riga di `src/sim/` e' cambiata per questo passaggio: e' cambiata **la
+## ## m12: **60.0 -> 35.0**, e **la misura e' di questa foglia**
+##
+## Questo passaggio **non** e' una scelta di ritmo ne' una sonda di sopravvivenza: e'
+## la conseguenza di un'aritmetica che chiunque puo' rifare, e che sta tutta in
+## `src/sim/obstacles.gd`.
+##
+##     disco   = RADIUS_FRACTION x R = 0,065 R      (deve superare RADIUS[BOSS] = 1,90 m)
+##     passaggio = 0,13 R                             (deve superare 2 x RADIUS[BOSS] = 3,80 m)
+##     ⟺ R > 1,90 / 0,065 = 29,23 m, e lo stesso limite due volte
+##
+## A **R = 20 m** (la torre del piano, quattro piani di 20 m) il disco vale `1,30 m`
+## e il passaggio `2,60 m`: entrambi **sotto** la sagoma del boss. E la conseguenza
+## non e' estetica, e' il campo: la corona rasterizzata dell'anello interno offre
+## `6,60 m` fra due centri consecutivi e ne servono `2 x (1,30 + 1,90 + 0,35) = 7,10 m`,
+## quindi **la corona e' chiusa**, il campo non ha una sorgente unica e **il centro
+## dell'arena — dove nasce il giocatore — diventa irraggiungibile**.
+##
+## Il **35,0 m** e' il raggio che **recupera il margine senza comprare un raggio
+## tondo**: a 35 m il disco e' `2,275 m` e il passaggio `4,55 m`, cioe' il **19,7%**
+## di margine su entrambi. Il minimo legale sarebbe 30 m, che a `0,26 m` di margine
+## chiuderebbe l'anello alla prima specie un po' piu' grossa: la soglia e' quella
+## che tiene **oggi**, non quella che tiene **domani**.
+##
+## Nessuna costante di `src/sim/` e' cambiata per questo passaggio: e' cambiata **la
 ## geometria su cui la simulazione converge**, che e' esattamente la forma del
 ## 28 -> 46 di m9. Quello che ne deriva e' dichiarato dove viene misurato, cioe'
-## in `tests/test_orda.gd` (la sezione sul raggio): la griglia del campo passa
-## da 55x55 a 69x69 celle, i dischi da 2,99 a 3,90 m di raggio, e il costo per
-## passo e' rimisurato con lo stesso codice a 46 m e a 60 m.
+## in `tests/test_orda.gd` (la sezione sul raggio e la sezione «torre»): la griglia
+## del campo, i dischi e la corda dell'anello interno vengono rimisurate con lo
+## stesso codice ai tre raggi.
 ##
-## Un fallback che dicesse 46.0 mentirebbe proprio nel caso in cui nessuno lo
+## Un fallback che dicesse 46.0 o 60.0 mentirebbe proprio nel caso in cui nessuno lo
 ## guarda, cioe' quando l'arena non si e' ancora registrata: e in quel caso
 ## nessuna delle misure qui sopra sarebbe quella che vale in partita.
 ##
@@ -491,7 +622,7 @@ var kills: int = 0
 ## copia si occupa `tests/test_orda.gd` (legge questa riga dal sorgente e la
 ## confronta col default del contratto); delle altre si occupa
 ## `tests/test_arena.gd`.
-var arena_radius: float = 60.0
+var arena_radius: float = 35.0
 ## Ultimi colpi ricevuti, in un anello di capienza fissa: `hit_count` quanti
 ## sono validi. Serve a sfx/flash senza toccare gli array e senza allocare.
 var hit_count: int = 0
@@ -502,7 +633,7 @@ var grid_unknown_cells: int = 0
 
 # --- La partita ---------------------------------------------------------------
 #
-# Senza tipo dichiarato, come `_grid`: l'oggetto lo crea `_build()`, e in GDScript
+# Senza tipo dichiarato, come `_grids`: gli oggetti li crea `_build()`, e in GDScript
 # `:=` su una variabile senza tipo non compila. Si indica il tipo dove si legge.
 # `run` non e' nullo dopo `_build()`, che e' l'unico posto in cui si costruisce.
 
@@ -533,7 +664,18 @@ var _pesi_senza_mortar: PackedFloat32Array = PackedFloat32Array()
 
 # --- Interno ------------------------------------------------------------------
 
-var _grid = null
+## ## m12: `_grids`, non `_grid`
+##
+## Il campo si chiama `_grids` perche' con la torre ne serve **uno per piano**: una
+## griglia sola metterebbe nella stessa cella i nemici di quattro piani che si
+## sovrappongono in XZ, e ogni query controllerebbe quattro volte i nemici che non
+## le interessano — e il `BUCKET_SLOTS` si consumerebbe con quattro volte la
+## densita' vera, cioe' con il traboccamento che il criterio di m3 asserisce a
+## `false`. Il campo intero (`flow_field`) resta comodo per i lettori di sempre, ma
+## **non e' piu' la strada del ciclo di gioco**: `_grid` non esiste piu' e chi lo
+## cerca deve passare da `_grid_of(f)`, che restituisce `nil` quando la fetta non
+## esiste invece di far crashare il processo su un identificatore sparito.
+var _grids: Array = []
 var _grid_extent: float = 0.0
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 ## Bersaglio dei nemici. Se -gameplay ha registrato `player_position` e' la sua
@@ -556,6 +698,20 @@ var _player_cache: Node = null
 ## E' il tetto di cadenza di `TOUCH_INTERVAL`, ed e' l'unico stato che serve:
 ## nessun cursore, nessun conteggio di morderci per passo (vedi la sezione
 ## "il morso" in testa al file: quel tetto li' e' stato provato e non mordeva).
+##
+## ## m12: **un solo contatore per quattro piani**, e perche' e' giusto
+##
+## Il difetto che questo numero potrebbe avere e' esattamente quello che il tetto
+## per piano aveva: un morso accaduto sul piano 2 azzererebbe il tetto anche per il
+## piano 0, e su quattro piani che si spartiscono una cadenza globale. **Ma non
+## e' un difetto, e la ragione e' nella forma del numero**: il tetto e' un tetto
+## **sulla cadenza con cui il giocatore viene ferito**, e il giocatore sta su un
+## piano solo. Nessun nemico di un altro piano lo raggiunge — `nearest_enemy_index`
+## e la griglia per piano lo garantiscono — quindi il contatore globale e il
+## contatore del suo piano danno lo stesso numero, perche' solo un piano produce
+## morsi alla volta. Se un domani i piani si sovrapponessero in `y` (non e' il caso
+## della torre) questa riga diventerebbe un tetto per piano e andrebbe fatto un
+## array: il numero che lo dichiara e' `count_on_floor() > 1` che riceve richieste.
 var _bite_interval_left: float = 0.0
 
 func _ready() -> void:
@@ -654,8 +810,225 @@ func _load_mortar() -> void:
 func bite_range_of(kind: int) -> float:
 	return E.bite_range_of(kind, body_scale)
 
+## Il tetto di cadenza dei morsi, **pubblicato sul contratto** (m12, 2026-10-18).
+##
+## Non serve a niente dentro questo file: serve a `-gameplay`, che deve poter
+## confrontare la sua finestra di invulnerabilita' con l'intervallo con cui
+## l'orda morde. E il punto della funzione e' che **restituisce la costante letta
+## adesso**, non una copia passata alla registrazione: un valore congelato nel
+## momento del `register_impl` diverrebbe una seconda costante, e cioe' esattamente
+## il difetto che questo canale chiude.
+##
+## Il numero che esce e' `TOUCH_INTERVAL` e nient'altro: se un domani il contratto
+## restituisse qualcosa di diverso dal tetto che `_apply_bites` usa davvero, il
+## canale starebbe dicendo una cosa e la simulazione ne farebbe un'altra.
+func touch_interval() -> float:
+	return TOUCH_INTERVAL
+
 func _physics_process(delta: float) -> void:
 	step(delta)
+
+# --- m12: la torre letta dal contratto ----------------------------------------
+
+## Rilegge i due numeri geometrici della torre dal contratto. Chiamata una volta
+## per passo, **prima** di qualunque altra cosa che dipenda dal piano: il passo
+## che muove i nemici deve sapere su quale piano siamo *in quel passo*, non in
+## quello precedente.
+##
+## **Nessuna copia**: `game.get("floor_count")` e `game.get("floor_height")`
+## leggono i campi che `-arda` ha registrati in `_enter_tree()` (§5.1). Se il
+## contratto non c'e' — l'orda montata da sola sotto `--script`, il caso dei test
+## che misurano le tabelle — restano `1` e `0.0`, che e' il mondo di prima di m12:
+## `floor_of()` restituisce `0` e **quello e' giusto**, non un ripiego.
+func _sync_tower() -> void:
+	var game := _contract()
+	if game == null:
+		_floor_count = 1
+		_floor_height = 0.0
+		return
+	var c = game.get("floor_count")
+	var h = game.get("floor_height")
+	_floor_count = 1 if c == null else maxi(int(c), 1)
+	_floor_height = 0.0 if h == null else maxf(float(h), 0.0)
+
+## Quanti piani ha la torre adesso. Superficie pubblica perche' un test (e un
+## HUD) deve poter dire «quanti piani ci sono» senza leggere un campo privato.
+func floor_count() -> int:
+	return _floor_count
+
+## Quanto e' alto un piano, in metri. `0.0` = la torre non e' montata.
+func floor_height() -> float:
+	return _floor_height
+
+## Il piano a cui appartiene l'altezza `y`. **La risposta la da' il contratto**
+## (`Game.floor_of`), e non questa foglia: l'aritmetica del bordo — «il bordo
+## inferiore e' del piano di sotto» — e' dichiarata in `src/core/contracts.gd`
+## perché tre foglie che la rifanno concordano finche' non c'e' una torre.
+##
+## Senza contratto il mondo e' a un piano solo e la risposta e' `0`: e' la risposta
+## **esatta** per quel mondo, non una scelta.
+func floor_of(y: float) -> int:
+	var game := _contract()
+	if game == null:
+		return 0
+	return int(game.floor_of(y))
+
+## La quota del pavimento del piano `f`, cioe' l'inverso di `floor_of()`.
+##
+## **Questa e' l'unica aritmetica sulla torre che questa foglia rifa**, e il
+## contratto non la espone: `floor_of(y)` dice «a che piano appartiene `y`», non
+## «a che quota sta il piano `f`». Il numero viene da `floor_height`, che e' letto
+## dal contratto e non e' una copia, e `tests/test_orda.gd` asserisce
+## `floor_of(floor_base(f)) == f` su tutti i piani e sui due bordi: quindi questa
+## funzione non puo' divergere dal contratto senza che la porta vada rossa.
+## Se un giorno il vertice volesse chiudere anche questa, il posto naturale e'
+## `floor_base(f)` accanto a `floor_of(y)` nel contratto, e questa riga diventerebbe
+## una lettura come le altre.
+func floor_base(f: int) -> float:
+	if _floor_height <= 0.0:
+		return 0.0
+	return float(maxi(f, 0)) * _floor_height
+
+## Il piano **del giocatore**. `player_floor()` e' l'API che registra `-gameplay`
+## ed e' **l'unica** strada: il contratto la dichiara perche' durante una rampa il
+## giocatore e' fra due piani e `floor_of()` su mezzo piano risponderebbe con
+## sicurezza sbagliata. Il ripiego su `floor_of(player_position().y)` che c'era qui
+## e' stato tolto perche' **mascherava un canale mancante**: finche' `player_floor`
+## non era in `const API`, `register_impl` rifiutava la registrazione e la torre
+## nasceva senza sapere dov'e' il giocatore durante una rampa.
+##
+## **Il `-1` resta pero' un caso da urlare e non un ripiego.** Il contratto dichiara
+## `-1` come «non lo so» e `0` come piano valido: se `-gameplay` non ha ancora
+## registrato l'API (l'orda montata da sola sotto `--script`, il caso dei test che
+## non hanno un giocatore), questa funzione **dice 0 e lo dichiara** con
+## `player_floor_source`, e non finge di aver letto qualcosa. Un `-1` qui finirebbe
+## dentro `flow_fields[-1]` e dentro `enemy_floors`, cioe' un crash; il `-1` del
+## contratto va trasformato in un piano, non lasciato passare.
+var player_floor_source: String = "player_position"
+
+func player_floor_index() -> int:
+	var alto := maxi(_floor_count - 1, 0)
+	var game := _contract()
+	if game != null and game.has_impl("player_floor"):
+		var f: int = int(game.player_floor())
+		if f >= 0:
+			player_floor_source = "player_floor"
+			return clampi(f, 0, alto)
+	# ## m12: il canale c'e' ma risponde «non lo so» -> nessun giocatore in scena
+	#
+	# Non e' un errore: e' l'orda montata senza `-gameplay`, cioe' i test che
+	# misurano le tabelle delle specie. Il piano e' 0, che e' la risposta esatta per
+	# un mondo senza giocatore, e `player_floor_source` dice **perche'** la risposta
+	# e' quella: due numeri uguali che si dichiarano diversi sono la differenza fra
+	# «la torre funziona» e «la torre funziona e qualcuno lo ha misurato».
+	player_floor_source = "player_position"
+	return clampi(floor_of(_player_focus().y), 0, alto)
+
+## ## m12: su che piano nasce **adesso**
+##
+## ## Il difetto che questa funzione chiude, in una riga di numeri
+##
+## Il tetto per piano era confrontato col **totale**: `_top_up` smetteva di mettere
+## nemici quando `count_on_floor(_focus_floor) >= population_per_floor()`, cioe'
+## quando il campo **totale** aveva toccato `50` su quattro piani. Risultato misurato
+## da `test_arena`: «la quota dell'onda corrente e' 200 ma l'orda si e' fermata a 50
+## vivi». Non era `POP_MAX` sceso, erano **tre piani su quattro che restavano vuoti**,
+## e nessun errore: solo un numero che non arrivava.
+##
+## ## La regola, e perche' il piano del giocatore viene **prima**
+##
+## Il tetto **totale** e' giusto (`population`, e a regime `200`), e quello per piano e'
+## giusto anche lui: sono due grandezze diverse e confrontarle e' stato l'errore.
+## Ogni piano tiene `population_per_floor()` e il totale si raggiunge **sommando**.
+##
+## L'ordine di riempimento e' una scelta dichiarata, e non e' decorativo: **prima il
+## piano del giocatore**, poi gli altri in ordine crescente. Il motivo e' che il piano
+## su cui il giocatore sta deve essere **pieno prima** che qualcuno si riempia da
+## un'altra parte: il piano del giocatore e' l'unico dal quale si puo' essere morso,
+## quindi e' l'unico la cui scarsita si vede. Gli altri si riempiono quando il primo
+## e' al suo tetto, e cioe' il giocatore sale e trova gia' chi lo aspetta.
+##
+## **Una sola regola per due cammini**: `_populate` (primo frame, restart, reseed) e
+## `_top_up` (riempimento durante la partita) chiamano **questa** funzione. Due
+## versioni della stessa scelta sarebbero due numeri che possono divergere, ed e'
+## esattamente quello che e' successo: `_populate(200)` riempiva quattro piani e
+## `_top_up` si fermava a cinquanta.
+func _piano_di_nascita() -> int:
+	var alto := maxi(_floor_count - 1, 0)
+	var quota := population_per_floor()
+	if count_on_floor(_focus_floor) < quota:
+		return clampi(_focus_floor, 0, alto)
+	for k in range(maxi(_floor_count, 1)):
+		var f := _ordine_piano(k)
+		if count_on_floor(f) < quota:
+			return clampi(f, 0, alto)
+	return clampi(_focus_floor, 0, alto)
+
+## Quanti nemici vivi stanno sul piano `f`.
+func count_on_floor(f: int) -> int:
+	var n := 0
+	for i in count:
+		if enemy_floors[i] == f:
+			n += 1
+	return n
+
+## Quanti nemici stanno al massimo **su un piano**, cioe' `MAX_ENEMIES` diviso
+## per il numero di piani: `200 / 4 = 50` con la torre, `200 / 1 = 200` senza.
+##
+## **Il tetto di popolazione resta un totale.** Il piano (piano §«Quattro piani») scrive
+## `50 x 4 = 200`, e la divisione e' fatta qui dal numero che c'e' gia' e non scritta
+## come `50`: se un domani i piani fossero sei, il numero diverrebbe 33 senza che
+## nessuno lo riscriva. Il valore di `POP_MAX` che c'e' in `run.gd` e quello di
+## `MAX_ENEMIES` qui restano duecento, e questa funzione e' il modo in cui il
+## duecento diventa un cinquanta per piano senza che nessuno copia il cinquanta.
+##
+## **E i due tetti non si confrontano fra loro**: quello **totale** e' `population`,
+## quello **per piano** e' questa funzione. Sono grandezze diverse e confrontarle e'
+## stato un difetto vero (l'orda ferma a 50 con una quota di 200): vedi
+## `_piano_di_nascita()`.
+func population_per_floor() -> int:
+	return maxi(1, MAX_ENEMIES / maxi(_floor_count, 1))
+
+## La **felta di ostacoli del piano `f`**: la stessa che ha costruito il suo campo.
+## Con la torre assente (un piano solo) e' l'intero array, cioe' il comportamento
+## di m9/m10.
+func obstacles_of(f: int) -> PackedVector3Array:
+	if _obs_slices.is_empty():
+		return obstacles
+	if f < 0 or f >= _obs_slices.size():
+		return obstacles
+	return _obs_slices[f]
+
+## Il **campo di percorrenza del piano `f`**, cioe' quello che guida i nemici che
+## stanno li'. Con la torre assente e' l'unico campo, come prima.
+func flow_field_of(f: int) -> Variant:
+	if flow_fields.is_empty():
+		return flow_field
+	if f < 0 or f >= flow_fields.size():
+		return flow_field
+	return flow_fields[f]
+
+## Il campo che un nemico con indice `i` sta seguendo **adesso**: quello del suo
+## piano. E' la funzione che rende la torre vera e che il criterio con i denti
+## chiude: toglierla e rimettere `flow_field` (un campo solo per tutta la torre)
+## fa si' che i nemici del piano 2 aggirino i dischi del piano 0.
+func _flow_of(i: int) -> Variant:
+	if _floor_count <= 1 or flow_fields.is_empty():
+		return flow_field
+	return flow_field_of(enemy_floors[i])
+
+## Il piano `k`-esimo fra quelli **diversi** da quello del giocatore, in ordine
+## crescente. Serve a `_populate`: il riempimento mette il giocatore sul suo
+## piano **per primo** e poi gli altri, e quindi l'orda parte dove si vede.
+func _ordine_piano(k: int) -> int:
+	var n := 0
+	for f in maxi(_floor_count, 1):
+		if f == _focus_floor:
+			continue
+		if n == k:
+			return f
+		n += 1
+	return 0
 
 # --- Costruzione --------------------------------------------------------------
 
@@ -664,6 +1037,13 @@ func _build() -> void:
 		return
 	_built = true
 	arena_radius = _contract_radius()
+	# ## m12: la torre **prima** degli ostacoli
+	#
+	# `_load_obstacles()` taglia `Game.obstacles` in fette di `floor_count` pezzi e
+	# costruisce un campo per fetta: senza sapere quanti piani ci sono prima,
+	# taglierebbe l'array a pezzi sbagliati e i tre piani sbagliati avrebbero un
+	# campo senza ostacoli — cioe' nemici che attraversano i muri senza accorgersene.
+	_sync_tower()
 	# Gli ostacoli prima di **qualsiasi** spawn: la disposizione iniziale deve
 	# gia' sapere dove sono i muri, altrimenti il primo nemico della partita
 	# nasce dentro uno e il criterio n. 2 ha gia' un nemico da segnalare al
@@ -683,7 +1063,7 @@ func _build() -> void:
 	# `_sync_grid()` fa `setup()` solo quando l'estensione cambia davvero:
 	# `setup()` ricrea tutti i secchielli, quindi rifarlo ogni frame sarebbe
 	# esattamente l'allocazione nel ciclo di gioco che questo file evita.
-	_grid = Grid.new()
+	# ## m12: una griglia **per piano**, e `_grids` le crea tutte qui dentro
 	_sync_grid()
 	_sep_buf.resize(SEPARATION_CHECKS)
 	hit_positions.resize(HITS_KEPT)
@@ -750,6 +1130,8 @@ func _build() -> void:
 func _load_obstacles() -> void:
 	obstacles = PackedVector3Array()
 	flow_field = null
+	flow_fields = []
+	_obs_slices = []
 	flow_problem = ""
 	flow_rebuilds = 0
 	var game := _contract()
@@ -782,12 +1164,56 @@ func _load_obstacles() -> void:
 			return
 	# Copia: l'array del contratto e' di un'altra foglia e non e' nostro.
 	obstacles = letti.duplicate()
-	flow_field = Flow.new()
+	# ## m12: **un campo per piano**, e la felta degli ostacoli che l'ha costruito
+	#
+	# L'array del contratto e' **un array piatto**: con la torre contiene
+	# `floor_count` fette uguali e consecutive, che `-arda` ha ottenuto
+	# concatenando quattro `OBST.layout(raggio, piano)`. Il taglio e' fatto **una
+	# volta sola**, da `Obst.slice_floor`, che e' la stessa funzione che il produttore
+	# dei numeri espone: se i due foglie tagliassero in punti diversi, il nemico
+	# eviterebbe i dischi di un piano mentre vede quelli di un altro, cioe' la
+	# copia che mente, spostata di un livello.
+	#
+	# `floor_count == 1` (il mondo di prima di m12) prende il ramo vecchio: una
+	# fetta sola, l'array intero, e `flow_field` e' quel campo. **Il comportamento e'
+	# identico voce per voce**, perche' `slice_floor` con `floors <= 1` duplica
+	# l'intero array e la lista ne contiene un elemento solo.
+	var piani := maxi(_floor_count, 1)
+	if piani > 1 and obstacles.size() % piani != 0:
+		flow_problem = "Game.obstacles ha %d dischi, che non si divide in %d piani: " \
+			+ "la felta per piano non e' intera e non si puo' sapere quale ostacolo " \
+			+ "appartiene a quale piano" % [obstacles.size(), piani]
+		_avvisa_ostacoli(flow_problem)
+		return
 	# `E.RADIUS[BOSS]` e non un numero scritto qui: il raggio del nemico piu'
 	# grosso sta nella tabella delle specie e non ha una seconda copia (criterio
 	# n. 6 di m7).
-	flow_field.build(obstacles, arena_radius, E.radius_of(E.BOSS))
-	flow_field.rebuild(_player_focus())
+	var corpo := E.radius_of(E.BOSS)
+	for f in piani:
+		var fetta := Obst.slice_floor(obstacles, f, piani)
+		if fetta.is_empty():
+			# ## Lo stesso punto 5 del contratto di m10, e con piu' peso
+			#
+			# Un piano senza ostacoli non e' «un piano senza muri»: e' **quattro
+			# chiamate a `layout()` che hanno restituito lo stesso identico layout e
+			# poi un taglio sbagliato**, cioe' la piramide non montata. Il campo di
+			# quel piano direbbe ai nemici di andare dritti, e nessuno se ne accorgerebbe.
+			flow_problem = "il piano %d non ha ostacoli di %d: un insieme vuoto e' un " \
+				+ "errore, non un mondo senza muri (contratto di m10, punto 5)" % [f, obstacles.size()]
+			_avvisa_ostacoli(flow_problem)
+			flow_fields = []
+			_obs_slices = []
+			return
+		_obs_slices.append(fetta)
+		var campo := Flow.new()
+		campo.build(fetta, arena_radius, corpo)
+		flow_fields.append(campo)
+	# `flow_field` resta il campo **del piano del giocatore**: chi legge quel campo
+	# pubblico (le sezioni di m10, `-arena`) continua a vedere un campo costruito,
+	# e in un mondo a un piano solo e' esattamente quello di prima.
+	flow_field = flow_field_of(_focus_floor)
+	if flow_field != null:
+		flow_field.rebuild(_player_focus())
 
 ## Il margine con cui un punto di nascita viene tenuto fuori dagli ostacoli: il
 ## **corpo del nemico piu' grosso**, non quello della specie che capita di
@@ -818,7 +1244,15 @@ func inside_obstacles() -> int:
 		return 0
 	var dentro := 0
 	for i in count:
-		if flow_field != null and flow_field.contains(transforms[i], radii[i]):
+		# ## m12: il campo da cui chiedere e' quello **del suo piano**
+		#
+		# Con la torre, `flow_field` e' il campo del piano del giocatore: chiedere
+		# a lui se un nemico del piano 2 e' dentro un disco sarebbe chiedere dei
+		# **dischi del piano sbagliato**, e la risposta sarebbe giusta per il piano
+		# sbagliato. Il numero di questo criterio deve parlare dei dischi che quel
+		# nemico puo' incontrare davvero.
+		var campo = _flow_of(i)
+		if campo != null and campo.contains(transforms[i], radii[i]):
 			dentro += 1
 	return dentro
 
@@ -826,11 +1260,29 @@ func inside_obstacles() -> int:
 ## volta per passo, prima di muovere chiunque: da fermo non costa niente, che e'
 ## il caso in cui il gioco si vorrebbe vincere stando fermi.
 func _sync_flow(target: Vector3) -> void:
-	if flow_field == null:
+	# ## m12: si ricostruisce **il campo del piano del giocatore**, e non «un campo»
+	#
+	# Un campo solo per tutta la torre avrebbe una sorgente sola e un gradiente solo:
+	# i nemici di un piano che non ospita il giocatore inseguirebbero una rampa che
+	# non esiste, cioe' passerebbero **attraverso il pavimento** seguendo la
+	# discesa del costo verso il punto in cui il giocatore sta sull'altro piano. Il
+	# campo e' quindi **uno per piano**, costruito sulla felta di ostacoli di quel
+	# piano, e si ricostruisce quando il bersaglio di **quel** campo si e' mosso.
+	#
+	# Gli altri piani non vengono ricostruiti: nessun nemico li insegue (il
+	# bersaglio e' il giocatore, che sta su un piano solo) e il campo di un piano
+	# senza bersaglio non ha niente da dire. Finche' il giocatore sale, il piano
+	# nuovo viene costruito al primo passo — `needs_rebuild()` risponde vero finche'
+	# quel campo non e' mai stato costruito — e quindi un cambio di piano non costa
+	# un passo di ritardo.
+	var f := clampi(_focus_floor, 0, maxi(flow_fields.size() - 1, 0))
+	if f < 0 or f >= flow_fields.size():
 		return
-	if flow_field.needs_rebuild(target):
-		flow_field.rebuild(target)
-		flow_rebuilds = int(flow_field.rebuilds)
+	var campo = flow_fields[f]
+	flow_field = campo
+	if campo.needs_rebuild(target):
+		campo.rebuild(target)
+		flow_rebuilds = int(campo.rebuilds)
 
 func _register() -> void:
 	if _registered:
@@ -847,6 +1299,23 @@ func _register() -> void:
 	game.register_impl("nearest_enemy", self.nearest_enemy_index)
 	game.register_impl("damage_enemy", self.damage_enemy)
 	game.register_impl("random_spawn_point", self.random_spawn_point)
+	# ## m12, 2026-10-18: il tetto di cadesta dei morsi esce dal contratto
+	#
+	# `-gameplay` aveva `INVULN_AFTER_HIT = 0,25 s` come costante **propria**, e le
+	# due non si potevano confrontare perche' un `const` GDScript non si legge da
+	# un'istanza. La misura: 65 offerte dell'orda a 0,1667 s contro 36 accettate
+	# dal giocatore a 0,3167 s — la finestra e' **piu' lunga** dell'intervallo che
+	# dovrebbe proteggere, cioe' un antidoppio-conteggio piu' largo del morso.
+	#
+	# Il difetto non e' il numero: e' che i due sono **indipendenti** e nessuno dei
+	# due puo' dire all'altro che esiste. Percio' qui si registra **il numero con cui
+	# l'orda morde davvero** (`TOUCH_INTERVAL`), non una sua copia: l'invulnerabilita'
+	# del giocatore deriva da qui invece di avere un tetto suo.
+	#
+	# **Una `Callable`, non un valore**: il contratto tiene un `Array` di `Callable`
+	# e restituisce l'ultima viva, quindi quello che si registra e' il canale, non
+	# una fotografia del numero di adesso.
+	game.register_impl("touch_interval", self.touch_interval)
 
 func _resize_arrays(n: int) -> void:
 	transforms.resize(n)
@@ -861,6 +1330,10 @@ func _resize_arrays(n: int) -> void:
 	bites.resize(n)
 	mortar_timers.resize(n)
 	mortar_fire.resize(n)
+	# ## m12: `enemy_floors` cresce e si svuota **negli stessi quattro punti** di
+	# tutti gli altri array paralleli, e per la stessa ragione: un array parallelo
+	# con una strada sua e' il modo in cui si stacca dagli altri.
+	enemy_floors.resize(n)
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -869,13 +1342,54 @@ func _resize_arrays(n: int) -> void:
 ## che sia una sola: due versioni della stessa disposizione sarebbero due numeri
 ## che possono divergere, e il primo frame e il restart devono essere la stessa
 ## cosa vista due volte.
+##
+## ## m12: il riempimento e' **per piano**, e comincia da quello del giocatore
+##
+## Il tetto di popolazione resta un **totale** (`MAX_ENEMIES = 200`, lo stesso
+## numero di `Run.POP_MAX`) e diventa `50` per piano perche' `200 / 4 = 50`: qui la
+## divisione e' **fatta dal numero che c'e'**, non scritta come `50`. Se un domani i
+## piani fossero sei, il numero diverrebbe 33 senza che nessuno lo riscriva — ed e'
+## per questo che la cifra `50` non compare in nessuna riga di `src/sim/`.
+##
+## **L'ordine e' dichiarato perche' e' una scelta**: prima il piano del giocatore,
+## poi gli altri in ordine crescente. Il motivo e' che la torre deve essere
+## **abitabile dal primo passo**: se il riempimento partisse dall'ultimo piano, il
+## giocatore comincerebbe con due nemici e una scena vuota, e i piani che non
+## ospitano nessuno avrebbero gia' la propria folla. Quindi il resto del totale va
+## sugli altri piani — che e' anche la risposta alla domanda «dove sta l'orda quando
+## il giocatore sale?»: **sta li'**, e si riempie di nuovo quando lui torna.
+##
+## Il resto (`%`) resta sul piano del giocatore, cosi' la somma e' esatta su
+## qualunque `n`: `25` su quattro piani sono `7 + 6 + 6 + 6` e il giocatore vede
+## subito i suoi sette. Il criterio di `tests/test_orda.gd` asserisce i due numeri
+## insieme — `count == 200` **e** `50` su ciascun piano — perche' ciascuno dei due,
+## da solo, passa anche con l'altro rotto.
 func _populate(n: int) -> void:
 	var target := clampi(n, 0, MAX_ENEMIES)
 	count = target
 	_resize_arrays(count)
-	for i in count:
-		_apply_spawn(i, Spawner.layout_point(arena_radius, i, count, _rng,
-			obstacles, _spawn_skin()), _pick_kind())
+	var piani := maxi(_floor_count, 1)
+	var per := target / piani
+	var resto := target - per * piani
+	var i := 0
+	for k in piani:
+		var f: int = _focus_floor if k == 0 else _ordine_piano(k - 1)
+		var q := per
+		if f == _focus_floor:
+			q += resto
+		for _j in q:
+			if i >= count:
+				break
+			var pos := Spawner.layout_point(arena_radius, i, count, _rng,
+				_player_focus(), _spawn_gap(), obstacles_of(f), _spawn_skin())
+			# La quota e' **fuori** dal confronto che ha fatto `layout_point`
+			# (che e' una funzione a due dimensioni) e **dentro** il risultato: se
+			# la si mettesse prima, il punto di nascita sarebbe a 20 m dal piano e
+			# l'anello di disposizione si misurerebbe sul piano sbagliato.
+			pos.y = floor_base(f)
+			_apply_spawn(i, pos, _pick_kind())
+			enemy_floors[i] = f
+			i += 1
 	_grid_dirty = true
 
 ## I pesi delle specie dell'onda in corso.
@@ -988,6 +1502,13 @@ func step(delta: float) -> void:
 	if not _built or delta <= 0.0:
 		return
 	arena_radius = _contract_radius()
+	# ## m12: la torre si rilegge **prima** della griglia e del campo
+	#
+	# `floor_count` e `floor_height` decidono quante griglie e quanti campi esistono:
+	# leggerli dopo averli usati lascerebbe un passo con la torre di ieri e quella di
+	# domani, e il numero di griglie che non combacia coi piani dei nemici e' il
+	# modo in cui una query restituisce l'indice di un altro piano.
+	_sync_tower()
 	# Se l'arena e' cambiata, la griglia va riscaldata di nuovo, altrimenti le
 	# celle nuove costerebbero un'allocazione per frame.
 	_sync_grid()
@@ -1008,6 +1529,17 @@ func step(delta: float) -> void:
 	_rebuild_grid()
 	hit_count = 0
 	var focus := _player_focus()
+	# ## m12: **due numeri prima di muovere chiunque**, e nell'ordine
+	#
+	# `_focus_floor` viene dal giocatore e `enemy_floors[i]` dalla posizione di ogni
+	# nemico: il primo dice al campo e allo spawn **dove si nasce**, il secondo dice a
+	# ogni nemico **quale campo e' il suo**. I due non possono essere lo stesso numero
+	# per costruzione (uno viene dal contratto, l'altro dalla posizione), ed e' per
+	# quello che il criterio li confronta: se il secondo fosse derivato dal primo,
+	# «nessun nemico attraversa un pavimento» sarebbe una frase.
+	_focus_floor = player_floor_index()
+	sep_neighbours_last = 0
+	sep_saturated_last = 0
 	# Il campo prima di muovere chiunque: l'inseguimento di questo passo legge
 	# il campo che e' stato costruito **per questo bersaglio**, non quello del
 	# passo precedente. Costa una passeggiata sulle celle quando e' il caso, e
@@ -1018,9 +1550,10 @@ func step(delta: float) -> void:
 	# centro vuoto dell'arena. Si calcola una volta per passo, non per nemico.
 	var ha_giocatore := _has_player()
 	for i in count:
+		enemy_floors[i] = floor_of(transforms[i].y)
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
-			body_scale, bite_mode, mortar_timers, mortar_fire, flow_field)
+			body_scale, bite_mode, mortar_timers, mortar_fire, _flow_of(i))
 	# ## m13: i colpi in volo scendono **nello stesso passo** in cui nascono
 	#
 	# Prima i morsi e poi il mortar, o viceversa: sono due azioni diverse e
@@ -1307,10 +1840,30 @@ func _sweep_dead() -> void:
 ## enorme) non deve poter scaricare una raffica tutta insieme al passo dopo,
 ## altrimenti il tetto esisterebbe solo nella media e il sintomo tornerebbe
 ## proprio nei momenti in cui il gioco e' andato a scatti.
+## ## m12: il tetto e' **per piano**, e senza questa riga la torre non si riempie
+##
+## `population` e' un **totale** (la curva delle onde di `run.gd`), ma il nemico
+## nasce sul piano del giocatore: quindi il tetto che conta per lui non e' il totale,
+## e' la **quota di quel piano**, che e' `population_per_floor()` = `50` su quattro
+## piani. Senza questo ramo, `_top_up` continuerebbe a riempire il piano del
+## giocatore fino a `population` e la separazione si troverebbe con **`200 x 4` = 800
+## corpi in una stanza di 20 m di raggio**: nessuna legge si rompe (la separazione e'
+## una forza morbide) e nessun codice si rompe, ma la folla diventa un punto e il
+## gioco smette di essere un bullet heaven.
 func _top_up(delta: float) -> void:
 	if not auto_respawn or count >= population:
 		return
 	if delta <= 0.0:
+		return
+	# ## m12: il tetto per piano e' **del piano che si riempie**, non del totale
+	#
+	# Il confronto e' fra due grandezze diverse e per questo va detto: sopra c'e' il
+	# tetto **totale** (`population`, `200` a regime) e qui sotto c'e' quello **del piano**
+	# che `_piano_di_nascita()` ha scelto. Il difetto che questo ramo chiude e' stato
+	# confrontare il per-piano con il totale: l'orda si fermava a `50` vivi con una
+	# quota di `200`, e tre piani su quattro restavano vuoti senza un solo errore.
+	var piano := _piano_di_nascita()
+	if _floor_count > 1 and count_on_floor(piano) >= population_per_floor():
 		return
 	_budget += (SPAWN_RATE_FALLBACK if run == null else run.spawn_rate()) * delta
 	var n := int(_budget)
@@ -1355,15 +1908,33 @@ const SPAWN_RATE_FALLBACK := Run.SPAWN_RATE
 ## e' `KIND_WEIGHTS` voce per voce, quindi li' i due cammini erano gia' lo stesso
 ## numero e questa correzione e' invisibile. Anche l'impronta `m11-bis`, che e'
 ## un numero di onda 1, non si muove. Il difetto era vivo dalle onde 2 in giu'.
+## ## m12: il nemico entra **sul piano del giocatore**, e su tre cose insieme
+##
+## Sono tre righe e sono una sola promessa: il punto di nascita ha la quota del
+## piano, i dischi che lo tengono fuori sono quelli di quel piano, e l'array dei
+## piani lo registra. Una promessa senza le tre righe e' un difetto che si vede in
+## tre modi diversi — un nemico a 20 m di distanza verticale che il giocatore non
+## vede, un nemico che nasce dentro un disco di un altro piano, e un array parallelo
+## disallineato — e nessuno dei tre e' un crash.
+##
+## `focus` va passato a `Spawner.spawn_point` con `y = 0` **per forza**: il confronto
+## del `min_gap` e' in tre dimensioni e, con un fuoco a `y = 40` e dei candidati a
+## `y = 0`, la sola componente verticale (40 m) farebbe passare **ogni** candidato
+## del `MIN_SPAWN_GAP` di 12 m: il nemico nascerebbe addosso al giocatore. La quota
+## si mette quindi **fuori** dal confronto e **dentro** il risultato.
 func _spawn_one() -> void:
 	if count >= MAX_ENEMIES:
 		return
+	var f := _piano_di_nascita()
 	var kind := _pick_kind()
-	var pos := Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP,
-		obstacles, _spawn_skin())
+	var focus := _player_focus()
+	var pos := Spawner.spawn_point(arena_radius, Vector3(focus.x, 0.0, focus.z), _rng,
+		MIN_SPAWN_GAP, obstacles_of(f), _spawn_skin())
+	pos.y = floor_base(f)
 	count += 1
 	_resize_arrays(count)
 	_apply_spawn(count - 1, pos, kind)
+	enemy_floors[count - 1] = f
 	_grid_dirty = true
 
 ## Uccisione per **scambio con l'ultimo**: `transforms[i] = transforms[last]` e
@@ -1384,6 +1955,17 @@ func _kill(i: int) -> void:
 		bites[i] = bites[last]
 		mortar_timers[i] = mortar_timers[last]
 		mortar_fire[i] = mortar_fire[last]
+		# ## m12: `enemy_floors` partecipa allo scambio come tutti gli altri
+		#
+		# **Senza questa riga il difetto e' invisibile e compare a caso.** Il nemico
+		# che prende il posto di quello ucciso ha la sua posizione e la sua vita ma
+		# **il piano del morto**: inseguirebbe col campo di un piano in cui non si
+		# trova, cercherebbe i vicini nella griglia sbagliata e i proiettili lo
+		# raggiungerebbero con l'indice giusto e con il bersaglio sbagliato. Non e'
+		# un crash, non e' un valore fuori range: e' un nemico che appartiene a due
+		# piani, e la prima volta che si vede e' a tre minuti dalla causa, in una
+		# sezione che non c'entra niente con i piani.
+		enemy_floors[i] = enemy_floors[last]
 	count = last
 	_resize_arrays(count)
 	kills += 1
@@ -1690,19 +2272,82 @@ func reseed(s: int) -> void:
 
 # --- Griglia ------------------------------------------------------------------
 
-## Riscalda la griglia solo quando l'estensione cambia. `setup()` ricrea tutti i
+## Riscalda le griglie solo quando l'estensione cambia. `setup()` ricrea tutti i
 ## secchielli: chiamarlo ogni frame sarebbe l'allocazione nel ciclo di gioco che
 ## questo file evita, quindi la soglia e' volutamente grossolana.
+##
+## ## m12: una griglia **per piano**, e perche' `Array` e non una sola
+##
+## Con la torre i quattro piani si sovrappongono in XZ: la stessa cella di 4 m
+## avrebbe dentro i nemici di tutti e quattro, e allora (a) ogni query
+## controllerebbe quattro volte i nemici che non le interessano e (b) il
+## `BUCKET_SLOTS = 32` si consumerebbe con **quattro volte** la densita' vera,
+## cioe' con il traboccamento che `tests/test_arda.gd` asserisce a `false` e che
+## `test_gameloop` asserisce a ogni passo. Con una griglia per piano la densita'
+## per cella resta **quella che e' stata misurata** a m3, che e' il numero che
+## quei due criteri guardano.
+##
+## `Grid` e' un `RefCounted`: quattro griglie sono quattro array di secchielli e
+## **zero nodi**, quindi `node_count` non si muove e il criterio n. 7 resta verde.
+## Il costo e' la memoria del riscaldamento, che e' `floor_count` volte quella di
+## prima e va detto perche' e' un numero che si paga: a `R = 20 m` sono 529 celle
+## da 33 slot per griglia.
 func _sync_grid() -> void:
 	var extent := arena_radius * 1.5
-	if absf(extent - _grid_extent) < 0.5:
+	var stessa := absf(extent - _grid_extent) < 0.5
+	if stessa and _grids.size() == maxi(_floor_count, 1):
 		return
 	_grid_extent = extent
-	_grid.setup(Grid.CELL, extent)
+	# Il numero di griglie segue `floor_count`, che e' geometria **statica**
+	# (registrata da `-arda` in `_enter_tree()`, prima di qualunque `_ready()`):
+	# questo ramo non gira nel corso di una partita. Se un domani cambiasse, il
+	# costo e' `floor_count` allocazioni una volta sola, dichiarato perche' e' una
+	# frase che diventa vera solo se qualcuno cambia la geometria a meta' partita.
+	if _grids.size() != maxi(_floor_count, 1):
+		_grids = []
+		for _f in maxi(_floor_count, 1):
+			_grids.append(Grid.new())
+	for g in _grids:
+		g.setup(Grid.CELL, extent)
 	_grid_dirty = true
 
+## La griglia del piano `f`, o `null` se quel piano non ha griglia (il caso in cui
+## la torre non e' montata e non c'e' niente da listare). Tutti i lettori passano
+## di qui: **un `null` e' una risposta**, non un crash su un identificatore che
+## non esiste piu'.
+func _grid_of(f: int) -> Variant:
+	if f < 0 or f >= _grids.size():
+		return null
+	return _grids[f]
+
+## ## m17: i tre numeri che **fuori** di questo file hanno bisogno di un nome
+##
+## Non sono un accessor generico e non aggiungono niente a chi li chiama da dentro:
+## sono **la dichiarazione del produttore** per chi deve misurarli. Fino a qui
+## `tests/test_orda.gd::_torre_griglie` leggeva `_grids`, `_floor_count` e
+## `_focus_floor` **di sotto**, che funziona in GDScript (l'underscore e' una
+## convenzione, non una privacy) ma e' la prima volta che questo progetto legge
+## un membro privato di un'altra foglia: un numero che nessuno nomina e' un numero
+## che nessuno verifica, e questi tre li verifica un criterio.
+func grids_size() -> int:
+	return _grids.size()
+
+## Quante griglie ci sono **perché** ci sono: il `floor_count` che l'orda ha letto,
+## che e' il numero che deve combaciare con `grids_size()`.
+func floor_count_read() -> int:
+	return _floor_count
+
+## Il piano logico del giocatore: quello che dichiara il contratto, non quello che
+## capita a `y = 0`.
+func focus_floor() -> int:
+	return _focus_floor
+
+## La griglia del piano `f`, con il nome che il produttore le dà. `null` e' una
+## risposta dichiarata (vedi `_grid_of`), non un crash.
+func griglia(f: int) -> Variant:
+	return _grid_of(f)
+
 func _rebuild_grid() -> void:
-	_grid.begin_frame()
 	# `worst_bucket` e' un **massimo storico** dentro `spatial_grid.gd`: si azzera
 	# in `setup()` e non in `begin_frame()`, quindi dopo questo punto direbbe ancora
 	# il picco della disposizione **precedente**. Il contratto di m3 pretende il
@@ -1710,10 +2355,24 @@ func _rebuild_grid() -> void:
 	# scritta (punto 5). Lo si azzera qui, dall'unico posto che ricostruisce la
 	# griglia: il campo e' pubblico e non serve toccare `spatial_grid.gd`. Dopo il
 	# ciclo di `insert` sotto, vale "picco del frame appena ricostruito".
-	_grid.worst_bucket = 0
+	#
+	# ## m12: il picco e' **per piano** e `worst_bucket()` ne prende il massimo
+	# `worst_bucket()` e' dichiarato come «il nemico piu' occupato in una cella»:
+	# con la griglia per piano la domanda ha due risposte, una per piano, e il
+	# massimo delle due e' l'unico numero che non sceglie un piano a caso.
+	var ignote := 0
+	for g in _grids:
+		g.begin_frame()
+		g.worst_bucket = 0
 	for i in count:
-		_grid.insert(i, transforms[i])
-	grid_unknown_cells = _grid.unknown_cells
+		var f: int = enemy_floors[i]
+		var gr = _grid_of(f)
+		if gr == null:
+			continue
+		gr.insert(i, transforms[i])
+	for altra in _grids:
+		ignote = maxi(ignote, altra.unknown_cells)
+	grid_unknown_cells = ignote
 	_grid_dirty = false
 
 ## Una morte o uno spawn rendono la griglia vecchia. La query la sistema da
@@ -1723,15 +2382,39 @@ func _ensure_grid() -> void:
 	if _grid_dirty:
 		_rebuild_grid()
 
+## La spinta di separazione del nemico `i`, e **la telemetria del tetto**.
+##
+## ## m12: i vicini sono quelli **del suo piano**
+##
+## Con la griglia per piano, `collect_into` restituisce indici che sono gia' tutti
+## dello stesso piano: non serve un filtro sulla `y`, e non si puo' dimenticare.
+## Senza la griglia per piano, due nemici a 20 m di distanza verticale e a due
+## metri orizzontali si spingerebbero a vicenda attraverso il pavimento: la
+## separazione e' una forza morbide, ma una forza morbide che tira in giu' non e'
+## una forza morbide.
 func _separation(i: int) -> Vector3:
 	if count < 2:
 		return Vector3.ZERO
 	var p := transforms[i]
-	# `found` con tipo esplicito: `_grid` e' una variabile senza tipo (perche' la
-	# griglia si crea in `_build()`), e `:=` su un chiamata che non ha tipo
-	# dichiarato non compila.
-	var found: int = _grid.collect_into(_sep_buf, p, SEPARATION_RADIUS, transforms,
+	var g = _grid_of(enemy_floors[i])
+	if g == null:
+		return Vector3.ZERO
+	# `found` con tipo esplicito: `g` e' una variante (l'elemento di un `Array`
+	# senza tipo), e `:=` su una chiamata che non ha tipo dichiarato non compila.
+	var found: int = g.collect_into(_sep_buf, p, SEPARATION_RADIUS, transforms,
 		SEPARATION_CHECKS)
+	# ## I due numeri che dicono se `SEPARATION_CHECKS` e' diventato il vincolo
+	#
+	# Il tetto e' un **tetto di costo**, non una legge: quando `found` arriva a
+	# `SEPARATION_CHECKS` la query smette di guardare e il tetto e' diventato il
+	# limite vero della simulazione. Il piano (piano sez. «Il volume verticale») lo
+	# tratta come «non dovrebbe toccarlo» e chiede che sia **misurato**: quindi qui
+	# si conta, per ogni passo, quanti nemici hanno saturato il tetto e quanti
+	# vicini sono stati trovati in tutto. `tests/test_orda.gd` stampa entrambi a ogni
+	# lancio e asserisce che il secondo resti sotto il primo.
+	sep_neighbours_last += found
+	if found >= SEPARATION_CHECKS:
+		sep_saturated_last += 1
 	var acc := Vector3.ZERO
 	for k in found:
 		var j: int = _sep_buf[k]
@@ -1753,11 +2436,71 @@ func _separation(i: int) -> Vector3:
 ## L'indice e' esattamente quello che `damage_enemy(index, ...)` si aspetta, e il
 ## contratto fa `as int` su questo valore: si puo' chiamare
 ## `Game.nearest_enemy(pos, 12.0)` senza errori di cast (piano 5.2).
-func nearest_enemy_index(from: Vector3, radius: float) -> int:
+##
+## ## m12: il vicino cercato e' **un vicino di piano**
+##
+## E' il cambiamento di comportamento piu' grosso della torre, e il difetto che chiude
+## e' preciso: con quattro piani la distanza euclidea lungo `y` fa sembrare vicini
+## due corpi che sono a 20 metri di distanza l'uno dall'altro. Un `nearest_enemy`
+## che rispondesse «qualsiasi nemico entro il raggio» **restituirebbe un nemico di
+## un altro piano anche a raggio 1000 m**, e l'arma punterebbe e colpirebbe **attraverso
+## il pavimento**: il giocatore vedrebbe la cupola di un colpo e il danno arriverebbe
+## dal piano di sotto.
+##
+## Il filtro **non e' un `if` sulla `y`** ma la scelta di **quale griglia si apre**:
+## ogni piano ha la sua, e in quella ci sono solo nemici di quel piano. Quindi il
+## numero che garantisce la promessa non e' «`abs(dy) < 20`», che dipenderebbe da
+## `floor_height`, ma **quale tabella e' stata consultata**: un piano diverso ha una
+## tabella diversa e non c'e' nessun caso in cui la risposta possa guardare fuori.
+##
+## ## Il piano della griglia e' quello **logico**, e questa e' la riga che costa 39
+##
+## La versione di prima sceglieva la griglia con `floor_of(from.y)`, cioe' con la
+## **quota** del punto. Il giocatore fermo in cima alla rampa del piano 0 e' a
+## `y = 20,0 m` con la quota nel piano 1 e il latch ancora sul piano 0: la griglia
+## del piano 1 e' stata aperta, **l'orda e' tutta sul piano 0**, `nearest_index`
+## restituisce `-1`, l'arma non spara e l'onda non si chiude mai. Misurato:
+## `6.403` passi per chiudere l'onda 1 sono diventati `40.000`, e il ritmo delle
+## uccisioni da `1,8741 /s` a `0,0480 /s` — **39 volte meno**, perche' nessuno
+## sparava. Finche' il giocatore camminava sul pavimento piatto i due piani
+## coincidevano e nessuno se ne accorgeva.
+##
+## `weapon_base.gd::_try_fire` chiama questa funzione con
+## `Game.player_position()` come `from`, quindi `from` **e'** la posizione del
+## giocatore e il suo piano e' quello logico. `-gameplay` non deve cambiare una
+## riga perche' questo funziona, e questo file non deve leggere `player.gd`.
+##
+## ## I due casi, tenuti distinti da **un** criterio solo
+##
+## Il parametro `piano` e' l'ingresso dei due casi, e la selezione sta in una sola
+## funzione (`_piano_query`) perche' due copie di `if` sono due regole che divergono:
+##
+##   - **`piano < 0` (il contratto, cioe' il giocatore)**: si usa `_focus_floor`, il
+##     piano **logico**. E' il caso di `weapon_base`, ed e' quello che il latch
+##     descrive: durante la salita il giocatore e' ancora sul piano da cui e' partito.
+##   - **`piano >= 0` (un punto qualsiasi)**: si usa il piano che il chiamante
+##     dichiara. Per un punto che non e' il giocatore `floor_of(from.y)` e' giusto —
+##     non c'e' latch da rispettare — ma **non lo si calcola qui dentro**: lo calcola
+##     il chiamante che conosce il punto, e passa l'indice. Una copia di quella
+##     divisione qui dentro sarebbe un secondo `floor_of` con una soglia diversa,
+##     cioe' il difetto che il contratto vieta a tre foglie.
+func nearest_enemy_index(from: Vector3, radius: float, piano: int = -1) -> int:
 	if not _built or count == 0 or radius <= 0.0:
 		return -1
 	_ensure_grid()
-	return _grid.nearest_index(from, radius, transforms)
+	var g = _grid_of(_piano_query(piano))
+	if g == null:
+		return -1
+	return g.nearest_index(from, radius, transforms)
+
+## L'unico posto che sceglie la griglia di una query. `piano < 0` = «sono il
+## giocatore» e risponde col piano **logico**; `piano >= 0` = «sono un punto» e
+## risponde col piano dichiarato dal chiamante.
+func _piano_query(piano: int) -> int:
+	var alto := maxi(_floor_count - 1, 0)
+	if piano >= 0:
+		return clampi(piano, 0, alto)
+	return clampi(_focus_floor, 0, alto)
 
 ## Applica `amount` di danno al nemico `index` e gli impartisce `knockback`.
 ## Se il nemico muore, viene tolto **subito**: dopo questa chiamata `count` e'
@@ -1782,11 +2525,38 @@ func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 
 ## Punto di arrivo casuale dentro l'arena. Non puo' restituire `Vector3.ZERO`:
 ## il contratto usa ZERO come segnale di "non implementato".
+##
+## ## m12: nasce **sul piano del giocatore**, e perche' la firma resta senza argomenti
+##
+## `random_spawn_point()` non ha parametri e la torre non le aggiunge: la firma e'
+## congelata dal contratto di m2 e chiamarla con un piano la cambierebbe per tre
+## foglie. Il piano arriva quindi da **dentro**, ed e' l'unica cosa che questa
+## funzione puo' sapere: `_focus_floor`, che `step()` ha gia' letto da
+## `Game.player_floor()` in questo passo.
+##
+## Il punto torna alla **quota del piano** (`floor_base`) e i dischi che lo
+## proteggono sono **quelli di quel piano** (`obstacles_of`). Senza la quota il
+## nemico nascerebbe sul pavimento di sotto a quello del giocatore: il gioco
+## continuerebbe a funzionare e l'orda si riempirebbe di nemici **irraggiungibili**,
+## che e' la classe di difetto piu' insidiosa perche' nessun errore e nessun crash —
+## solo un campo che sembra vuoto e un giocatore che non viene attaccato.
+##
+## Il `focus` passato a `Spawner.spawn_point` ha `y = 0` **per forza**: `spawn_point`
+## e' una funzione a due dimensioni e confronta `p.distance_squared_to(focus)` in
+## tre. Con un `focus` a `y = 40` e dei candidati a `y = 0`, la distanza verticale
+## da sola (40 m) farebbe passare **ogni** candidato del `min_gap` di 12 m, e il
+## nemico nascerebbe addosso al giocatore: un difetto che la quota del piano,
+## applicata **dopo**, avrebbe creato e non evitato. Percio' il piano si mette **fuori**
+## dal confronto e **dentro** il risultato.
 func random_spawn_point() -> Vector3:
 	if not _built:
 		return Vector3(0.0, 0.0, _contract_radius() * 0.5)
-	return Spawner.spawn_point(arena_radius, _player_focus(), _rng, MIN_SPAWN_GAP,
-		obstacles, _spawn_skin())
+	var f := _piano_di_nascita()
+	var focus := _player_focus()
+	var pos := Spawner.spawn_point(arena_radius, Vector3(focus.x, 0.0, focus.z), _rng,
+		MIN_SPAWN_GAP, obstacles_of(f), _spawn_skin())
+	pos.y = floor_base(f)
+	return pos
 
 # --- Lettura per arena e ui ---------------------------------------------------
 
@@ -1808,16 +2578,29 @@ func census() -> PackedInt32Array:
 		out[E.clamp_kind(kinds[i])] += 1
 	return out
 
-## Celle occupate dalla griglia, per diagnostica.
+## Celle occupate dalle griglie, per diagnostica. **Somma** sui piani: e' il numero
+## di celle che contengono almeno un nemico, e con la griglia per piano le celle di
+## due piani sono due celle distinte anche se lo stesso quadrato della torre.
 func occupied_cells() -> int:
-	if _grid == null:
-		return 0
-	return _grid.occupied_cells()
+	var n := 0
+	for g in _grids:
+		n += g.occupied_cells()
+	return n
 
 ## Qualche secchiello e' traboccato e le query stanno cadendo a scansione
 ## lineare? Non deve succedere, e il test lo controlla.
+##
+## ## m12: `true` se **una sola** griglia ha traboccato
+##
+## La griglia e' una per piano, quindi la domanda non ha piu' una risposta sola: ha
+## una risposta per piano e questa funzione dice «qualcuno ha traboccato». Dire
+## quale piano ha traboccato e' `worst_bucket()`, che ne da' il massimo: i due
+## numeri insieme dicono «dove» e «quanto».
 func grid_overflowed() -> bool:
-	return _grid != null and _grid.overflowed
+	for g in _grids:
+		if g.overflowed:
+			return true
+	return false
 
 ## Il nemico piu' occupato in una cella, **nel frame (griglia) appena
 ## ricostruito**: il picco delle celle dell'ultima disposizione scritta nella
@@ -1851,7 +2634,17 @@ func grid_overflowed() -> bool:
 ## con un tetto **proprio, sotto 32** (e quel tetto va derivato da una misura, non
 ## scelto a piacere), che e' esattamente il tetto dichiarato che m3 chiede.
 func worst_bucket() -> int:
-	return 0 if _grid == null else _grid.worst_bucket
+	# ## m12: **il massimo sui piani**, e perche' non la somma
+	#
+	# Il numero e' «il nemico piu' occupato in una cella»: con la griglia per piano
+	# ogni piano ha il suo, e la somma direbbe «200 nemici in una cella» quando i
+	# duecento sono sparsi su quattro piani diversi. Il massimo e' l'unico aggregato
+	# che continua a dire «una cella, questo numero di nemici», che e' la domanda
+	# che `tests/test_arda.gd` pone con `GRID_CEILING`.
+	var peggiore := 0
+	for g in _grids:
+		peggiore = maxi(peggiore, g.worst_bucket)
+	return peggiore
 
 # --- Interno ------------------------------------------------------------------
 

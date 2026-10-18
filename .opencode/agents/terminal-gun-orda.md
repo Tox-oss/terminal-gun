@@ -1,9 +1,9 @@
 ---
 description: "terminal-gun-orda: 200 nemici vivi senza un nodo per nemico. Object pool, griglia spaziale, generazione procedurale, AI di aggiramento, e i test che lo dimostrano."
 mode: subagent
-model: opencode/space-bunny-free#max
+model: opencode/beam-free
 color: "#ef4444"
-steps: 55
+steps: 150
 hidden: true
 permissions:
   # ==========================================================================

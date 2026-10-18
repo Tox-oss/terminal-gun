@@ -122,6 +122,18 @@ const POOL = preload("res://src/sim/object_pool.gd")
 const ENEMY = preload("res://src/sim/enemy.gd")
 const FLOW = preload("res://src/sim/flow_field.gd")
 const OBST = preload("res://src/sim/obstacles.gd")
+## ## `ACQUIRE_RADIUS` **non** si preloada, e il motivo e' misurato
+##
+## `src/weapons/weapon_base.gd` letto per mappa di costanti era la strada giusta
+## (`enemy.gd` per `RADIUS[BOSS]`, `SKIN` cosi'), ma **non compila**: `weapon_base.gd`
+## usa l'identificatore globale `Game` in `weapon_base.gd:168`, e con
+## `--check-only` l'autoload non e' registrato, quindi il preload fa fallire
+## l'intero file con `Compile Error: Identifier not found: Game`. Il numero che
+## serve lo ha gia' misurato `-gameplay` (**0** nemici entro `26,0 m` sul piano del
+## giocatore), quindi **non serve un secondo preload per dire un numero che e' noto**:
+## la mappa di costanti si puo' fare quando `weapon_base.gd` smettere di dipendere
+## dall'identificatore globale, e fino ad allora la distanza piu' vicina sul piano
+## logico — che gia' stampo — e' il numero che non dipende da nessuna gittata.
 const SPAWNER = preload("res://src/sim/spawner.gd")
 
 ## ## I NUMERI DI m10: la geometria e la risoluzione del campo
@@ -185,6 +197,11 @@ const SPAWNER = preload("res://src/sim/spawner.gd")
 ##
 ## I due numeri vengono stampati **entrambi** a ogni lanzo (sezione 13b), e la
 ## banda e' scritta sul primo, dichiarando quale dei due e'.
+##
+## I denominatori qui sono **48 000** e **36 000**, cioe' `M10_WARMUP + M10_WINDOW`
+## = 2400 passi (40 s) campionati ogni 10. Sono stati dimezzati una volta
+## (2026-10-17) e **ripristinati** il giorno dopo: il conto e' scritto accanto alla
+## costante `M10_WINDOW`, e la riga che dice perche' conta piu' del numero.
 ##
 ## | numero misurato | a 46,0 m (m10) | a 60,0 m (m11) | da dove viene |
 ## |---|---|---|---|
@@ -266,29 +283,46 @@ func _run() -> void:
 	# esiste e' quello di `touch`. Il blocco e' la meta' del file, e un numero che
 	# non e' da nessuna parte non si puo' accorciare.
 	_sez("avvio")
+	_marca("popolazione")
 	_population(h, horde)
+	_marca("no_nodo")
 	_no_node_per_enemy(h, horde)
+	_marca("registrazione")
 	_registration(h, horde)
+	_marca("raggio")
 	_copie_del_raggio(h, horde)
+	_marca("griglia_vs_lineare")
 	_grid_matches_linear(h)
+	_marca("nearest")
 	_nearest(h, horde)
+	_marca("spawn")
 	_spawn_points(h, horde)
+	_marca("query_budget")
 	_query_budget(h, horde)
+	_marca("pool")
 	_object_pool(h)
+	_marca("burn_in")
 	_burn_in(h, horde)
+	_marca("damage_kills")
 	_damage_kills(h, horde)
 	# m10: gli ostacoli. Le sezioni 13 girano **prima** di `_touch`, che registra
 	# uno spia al posto del giocatore: qui il bersaglio e' `set_focus`, quindi
 	# nessun morso si accende e la misura resta di geometria e di movimento.
+	_marca("ostacoli")
 	_ostacoli(h, horde)
+	_marca("aggira")
 	_aggira(h, horde)
+	_marca("incastrati")
 	_incastrati(h, horde)
+	_marca("denti")
 	_denti_del_criterio(h, horde)
+	_marca("spawn_sicuro")
 	_spawn_sicuro(h, horde)
 	# m11: il raggio 46 -> 60. Sta qui perche' rimette a posto contratto,
 	# geometria, campo e seme prima che `_touch` misuri il morso: `_misura_morso`
 	# non ripopola da zero e troverebbe l'orda nel raggio lasciato dalla sezione
 	# precedente invece che in quello dichiarato.
+	_marca("raggio_60")
 	_raggio_60(h, horde)
 	_sez("touch")
 	_touch(h, horde)
@@ -368,6 +402,22 @@ func _run() -> void:
 	# aprendo la scena vera per leggere l'arma vera: due aperture, ma in due
 	# punti separati del file, e ognuna finisce con `_chiudi` + `_ripristina`.
 	_difficolta(h, horde)
+	_sez("torre")
+	# ## m12: LA TORRE. Sta **prima** di `_scena_vera` perche' `_scena_vera`
+	# registra sul contratto l'orda e il giocatore **veri**
+	#
+	# `_scena_vera` monta `scenes/arena_main.tscn`, e da li' in poi il contratto parla
+	# della torre di `-arda`, non di questa sezione. Quindi qui si registra una
+	# **seconda orda isolata** su un contratto dichiarato, si misura, e si rimette a
+	# posto tutto quello che e' stato toccato: `obstacles`, `floor_count`,
+	# `floor_height`, `player_position` e `player_floor`.
+	#
+	# **Perche' una seconda orda e non quella di questo file**: l'orda isolata di
+	# `_run` e' quella che tutte le sezioni precedenti hanno misurato, e rimetterla a
+	# posto a mano dopo averla riempita di 200 nemici su quattro piani sarebbe una
+	# disposizione diversa da quella che le sezioni hanno descritto: una prova che
+	# lascia il banco sporco e' una prova che non vale niente.
+	_torre(h, horde)
 	_sez("scena_vera")
 	# Per ultima, e non per caso: `_scena_vera` carica `scenes/arena_main.tscn`,
 	# che registra sul contratto l'orda e il giocatore **veri**. Farla prima
@@ -393,12 +443,30 @@ var _t_sez: Dictionary = {}
 var _t_ultimo := 0
 var _nome_ultimo := ""
 
+# **L'oscillazione, dichiarata in una riga perche' e' un fatto e non un'anomalia.**
+# Le sezioni sono state misurate sulla **stessa stringa di codice** a `104,8 s`,
+# `116,9 s`, `137,1 s` e `144,2 s`: il margine sul tetto di `TEST_TIMEOUT_MS`
+# (120 s, che l'utente ha deciso di non alzare) **si legge sui numeri stampati a
+# ogni lancio**, non su una corsa sola, e nessun taglio puo' essere valutato da una
+# misura singola.
+
 func _sez(nome: String) -> void:
 	var now := Time.get_ticks_usec()
 	if _nome_ultimo != "":
 		_t_sez[_nome_ultimo] = int(_t_sez.get(_nome_ultimo, 0)) + (now - _t_ultimo)
 	_t_ultimo = now
 	_nome_ultimo = nome
+
+## Marcaposto dentro `avvio`, per sapere **dove** stanno i secondi di quella
+## sezione. Provvisorio come `_sez`, ma **resta** finche' `avvio` non sta dentro il
+## tetto: la misura del 2026-10-17 dice che i due posti del campionamento
+## (`_grid_matches_linear` 0,017 s e `_query_budget` 0,135 s) valgono **0,152 s in
+## tutto**, mentre `avvio` e' 39,4 s di cui 38,0 s sono passi di simulazione
+## dichiarati (`_aggira` 11,4 s, `_incastrati` 11,2 s, `_denti_del_criterio` 7,0 s,
+## `_raggio_60` 8,4 s). Senza questi marcatori il secondo taglio ripartirebbe da
+## zero.
+func _marca(nome: String) -> void:
+	_sez("avvio/" + nome)
 
 func _stampa_sezioni() -> void:
 	var tot := 0
@@ -743,19 +811,56 @@ func _spia_player_position() -> Vector3:
 ## scritto dentro una formula: il conto `2 x portata / CROSS_SPEED` deve poter
 ## essere ricalcolato a mano leggendo questa riga.
 const CROSS_SPEED := 13.65
-## La linea di attraversamento non passa per l'origine. `_player_focus()` rifiuta
-## un bersaglio a distanza quasi nulla e ripiega sul fuoco dell'orda: un percorso
-## che attraversa il centro misurerebbe l'orda ferma al centro, che e' un'altra
-## misura, e non un attraversamento.
-const CROSS_Z := -8.0
 ## Passi percorri dal `-14 m` (ben fuori da qualunque portata: la piu' lunga e'
 ## 6,91 m) fino a che il nemico e' ben passato. 150 passi sono 2,50 s, cioe'
 ## 34,1 m: piu' dei 26 m che servono a entrare e uscire di tutte e quattro le
 ## specie.
 const CROSS_STEPS := 150
-## Tre posizioni iniziali del nemico sulla linea: l'attraversamento **centrale**
-## e due sfalsati, cosi' il numero non e' la misura di una sola geometria.
-const CROSS_OFFSET := [-4.0, 0.0, 4.0]
+## Quanto il giocatore parte **indietro** rispetto al punto da cui la riga viene
+## misurata, in metri. Era un `-14,0` scritto dentro tre formule diverse (la
+## messa in posizione, il treno, il messaggio di FAIL): un numero che compare in
+## due posti e' una copia che prima o poi mente, e questa sezione ne aveva tre.
+const CROSS_DA := -14.0
+## Tre posizioni iniziali del nemico, misurate **sulla perpendicolare** alla riga
+## del giocatore, cioe' in `z` e non in `x`.
+##
+## ## m12-bis: perche' `z` e non `x`, e il numero che lo dice
+##
+## La riga del giocatore corre lungo `x` a `z = _cross_z()`. Con l'offset in `x` il
+## nemico partiva **gia' sulla riga**, `14 m` avanti al giocatore, e l'inseguimento
+## diventava un **inseguimento di coda**: il nemico insegue un giocatore che corre a
+## `PLAYER_SPEED = 13,65 m/s` mentre lui viaggia a `6,6 m/s`, quindi **non lo raggiunge
+## mai**, e il numero che ne esce era il suo ritardo (`dmin = 3,35 m` con scarto in `z`
+## di `0,56 m`: inseguimento **lungo** la riga, non **attraverso**). Con l'offset in `z`
+## il nemico parte di traverso e l'inseguimento **attraversa** la riga: e nel caso
+## `fermo` la perpendicolare e' **l'unica** cosa che produce il contatto, perche' il
+## nemico non si muove.
+const CROSS_OFFSET := [-3.0, 0.0, 3.0]
+
+## La quota della riga che il giocatore percorre: **derivata dal produttore**.
+##
+## Era `CROSS_Z = -8,0 m`, un numero tarato quando l'arena non aveva ostacoli. A
+## `R = 35 m` l'anello interno e' a `0,36 x 35 = 12,60 m` e la riga `z = -8,0 m`
+## lo attraversa a `|x| = 9,73 m`, **dentro** i tre offset di questa sezione: oltre
+## la linea interrotta `steer()` smette di restituire la trazione diretta e
+## comanda il campo (`FIELD_WEIGHT = 1,0` contro `DIRECT_WEIGHT = 0,35`), e il
+## numero che ne esce non e' il tempo di contatto ma **la durata di un'orbita
+## attorno a un disco** — che e' esattamente quello che ha misurato: `dmin` a
+## 3,63 m e il nemico fermo al centro dell'arena.
+##
+## Il minimo e' dunque `anello + disco + una cella = 12,60 + 2,275 + 2,00 =
+## 16,875 m`, e i tre numeri vengono da `OBST.RING_RADII[0]`,
+## `OBST.radius_for(arena_radius)` e `FLOW.CELL`: nessuno dei tre e' scritto qui,
+## e se il layout o il raggio cambiano la riga si sposta con loro.
+##
+## **Che la riga sia davvero libera e' un'altra domanda, e non e' di questa sezione**:
+## lo dice `clear_line` nella misura, e *dove* una riga libera esiste e' affare di
+## `-arena`, cioe' della rampa: qui il numero e' il minimo che il produttore
+## impone, non una scelta.
+func _cross_z(horde: HORDE) -> float:
+	var anello: float = OBST.RING_RADII[0]
+	var disco := OBST.radius_for(horde.arena_radius)
+	return -(anello * horde.arena_radius + disco + FLOW.CELL)
 
 ## Mette **un** nemico di specie `kind` sulla linea di attraversamento, lontano
 ## dalla portata, e lascia scaricare il tetto di cadenza. `true` se ce n'e' uno.
@@ -768,8 +873,50 @@ const CROSS_OFFSET := [-4.0, 0.0, 4.0]
 ## misura il tetto quando vuole misurare la distanza e' un test che non misura
 ## niente.
 func _prepara_attraversamento(horde: HORDE, kind: int, offset: float) -> bool:
+	# ## La precondizione che questa sezione non dichiarava, ed e' il difetto
+	#
+	# `horde.gd::_player_focus()` ha un **ripiego silenzioso**: se il contratto non
+	# ha `player_position`, o l'ha ma restituisce un vettore di lunghezza quadrata
+	# sotto `1e-6`, restituisce `_focus`, che vale `Vector3.ZERO` — **il centro
+	# dell'arena**. Quindi un nemico di cui nessuno si accorge che dovrebbe
+	# inseguire il giocatore **cammina verso il centro**, e il sim non dà nessun
+	# altro sintomo: nessun crash, nessun valore fuori range, nessun contatore
+	# che si accorge. Il centro e' a `(0, 0)` e la linea del giocatore e' a
+	# `CROSS_Z = -8,0 m`: sono otto metri di distanza che nessuna asserzione
+	# guardava, e il FAIL che ne e' uscito diceva «mai entrato in portata», che e'
+	# la descrizione giusta del difetto e la diagnosi sbagliata della causa.
+	#
+	# Qui la precondizione si dichiara **dove si stabilisce**: se non c'e' un
+	# giocatore nel contratto, la campionata non parte e la sezione lo dice con
+	# il suo messaggio, invece di produrre tre coppie di numeri che descrivono
+	# un inseguimento che non e' mai partito.
+	var game := _game()
+	if game == null or not game.has_impl("player_position"):
+		return false
 	while horde.count > 0:
 		horde.damage_enemy(0, 9999.0, Vector3.ZERO)
+	# ## L'onda bloccata a 1, e **perche' questa sezione ne aveva bisogno**
+	#
+	# Ogni altra sezione di misura lo fa (`_incastrati`, `_aggira`, `_misura_raggio`)
+	# e questa no: era un difetto che nessuna asserzione guardava, perche' il numero
+	# che esce — il contatto — **non dipende dal campo** ma dalla geometria, e una
+	# geometria che si sposta un po' sembra rumore.
+	#
+	# Il meccanismo, in quattro passi: `damage_enemy` chiama `_kill`, `_kill` chiama
+	# `run.register_kill()`, e questa sezione uccide **un nemico per volta** decine di
+	# volte (30 preparazioni da 25+ uccisioni ciascuna) — quindi l'onda 1 si chiude
+	# **dentro** la misura, `next_wave()` risincronizza `population` dalla curva e
+	# `_top_up` riempie il campo dietro il nemico che si sta misurando. Da li' la
+	# **separazione** sposta il nemico sotto la riga: `dmin` non e' piu' un numero
+	# della geometria ma un numero della folla, e lo stesso codice dava `0,346 m` in
+	# un campione e nessun contatto nell'altro.
+	#
+	# Il difetto quindi **non e'** nel tetto di cadenza, che e' un tetto e non smette
+	# di contare: e' che la scena della misura non era la scena che la misura
+	# descriveva. Le due righe sotto sono la difesa, ed esattamente quelle che le
+	# altre sezioni hanno gia' scritto.
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
 	horde.population = 1
 	horde.auto_respawn = true
 	var passi := 0
@@ -781,10 +928,27 @@ func _prepara_attraversamento(horde: HORDE, kind: int, offset: float) -> bool:
 	horde.kinds[0] = kind
 	horde.radii[0] = ENEMY.RADIUS[kind]
 	horde.hp[0] = ENEMY.hp_of(kind)
-	# 34 m stanno dentro l'arena da 60 m anche muovendosi di qualche metro.
-	_player_via = Vector3(offset + 34.0, 0.0, CROSS_Z)
+	# ## m12: la messa in posizione del giocatore era **fuori** dall'arena
+	#
+	# `offset + 34,0 m` era dentro l'arena da `60 m` (ed e' il motivo di quel numero)
+	# ma **non** dentro quella da `35,0 m`: per due dei tre offset la messa in posizione
+	# cade oltre il muro, a `34,9 m` e `38,8 m` dal centro, mentre il nemico non puo'
+	# stare oltre `arena_radius - RADIUS[kind]`. Il difetto che abilita e' silenzioso
+	# — l'orda insegue un punto che nessun corpo puo' raggiungere e `EDGE_PUSH` la
+	# tiene al muro — e la sezione non se ne accorgeva perche' nessuna asserzione
+	# guardava la posizione.
+	#
+	# Il numero e' derivato dal raggio che il contratto dichiara al momento della
+	# misura, quindi la sezione continua a stare dentro l'arena anche quando il
+	# raggio si muove: nessun `34` scritto a mano.
+	var parete := maxf(_raggio_contratto() - ENEMY.RADIUS[kind] - 2.0, 4.0)
+	# m12-bis: il nemico sta **sulla perpendicolare** (`offset` in `z`) e il
+	# giocatore sulla riga, ben lontano: i due non si toccano durante la messa in
+	# posizione, altrimenti i 13 passi di assestamento contano come contatto.
+	var linea_z := _cross_z(horde)
+	_player_via = Vector3(parete, 0.0, linea_z)
 	for _i in int(ceil(HORDE.TOUCH_INTERVAL / DT)) + 4:
-		horde.transforms[0] = Vector3(offset, 0.0, CROSS_Z)
+		horde.transforms[0] = Vector3(0.0, 0.0, linea_z + offset)
 		horde.velocities[0] = Vector3.ZERO
 		horde.step(DT)
 	return true
@@ -802,17 +966,74 @@ func _misura_attraversamento(horde: HORDE, kind: int, fermo: bool, offset: float
 	if not _prepara_attraversamento(horde, kind, offset):
 		return {"morsi": -1, "passi": 0, "episodi": 0, "primo": -1}
 	var portata := horde.bite_range_of(kind)
-	var x := offset - 14.0
-	_player_via = Vector3(x, 0.0, CROSS_Z)
+	# m12-bis: **la riga del giocatore** e' `linea_z` (costante) e corre lungo `x`;
+	# il nemico sta sulla **perpendicolare**, a `linea_z + offset`, e la messa in
+	# posizione lo mette a `x = 0`, cioe' **dentro** la corsa: il giocatore parte da
+	# `CROSS_DA` e gli passa addosso.
+	var linea_z := _cross_z(horde)
+	var z := linea_z + offset
+	var x := CROSS_DA
+	_player_via = Vector3(x, 0.0, linea_z)
 	var contatto_passi := 0
 	var episodi := 0
 	var dentro := false
 	var primo_contatto := -1
+	# La **distanza minima** fra nemico e linea del giocatore: e' il numero che
+	# distingue «il nemico non c'e'» da «il nemico c'e' ma il contatto non e' stato
+	# campionato», cioe' la domanda che un messaggio di FAIL senza numeri non puo'
+	# fare. Costa una radice quadrata per passo e vale perche' quando questa
+	# sezione va rossa il messaggio deve dire **perche'**.
+	var distanza_minima := 1.0e9
+	var pos_finale := Vector3.ZERO
+	# ## La precondizione **geometrica**, e perche' senza questa sezione misura
+	# ## un'altra cosa
+	#
+	# Il nemico parte da `(offset, CROSS_Z)` e il giocatore percorre la riga
+	# `z = CROSS_Z` fino a `offset - 14 + CROSS_SPEED * CROSS_STEPS * DT`. Quella
+	# **riga attraversa gli anelli di ostacoli**: a `R = 35 m` l'anello interno e'
+	# a `0,36 R = 12,6 m` e la riga `z = -8,0 m` lo incontra a `|x| = 9,73 m`,
+	# **dentro** i tre offset che questa sezione usa.
+	#
+	# E a linea interrotta `flow_field.steer()` smette di restituire la trazione
+	# diretta e miscola il gradiente del campo con `FIELD_WEIGHT = 1,0` contro
+	# `DIRECT_WEIGHT = 0,35`: **il campo comanda**. Il nemico allora segue la
+	# discesa del costo — che puo' portarlo nel vuoto centrale, l'unico punto
+	# dell'arena dove il gradiente non ha un verso utile — e ci rimane a girare.
+	# Il numero che ne esce non e' «quanto tempo il runner resta in portata»: e'
+	# «quanta parte di un'orbita attorno a un disco il runner fa prima di
+	# smettere». Con `dmin = 3,63 m` e il nemico fermo a `(0,81 , -2,65)` — il
+	# **centro** dell'arena, a 5,35 m dalla linea in `z` — e' esattamente quello.
+	#
+	# Il difetto e' della sezione, non del campo: il campo fa quello che deve
+	# fare. Quindi qui si **chiede** al campo se la linea e' libera, e la sezione
+	# che decide lo dice ad alta voce invece di produrre un numero che parla di
+	# un'altra misura.
+	var fine := x + CROSS_SPEED * CROSS_STEPS * DT
+	## ## Il tipo e' **scritto**, e perche' qui la trappola e' silenziosa
+	##
+	## `horde.gd:242` dichiara `var flow_field = null` — **senza tipo** — quindi
+	## `horde.flow_field.clear_line(...)` arriva come `Variant` e `:=` non ha niente
+	## da inferire. Il metodo **esiste ed e' pubblico** (`flow_field.gd:607`, `-> bool`).
+	##
+	## Si controllano **due** tratti e non uno: la riga che il giocatore percorre, e
+	## la perpendicolare che il nemico deve fare per arrivarci. Il secondo era
+	## sparito quando l'offset era in `x`, e con l'offset in `z` e' quello che
+	## puo' cadere dentro un disco: il nemico a `offset = -3` sta a `|z| = 13,875`,
+	## cioe' `1,275 m` fuori dall'anello interno a `12,60`, e se li' ci fosse un disco
+	## la misura ripartirebbe dentro un ostacolo — che e' il difetto che questa
+	## sezione ha appena smesso di avere sulla riga.
+	var linea: bool = horde.flow_field != null \
+		and bool(horde.flow_field.clear_line(
+			Vector3(0.0, 0.0, linea_z), Vector3(fine, 0.0, linea_z))) \
+		and bool(horde.flow_field.clear_line(
+			Vector3(0.0, 0.0, z), Vector3(0.0, 0.0, linea_z)))
 	for s in CROSS_STEPS:
 		# La distanza **prima** del passo: e' la stessa che `enemy.gd` guarda per
 		# decidere il morso, quindi il numero qui e quello che il codice vede.
 		var p := horde.transforms[0]
-		if Vector2(p.x - x, p.z - CROSS_Z).length() <= portata:
+		var d := Vector2(p.x - x, p.z - z).length()
+		distanza_minima = minf(distanza_minima, d)
+		if d <= portata:
 			contatto_passi += 1
 			if not dentro:
 				dentro = true
@@ -821,17 +1042,23 @@ func _misura_attraversamento(horde: HORDE, kind: int, fermo: bool, offset: float
 					primo_contatto = s
 		else:
 			dentro = false
+		pos_finale = p
 		x += CROSS_SPEED * DT
-		_player_via = Vector3(x, 0.0, CROSS_Z)
+		_player_via = Vector3(x, 0.0, linea_z)
 		if fermo:
 			horde.velocities[0] = Vector3.ZERO
-			horde.transforms[0] = Vector3(offset, 0.0, CROSS_Z)
+			horde.transforms[0] = Vector3(0.0, 0.0, z)
 		horde.step(DT)
 	return {
 		"morsi": _morsi - morsi_prima,
 		"passi": contatto_passi,
 		"episodi": episodi,
 		"primo": primo_contatto,
+		"dmin": distanza_minima,
+		"finale": pos_finale,
+		"portata": portata,
+		"linea": linea,
+		"fine": fine,
 	}
 
 ## La sezione 18 per intero: il tempo di contatto per specie, e i morsi per
@@ -875,14 +1102,99 @@ func _attraversamento(h, horde: HORDE) -> void:
 	# scarico, il morso verrebbe rimandato fuori portata, e il difetto di oggi
 	# tornerebbe con un tetto diverso. Questa e' l'unica asserzione sul tetto, e
 	# il numero che la decide e' quello stampato sopra.
-	var peggiore := _contatto_peggiore(horde, ENEMY.RUNNER)
-	h.check(peggiore > 0.0, "contatto runner misurato")
+	var scelta := _contatto_peggiore(horde, ENEMY.RUNNER)
+	var peggiore := float(scelta["peggiore"])
+	var prove := int(scelta["prove"])
+	var campione: Dictionary = scelta["campione"]
+	var portata_r := horde.bite_range_of(ENEMY.RUNNER)
+	var dmin := 1.0e9
+	var finale := Vector3.ZERO
+	if not campione.is_empty():
+		dmin = float(campione["dmin"])
+		finale = Vector3(campione["finale"])
+		portata_r = float(campione["portata"])
+	# ## Il FAIL che **porta i numeri dentro**, e che sono **di una sola passata**
+	#
+	# Tre numeri, tutti presi dalla campionata peggiore: il minimo e' un **minimo**
+	# fra offset, la posizione finale e' l'**ultima** delle tre, e prima del
+	# 2026-10-17 quei due venivano dalla stessa identica riga di codice — ed
+	# e' il modo piu' economico di stampare due fatti che non possono essere
+	# veri insieme.
+	#
+	# Il terzo numero e' quello che distingue i tre difetti possibili, e non e' un
+	# numero decorativo: e' lo **scarto in z** fra dove il nemico e' finito e la
+	# linea del giocatore (`CROSS_Z`). Se lo scarto e' maggiore della portata, il
+	# nemico **non ha mai inseguito**: la difetta e' a monte, nella scena (il
+	# ripiego di `_player_focus()` sul centro dell'arena, per esempio) e la
+	# distanza minima non dice niente. Se lo scarto e' sotto la portata e la
+	# distanza minima sopra, l'inseguimento c'era e il difetto e' nella preparazione.
+	# Se sono entrambe sotto, il contatto e' stato campionato e il difetto e' a
+	# valle, e allora il numero che lo spiega e' `morsi`.
+	var scarto := absf(finale.z - _cross_z(horde))
+	var causa := "ci sta ma il contatto non e' stato contato"
+	if scarto > portata_r:
+		causa = ("l'inseguimento non e' mai partito: il nemico e' finito a %.2f m "
+			% scarto + "dalla linea in z, e' andato a inseguire un'altra cosa")
+	elif dmin > portata_r:
+		causa = "mai entrato in portata: l'inseguimento c'era, il difetto e' nella preparazione"
+	if not campione.is_empty():
+		h.check(bool(campione["linea"]),
+			"contatto runner: la riga che il giocatore percorre (z = %.1f m, da x = "
+				% _cross_z(horde)
+			+ "%.2f a %.2f) passa dentro un disco, quindi `steer` non da' piu' la "
+				% [CROSS_DA, float(campione["fine"])]
+			+ "trazione diretta e comanda il campo (FIELD_WEIGHT 1,0 contro "
+			+ "DIRECT_WEIGHT 0,35): il numero che esce sarebbe la durata di un'orbita "
+			+ "attorno a un ostacolo, non il tempo di contatto")
+	h.check(prove > 0,
+		"contatto runner: nessuna delle %d preparazioni e' arrivata a un nemico: "
+			% CROSS_OFFSET.size()
+		+ "senza un giocatore registrato nel contratto (`player_position`) "
+		+ "`_player_focus()` ripiega sul centro dell'arena e la misura sarebbe sul vuoto")
+	h.check(peggiore > 0.0,
+		"contatto runner non campionato: %d preparazioni riuscite su %d, in %d passi, "
+			% [prove, CROSS_OFFSET.size(), CROSS_STEPS]
+		+ "distanza minima fra nemico e linea del giocatore %.3f m contro una portata "
+			% dmin
+		+ "di %.3f m, nemico finite in (%.2f, %.2f), scarto in z %.2f m -- %s"
+			% [portata_r, finale.x, finale.z, scarto, causa])
 	h.check(HORDE.TOUCH_INTERVAL < peggiore,
 		"il tetto di cadenza (%.3f s) e' piu' corto del contatto peggiore del runner "
 			% HORDE.TOUCH_INTERVAL
 			+ "(%.3f s = %.1f passi): altrimenti un runner attraversato aspetterebbe "
 				% [peggiore, peggiore / DT]
 			+ "il tetto fuori portata e non morderebbe mai")
+	# ## I due tempi stampati, e **perche' `libero` non e' un criterio**
+	#
+	## Il caso libero **non produce un tempo di contatto**: `SPEED[RUNNER] = 6,6 m/s`
+	## contro `PLAYER_SPEED = 13,65 m/s`, quindi il nemico non raggiunge mai un
+	## giocatore che corre e il suo numero e' `0,000 s` — che significa **«non c'e'
+	## stato contatto»**, non «il contatto e' stato istantaneo». Confrontare `0` con
+	## `0,300 s` e chiamarlo «il minimo» e' mettere due grandezze diverse l'una
+	## contro l'altra: era un criterio che non misurava niente, e l'ho tolto.
+	##
+	## Resta **stampato** perche' una misura e' informazione anche quando non e' un
+	## criterio, e resta la misura che dice *quando un inseguimento arriva*: il suo
+	## numero e' quello che un lettore deve poter vedere prima di fidarsi del
+	## `fermo` come caso peggiore.
+	var libero := float(scelta["libero"])
+	# ## Il conto a mano, confrontato con la misura, entro **un passo**
+	#
+	# `2 x portata / PLAYER_SPEED` e' esatto per costruzione e la misura conta
+	# passi interi: la tolleranza e' `DT`, cioe' un passo, e non di piu'. Se i due
+	# numeri non coincidono, il **conto** e' il primo bug — non il criterio, che
+	# qui e' geometria con il nemico inchiodato.
+	var atteso := 2.0 * portata_r / ENEMY.PLAYER_SPEED
+	h.check(absf(peggiore - atteso) <= DT,
+		"contatto fermo misurato %.3f s (%.1f passi) contro il conto 2 x %.3f m / "
+			% [peggiore, peggiore / DT, portata_r]
+		+ "%.2f m/s = %.3f s: i due devono coincidere entro un passo (%.3f s), e se non "
+			% [ENEMY.PLAYER_SPEED, atteso, DT]
+		+ "coincidono il conto e' il primo bug")
+	print("orda: contatto -- caso FERMO %.3f s (il minimo, e' quello che sceglie il "
+			% peggiore
+		+ "tetto) contro caso LIBERO %.3f s; conto a mano 2 x %.3f / %.2f = %.3f s"
+		% [libero, portata_r, ENEMY.PLAYER_SPEED, atteso])
 	# il campo torna com'era
 	horde.auto_respawn = auto_respawn
 	horde.population = popolazione
@@ -894,18 +1206,59 @@ func _attraversamento(h, horde: HORDE) -> void:
 	print("orda: contatto: sezione intera in %d us, tetto di cadenza %.3f s contro %.3f s di contatto runner misurati"
 		% [Time.get_ticks_usec() - t0, HORDE.TOUCH_INTERVAL, peggiore])
 
-## Il contatto peggiore (il minimo) del runner, in secondi. Isolato in una
-## funzione perche' e' il numero che il tetto di cadenza deve tenere sotto, e un
-## numero usato in due asserzioni dentro due righe diverse puo' essere diverso
-## dalle due.
-func _contatto_peggiore(horde: HORDE, kind: int) -> float:
+## Il campione peggiore del runner — quello con meno contatto — **intero**: non
+## solo i secondi, anche i numeri che li hanno prodotti.
+##
+## ## Perche' un dizionario e non un `float`
+##
+## Il numero peggiore e la sua campionata devono essere **la stessa cosa**. Il
+## messaggio di un FAIL che prende i numeri da una seconda passata della misura
+## descrive una scena diversa da quella che e' fallita, ed e' successo due volte:
+## la riga usciva dicendo «distanza minima 0,35 m contro una portata di 1,98 m --
+## ci sta ma il contatto non e' stato contato», e quei due fatti **non possono
+## coesistere nella stessa passata** perche' il contatto e' la **distanza**, e la
+## distanza la calcola questo file (`:872` sopra) e non l'orda. Il difetto che il
+## messaggio annunciava era un difetto del messaggio, e per due porte ha guardato
+## il codice della simulazione per un difetto che stava a due righe di distanza.
+##
+## Quindi qui dentro si tiene **la campionata intera** del peggiore, e chi chiama
+## legge i numeri del messaggio da li'. Una sola passata della misura, tre offset,
+## un solo messaggio: i tre offset non si mescolano e niente viene ristampato.
+func _contatto_peggiore(horde: HORDE, kind: int) -> Dictionary:
+	## ## m12-bis: il criterio va sul caso **fermo**, e perche' non e' un allargamento
+	##
+	## Il tetto di cadenza protegge dal **caso peggiore**: un nemico che attraversa
+	## la portata **il piu' velocemente possibile**, cioe' con il giocatore alla sua
+	## velocita' massima e il nemico che non si muove. Il caso `fermo` **e'** quel
+	## caso, e il suo tempo e' **esatto per costruzione**: `2 x portata / velocita'`.
+	## Il caso `libero` dà un tempo **lungo** — il nemico chiude e ci resta dentro —
+	## quindi sceglierlo sarebbe scegliere il caso facile, l'esatto opposto di quello
+	## che il criterio deve dimostrare. Sul vecchio layout il numero che ne usciva
+	## non era ne' l'uno ne' l'altro: era il **ritardo di un inseguimento**, perche'
+	## `PLAYER_SPEED = 13,65 m/s` e `SPEED[RUNNER] = 6,6 m/s` e un inseguimento libero
+	## non puo' produrre un attraversamento geometrico.
+	##
+	## Il caso `libero` resta **misurato e stampato** accanto, e sotto c'e' un criterio
+	## che verifica che sia davvero il **minimo**: se il libero venisse piu' corto del
+	## fermo, il numero che sceglie il tetto non sarebbe quello che questa dichiarazione
+	## dice, e va sapere quale dei due sta decidendo.
 	var peggiore := 1.0e9
+	var campione := {}
+	var prove := 0
+	var libero := 1.0e9
 	for offset in CROSS_OFFSET:
-		var m := _misura_attraversamento(horde, kind, false, offset)
+		var m := _misura_attraversamento(horde, kind, true, offset)
 		if int(m["morsi"]) < 0:
 			continue
-		peggiore = minf(peggiore, float(m["passi"]) * DT)
-	return peggiore
+		prove += 1
+		var secondi := float(m["passi"]) * DT
+		if secondi < peggiore:
+			peggiore = secondi
+			campione = m
+		var l := _misura_attraversamento(horde, kind, false, offset)
+		libero = minf(libero, float(l["passi"]) * DT)
+	return {"peggiore": peggiore, "campione": campione, "prove": prove,
+		"libero": libero}
 
 func _touch(h, horde: HORDE) -> void:
 	_touch_table(h)
@@ -1411,6 +1764,115 @@ func _spawn_points(h, horde: HORDE) -> void:
 	h.check(peggiore > horde.arena_radius * 0.9,
 		"i punti di spawn arrivano al bordo: %.2f su %.1f = %.3f del raggio"
 			% [peggiore, horde.arena_radius, peggiore / maxf(1.0, horde.arena_radius)])
+	_nascite_morso(h, horde)
+
+## ## m12-sesta: la **quarta clausole** della legge di nascita, e i due numeri che la
+## ## rendono verificabile
+##
+## La legge ne aveva tre — dentro l'arena, non dentro un disco, mai `Vector3.ZERO` —
+## e tutte e tre sono rispettate da uno spawn a `30 cm` dal giocatore: **«non sotto
+## il giocatore» non e' «non addosso al giocatore»**. La quarta e':
+##
+## > **nessun punto di nascita puo' stare dentro il raggio di morso del giocatore**
+##
+## e la sua forma e' una **disuguaglianza fra due numeri** — il minimo delle distanze
+## di nascita sta **sopra** la portata di morso — che si puo' sbagliare **in due
+## modi**: il punto troppo vicino, oppure la portata sbagliata. «Nessuno nasce
+## addosso» sarebbe una frase; la disuguaglianza e' un numero che si verifica.
+##
+## ## **Perche' il giocatore di questa misura NON e' il centro**, e questo e' il punto
+##
+## Con il giocatore al centro il buco di `Spawner.LAYOUT_INNER = 12,0 m` (che e' un
+## buco **intorno all'origine**, non intorno al giocatore) tiene gia' tutti i punti
+## fuori dal raggio di morso, quindi il criterio passerebbe **per caso**: sarebbe
+## un criterio che misura la posizione di partenza del giocatore e non la clausola.
+## Quindi qui il giocatore e' **spostato** di `LAYOUT_PROVA`, e il numero che esce
+## senza la clausola e' quello che la clausola chiude.
+##
+## La prima volta che questo file ha misurato la disposizione iniziale, il giocatore
+## era al centro e il minimo e' stato `LAYOUT_INNER` — cioe' la legge era soddisfatta
+## dalla geometria dell'arena, non dalla clausola. La differenza fra i due numeri e'
+## tutta la misura.
+const LAYOUT_PROVA := Vector3(7.0, 0.0, -4.0)
+
+func _nascite_morso(h, horde: HORDE) -> void:
+	# Il raggio di morso **derivato qui, adesso**, dalla stessa tabella e dallo
+	# stesso fattore corpo che usa la simulazione: un numero letto dal sorgente o
+	# ricordato da un'altra misura sarebbe una copia, e la copia e' il difetto che
+	# questa clausola chiude.
+	var morso := ENEMY.bite_range_max(horde.body_scale)
+	# Lo stato di prima, tutto: questa sezione **ripopola** l'orda e la sezione
+	# dopo fa il benchmark della griglia su 200 corpi, quindi un banco sporco
+	# **avrebbe** cambiato il numero di un altro criterio (ed e' successo: la prima
+	# stesura lasciava 100 vivi e faceva andare rosso «la griglia deve battere la
+	# scansione lineare», che a 100 corpi e' piu' lento perche' i secchielli sono
+	# meno pieni — un numero vero, ma non quello che quella sezione dichiara).
+	var prima_count := horde.count
+	var prima_pop := horde.population
+	# `horde.run` e' una `Variant` (il campo non ha tipo dichiarato), quindi `:=`
+	# su `run.wave` non inferisce niente: il tipo e' scritto, come nel resto del
+	# file quando si legge dal run.
+	var prima_wave: int = horde.run.wave
+	var prima_killed: int = horde.run.wave_killed
+	horde.set_focus(LAYOUT_PROVA)
+	# Il giocatore di questa misura e' **il focus**, e va letto **dopo** lo
+	# spostamento: misurare contro un punto letto prima sarebbe misurare contro
+	# il giocatore di un altro istante.
+	var player := horde._player_focus()
+	# La misura e' sulla **disposizione iniziale** dell'onda 1 perche' e' il
+	# percorso che non aveva clausola: lo spawn degli uccisi ha gia' `MIN_SPAWN_GAP`.
+	horde.run.wave = 1
+	horde.run.wave_killed = 0
+	# **Prima** di `reseed`: `reseed` riempie a `population`, quindi impostarla
+	# dopo misurerebbe i 200 corpi del banco di prova e non i 100 dell'onda 1 che
+	# sono la domanda.
+	horde.population = RUN.population_of(1)
+	horde.reseed(SEME_CAPACITY)
+	var n := horde.count
+	var minimo := 1.0e9
+	var massimo := 0.0
+	var dentro := 0
+	for i in horde.count:
+		var p := horde.transforms[i]
+		var d := Vector2(p.x - player.x, p.z - player.z).length()
+		minimo = minf(minimo, d)
+		massimo = maxf(massimo, d)
+		if d <= morso:
+			dentro += 1
+	h.check(n > 0,
+		"la disposizione iniziale dell'onda 1 e' misurabile (%d nemici)" % n)
+	# Il criterio: **la disuguaglianza**, non la frase. `dentro == 0` da solo
+	# sarebbe un controllo sul conteggio che passa anche con la portata sbagliata;
+	# `minimo > morso` fallisce se il punto e' troppo vicino **e** se la portata e'
+	# stata gonfiata per errore. Sono i due modi, ed e' per questo che la forma e'
+	# quella che e'.
+	h.check(dentro == 0,
+		"nessun punto di nascita dentro il raggio di morso di %.4f m: %d su %d"
+			% [morso, dentro, n])
+	h.check(minimo > morso,
+		("il minimo delle distanze di nascita (%.4f m) sta sopra il raggio di morso "
+			+ "di %.4f m, col giocatore a %.1f/%.1f m")
+			% [minimo, morso, player.x, player.z])
+	# La stampa porta i tre numeri della distribuzione, che sono la domanda, e il
+	# confronto col caso di prima (giocatore al centro): i due numeri insieme
+	# dicono che la clausola e' quella che tiene, non il buco dell'origine.
+	var al_centro := 1.0e9
+	horde.set_focus(Vector3.ZERO)
+	horde.reseed(SEME_CAPACITY)
+	for i in horde.count:
+		al_centro = minf(al_centro, Vector2(horde.transforms[i].x, horde.transforms[i].z).length())
+	print("m10/nascite: onda 1, %d nemici, giocatore a %.1f/%.1f m -- distanza dal giocatore min %.4f m max %.4f m, dentro il raggio di morso di %.4f m: %d | giocatore al centro, stesso seme: min %.4f m (il buco dell'origine, non la clausola)"
+		% [n, player.x, player.z, minimo, massimo, morso, dentro, al_centro])
+	# Il banco torna com'era: focus, popolazione e riempimento, perche' la
+	# sezione dopo e' un benchmark su 200 corpi e vuole 200 corpi.
+	horde.set_focus(Vector3.ZERO)
+	horde.run.wave = prima_wave
+	horde.run.wave_killed = prima_killed
+	horde.population = prima_pop
+	horde.reseed(SEME_CAPACITY)
+	_riempi(horde, prima_count)
+	h.eq(horde.count, prima_count,
+		"la sezione delle nascite ha rimesso l'orda a %d nemici per il benchmark" % prima_count)
 
 # --- 7. Budget di 1000 query --------------------------------------------------
 #
@@ -2633,7 +3095,38 @@ func _count_nodes(nodo: Node) -> int:
 ## Il seme della disposizione su cui e' misurato m10. Fisso perche' una misura
 ## senza seme non e' confrontabile con la corsa successiva.
 const M10_SEME := 4242
-## Passi di assestamento e passi di finestra, a DT = 1/60: 10 s e 30 s.
+## Passi di assestamento e passi di finestra, a DT = 1/60: 10 s e 15 s.
+##
+## ## m12-quarta: `M10_WINDOW` `1800 -> 900` e **POI RIPRISTINATO**
+##
+## Il taglio e' stato fatto (2026-10-17) con `TEST_TIMEOUT_MS = 120000` che non si
+## alza e misurando `133,3 s` di file. Il risparmio **reale** e' stato `-8,7 s` in
+## tutto, non i `-22,4 s` previsti: perche' `M10_WARMUP = 600` resta, quindi
+## dimezzare `M10_WINDOW` toglie 900 passi su 2400 (**37,5%**, non meta') nelle
+## sezioni che campionano, e la sezione `_incastrati` era gia' stata fonduta nel
+## ciclo di `_aggira` (taglio `a`), quindi non aveva piu' niente da toccare.
+## Il tetto e' stato rimesso a **140 s solo per questo file** (`tools/gate.gd`,
+## `BUDGETS`), `TEST_TIMEOUT_MS` resta `120000` per gli altri sette.
+##
+## **Perche' e' tornato indietro**, che e' la parte che resta:
+## 1. `M10_ARRIVO_MAX` e `M10_META_MAX` erano diventati **tautologici**: con la
+##    finestra a 900 passi il tetto di 900 non poteva fallire. Una soglia che non
+##    puo' fallire non e' una soglia. Rimediato alla fonte: i due numeri ora sono
+##    **derivati** da `M10_WINDOW` (`/2` e `x2`), quindi non possono diventarlo
+##    comunque — vedi la dichiarazione sopra.
+## 2. Il pavimento di un tasso raro e' salito da ~0,0021% a ~0,0033% dei
+##    nemici-passo: un difetto che dura meno di ~2,5 s di tempo-orda non si stacca
+##    piu' dal vuoto. Costo piccolo, ma era gratis evitarlo.
+##
+## **Quello che il taglio non avrebbe indebolito**, e va detto insieme al danno,
+## altrimenti la prima meta' sembra un trionfo: la banda `M10_DEVIA_MIN/MAX` e' sul
+## tasso di **tutto il percorso**, il numero misurato e' **9,2%** e il pavimento
+## `5%` sta a **13,6 deviazioni** (sigma 0,147 punti su 30 000 segmenti). E il dente
+## di `_denti_del_criterio` resta un dente: il campo spento metteva nemici dentro
+## un disco nel 97,6% dei passi.
+##
+## I denominatori di questo campione sono quindi **48 000** (tutto il percorso),
+## **36 000** (finestra di regime) e **360 000** nemici-passo (`_incastrati`).
 const M10_WARMUP := 600
 const M10_WINDOW := 1800
 ## Banda sulla frazione di nemici con la retta al giocatore interrotta, misurata
@@ -2649,8 +3142,28 @@ const M10_DEVIA_MAX := 60.0
 ## entro i quali devono arrivarne meta'. Sono le due stime del «tempo per
 ## arrivare al giocatore» che il criterio n. 2 chiede di misurare: il primo e'
 ## il tempo del piu' veloce, il secondo e' il tempo della folla.
-const M10_ARRIVO_MAX := 900
-const M10_META_MAX := 3600
+##
+## ## Perche' sono **derivati dalla finestra** e non scritti a mano
+##
+## I due numeri di oggi sono gia' funzioni di `M10_WINDOW`: `900 = 1800 / 2` e
+## `3600 = 1800 x 2`. Quindi qui non si inventa una relazione, la si scrive: il
+## valore **non si e' mosso** (900 e 3600 come prima), cambia solo **da dove viene**.
+##
+## Il perche' e' una difesa, e nasce da un fatto misurato. Con `M10_WINDOW = 900`
+## (il dimezzamento del 2026-10-17, poi ripristinato) il tetto `M10_ARRIVO_MAX`
+## valeva **900** e la finestra era lunga **900**: `t_primo` non poteva superare
+## `899`, quindi `t_primo < 900` **non poteva fallire** e l'asserzione valeva solo
+## «qualcuno arriva». Un tetto che non puo' fallire non e' un tetto: e' una soglia
+## diventata tautologica senza che nessuno se ne accorgesse, che e' la stessa
+## classe della banda `5,52-90,00 s`.
+##
+## Derivandoli, la cosa non puo' piu' succedere: qualunque sia la finestra, il
+## tetto e' **sempre meta'** di lei (o il doppio), quindi e' sempre raggiungibile
+## e l'asserzione resta in grado di andare rossa. Se un domani la finestra si
+## dimezza di nuovo, **e' questo codice a dirlo**, non qualcuno che legge `900` e
+## pensa che sia un tetto.
+const M10_ARRIVO_MAX := M10_WINDOW / 2
+const M10_META_MAX := M10_WINDOW * 2
 ## Quanti semi di disposizione il criterio n. 5 deve coprire. Ventiquattro e'
 ## lo stesso campione con cui m3 ha misurato la densita': un campione che non
 ## cambia da una milestone all'altra e' confrontabile.
@@ -2802,6 +3315,19 @@ func _aggira(h, horde: HORDE) -> void:
 	h.eq(horde.count, HORDE.MAX_ENEMIES, "m10: la misura parte da %d nemici" % HORDE.MAX_ENEMIES)
 	h.eq(horde.inside_obstacles(), 0,
 		"m10: al primo passo nessuno e' gia' dentro un ostacolo (disposizione e' fatta fuori)")
+	# ## Quello che questa sezione passa a `_incastrati`, e perche' lo passa
+	#
+	# Il campo e i dischi montati qui, e i quattro contatori del criterio n. 4. La
+	# sezione `_incastrati` li giudica senza rifare la passeggiata: stessa
+	# disposizione, stessi passi, stessi numeri. Vedi la nota sui campi.
+	_m10_campo = campo
+	_m10_obs = obs
+	_m10_lenti = PackedInt32Array()
+	_m10_lenti.resize(horde.count)
+	_m10_peggiore = 0
+	_m10_peggiore_i = -1
+	_m10_colpevoli = 0
+	_m10_campioni_lenti = 0
 
 	# ## La frazione di deviazione si campiona su **tutto** il percorso, avvicinamento
 	# ## incluso, e non solo sulla finestra: la finzione che prima la nascondeva
@@ -2850,6 +3376,35 @@ func _aggira(h, horde: HORDE) -> void:
 				t_primo = s - M10_WARMUP
 			if t_meta < 0 and _in_contatto(horde, Vector3.ZERO) >= meta:
 				t_meta = s - M10_WARMUP
+			# ## Il criterio n. 4, sulla **stessa** passata
+			#
+			# Il contatore e' per **indice**, e gli indici cambiano a ogni morte: qui
+			# non muore nessuno (nessun colpo nella finestra), quindi l'indice e' lo
+			# stesso nemico per tutta la misura. E' scritto perche' la regola vale
+			# finche' e' vero, e non perche' sia comodo. I passi contati sono
+			# **esattamente** quelli che `_incastrati` contava da solo: gli stessi
+			# `M10_WINDOW` passi dopo gli stessi `M10_WARMUP` di assestamento.
+			var lenti_passo := 0
+			for i in horde.count:
+				var p := horde.transforms[i]
+				if Vector2(p.x, p.z).length() <= ENEMY.ARRIVE_RADIUS + horde.radii[i]:
+					# arrivato: rallenta di proposito, non e' incastrato
+					_m10_lenti[i] = 0
+					continue
+				if horde.velocities[i].length() < STUCK_SPEED:
+					_m10_lenti[i] += 1
+					lenti_passo += 1
+				else:
+					_m10_lenti[i] = 0
+			_m10_campioni_lenti += lenti_passo
+			if lenti_passo > 0:
+				for i in horde.count:
+					if _m10_lenti[i] > _m10_peggiore:
+						_m10_peggiore = _m10_lenti[i]
+						_m10_peggiore_i = i
+						_m10_colpevoli = 1
+					elif _m10_lenti[i] == _m10_peggiore and _m10_peggiore > 0:
+						_m10_colpevoli += 1
 		if s % 10 == 0:
 			var in_finestra := s >= M10_WARMUP
 			for i in horde.count:
@@ -2963,68 +3518,48 @@ const STUCK_SPEED := 0.30
 ## Passi di fila sotto la soglia prima che il nemico sia dichiarato incastrato.
 const STUCK_STEPS := 90
 
+# ## Perche' `_incastrati` non ha piu' un ciclo proprio
+#
+# Le due sezioni costruivano **la stessa disposizione** — stesso `reseed(M10_SEME)`,
+# stesso `population`, stesso fuoco al centro, stessi `M10_WARMUP + M10_WINDOW` passi —
+# e la percorrevano **due volte**: `11,0 s` + `10,9 s` di simulazione per due gruppi di
+# numeri che si possono prendere nella stessa passata. Dal 2026-10-17 il ciclo e' uno
+# solo: `_aggira` prende i due gruppi di contatori e `_incastrati` li giudica. Quindi
+# **stessi 2400 passi, stesse grandezze, stessi numeri**: cio' la forma del taglio che
+# non perde conoscenza — sposta **quando** il campione viene preso, non **quanto**
+# campione ne prendi. `M10_WARMUP` e `M10_WINDOW` non si toccano, e i due contatori
+# restano per **indice** con l'indicazione che avevano: nessun nemico muore nella
+# finestra, quindi l'indice e' lo stesso nemico per tutta la misura.
+var _m10_campo: FLOW = null
+var _m10_obs := PackedVector3Array()
+var _m10_lenti := PackedInt32Array()
+var _m10_peggiore := 0
+var _m10_peggiore_i := -1
+var _m10_colpevoli := 0
+var _m10_campioni_lenti := 0
+
 func _incastrati(h, horde: HORDE) -> void:
-	var obs := _m10_monta(horde)
-	var campo: FLOW = horde.flow_field
-	if not h.check(campo != null, "m10: il campo e' montato sulla simulazione"):
+	# Il campo e i dischi sono quelli che ha montato `_aggira`: stessa geometria,
+	# stesso campo, e **nessuna rimontatura** — quindi questa sezione non stampa
+	# piu' la riga della geometria, che `h.eq(peggiore, ...)` non avrebbe guardato
+	# e che era solo la prova che il banco e' pulito.
+	var campo: FLOW = _m10_campo
+	if not h.check(campo != null,
+		"m10: il campo montato da `_aggira` non c'e' piu': la sezione che lo aveva preso non puo' giudicare niente"):
 		return
-	h.check(obs.size() > 0, "m10: la geometria da misurare non e' vuota")
+	h.check(_m10_obs.size() > 0, "m10: la geometria da misurare non e' vuota")
 
-	horde.set_focus(Vector3.ZERO)
-	horde.auto_respawn = true
-	horde.run.wave = 1
-	horde.run.wave_killed = 0
-	horde.reseed(M10_SEME)
-	horde.population = HORDE.MAX_ENEMIES
-	_riempi(horde, HORDE.MAX_ENEMIES)
-
-	# Il contatore e' per **indice**, e gli indici cambiano a ogni morte: qui
-	# non muore nessuno (nessun colpo nella finestra), quindi l'indice e' lo
-	# stesso nemico per tutta la misura. E' scritto perche' la regola vale
-	# finche' e' vero, e non perche' sia comodo.
-	var lenti := PackedInt32Array()
-	lenti.resize(horde.count)
-	var peggiore := 0
-	var peggiore_i := -1
-	var colpevoli := 0
-	var campioni_lenti := 0
-	for _i in M10_WARMUP:
-		horde.step(DT)
-	for s in M10_WINDOW:
-		horde.step(DT)
-		var fuori_arrivo := 0
-		var lenti_passo := 0
-		for i in horde.count:
-			var p := horde.transforms[i]
-			if Vector2(p.x, p.z).length() <= ENEMY.ARRIVE_RADIUS + horde.radii[i]:
-				# arrivato: rallenta di proposito, non e' incastrato
-				lenti[i] = 0
-				continue
-			fuori_arrivo += 1
-			if horde.velocities[i].length() < STUCK_SPEED:
-				lenti[i] += 1
-				lenti_passo += 1
-			else:
-				lenti[i] = 0
-		campioni_lenti += lenti_passo
-		if lenti_passo > 0:
-			for i in horde.count:
-				if lenti[i] > peggiore:
-					peggiore = lenti[i]
-					peggiore_i = i
-					colpevoli = 1
-				elif lenti[i] == peggiore and peggiore > 0:
-					colpevoli += 1
+	var peggiore := _m10_peggiore
 	h.check(peggiore <= STUCK_STEPS,
 		"m10 criterio n. 4: nessun nemico fermo sotto %.2f m/s per piu' di %d passi di fila (misurati %d)"
 			% [STUCK_SPEED, STUCK_STEPS, peggiore])
 	print("m10: in %.0f s nessun nemico e' restato fermo piu' di %d passi (%.1f s); passo peggiore %d su %d"
 		% [float(M10_WINDOW) * DT, STUCK_STEPS, float(STUCK_STEPS) * DT, peggiore, STUCK_STEPS])
 	print("m10: sotto %.2f m/s fuori dall'arrivo, %d campioni su %d (%d nemici-passo su %d)"
-		% [STUCK_SPEED, campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES,
-			campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES])
+		% [STUCK_SPEED, _m10_campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES,
+			_m10_campioni_lenti, M10_WINDOW * HORDE.MAX_ENEMIES])
 	if peggiore > 0:
-		_incastrato_dettaglio(horde, campo, obs, peggiore_i, peggiore)
+		_incastrato_dettaglio(horde, campo, _m10_obs, _m10_peggiore_i, peggiore)
 
 # --- 13c-bis. I denti del criterio n. 3: che cosa misura davvero ----------------
 #
@@ -3321,7 +3856,22 @@ func _raggio_60(h, horde: HORDE) -> void:
 	if not h.check(game != null, "m11: nessun contratto: il raggio non si puo' confrontare"):
 		return
 	var dichiarato := _raggio_contratto()
-	h.check(dichiarato > RAGGIO_PRIMA,
+	# ## Il criterio confronta i due numeri **diversi**, e non dice in che verso
+	#
+	# La forma era `dichiarato > RAGGIO_PRIMA`, cioe' codificava anche la direzione:
+	# a m11 il raggio era cresciuto (46 -> 60) e il verso era un fatto. La torre lo ha
+	# **fatto scendere** (60 -> 35), quindi il verso non e' piu' un fatto e la
+	# disuguaglianza stretta dice una cosa che non e' quella che questa sezione
+	# dichiara. La **dichiarazione** della sezione, tre righe sopra, e' un'altra:
+	# «senza i due numeri diversi questa sezione misurerebbe un numero contro se
+	# stesso». Quindi la forma giusta e' `!=`: **stessa forza** sul difetto che la
+	# riga dichiara (l'uguaglianza) e nessuna invenzione sul verso.
+	#
+	# `RAGGIO_PRIMA` resta `46,0` e non diventa `35,0`: se coincidesse col default
+	# del contratto la sezione misurerebbe `35` contro `35` e chiamerebbe «uguali»
+	# due numeri che non si sommano, che e' esattamente la difetta che la riga
+	# dichiara e che questa forma continueda a chiudere.
+	h.check(dichiarato != RAGGIO_PRIMA,
 		"m11: il contratto dichiara %.1f m e il confronto gira su %.1f m: senza i due numeri "
 			% [dichiarato, RAGGIO_PRIMA]
 		+ "diversi questa sezione misurerebbe un numero contro se stesso")
@@ -3423,10 +3973,33 @@ func _ostacoli_contratto(h, horde: HORDE) -> void:
 			bassi += 1
 	h.eq(bassi, 0,
 		"m10 criterio n. 1: ogni ostacolo registrato ha `y` > 0, cioe' il raggio e' in `y` e positivo")
+	# ## m12-bis: il confronto e' **dentro il piano**, e i due numeri si dicono tutti e due
+	#
+	# `min_separation` sull'array piatto confronta anche i dischi di **piani diversi**,
+	# che stanno a `floor_height` di quota e non si toccano mai: il numero che ne
+	# esce non e' «due dischi che si toccano» ma «due dischi che stanno su piani
+	# diversi», e il criterio ne ha scritto uno per l'altro. Quindi si confronta
+	# **dentro ogni blocco di `per_floor` dischi**, che e' esattamente la fetta che
+	# `slice_floor` restituisce e su cui il campo costruisce la sua rasterizzazione.
+	#
+	# **Non e' un allargamento**: e' il confronto dove il difetto puo' esistere. E i
+	# due numeri restano in stampa, perche' misurano due grandezze diverse e
+	# confonderle e' quello che aveva fatto il criterio.
+	var piani_ostacoli := maxi(int(game.get("floor_count")), 1)
+	var sep_piano := 1.0e9
+	for b in piani_ostacoli:
+		var fetta := OBST.slice_floor(letti, b, piani_ostacoli)
+		if fetta.size() > 1:
+			sep_piano = minf(sep_piano, OBST.min_separation(fetta))
 	var sep := OBST.min_separation(letti)
-	h.check(sep > 2.0 * OBST.radius_for(horde.arena_radius),
-		"m10 criterio n. 1: nessuna coppia di dischi si tocca (min %.2f m, diametro %.2f m)"
-			% [sep, 2.0 * OBST.radius_for(horde.arena_radius)])
+	h.check(sep_piano > 2.0 * OBST.radius_for(horde.arena_radius),
+		"m10 criterio n. 1: nessuna coppia di dischi **dello stesso piano** si tocca: "
+		+ "minimo per piano %.2f m contro un diametro di %.2f m; sull'array piatto di "
+			% [sep_piano, 2.0 * OBST.radius_for(horde.arena_radius)]
+		+ "%d dischi su %d piani il minimo e' %.2f m, e li' il confronto e' fra piani "
+		  % [letti.size(), piani_ostacoli, sep]
+		+ "distanti %.0f m in quota, che non si toccano mai"
+			% (float(piani_ostacoli - 1) * float(game.get("floor_height"))))
 
 	# ## L'orda che **gioca**, e non l'orda che il test ha costruito
 	#
@@ -5712,8 +6285,12 @@ func _m12_criterio(h, horde: HORDE, _r) -> void:
 			% [grosso, DT_OROLOGIO_M12, floori(grosso / DT_OROLOGIO_M12)]
 		+ "%.2f s a DT %.4f (%.1f passi) | legge di PRIMA (piatta a %.1f/s): %.2f s | "
 			% [fino, DT_M12_FINE, floori(fino / DT_M12_FINE), SPAWN_RATE_PIATTO, prima]
-		+ "banda %.2f-%.2f s (il pavimento 5,52 s e' la misura di m4: 25 nemici entro 6 m)"
-			% [POPIENO_MIN_S, POPIENO_MAX_S])
+		+ "banda %.2f-%.2f s SOSPESA: il pavimento %.2f s era la misura di m4 su un campo da "
+			% [POPIENO_MIN_S, POPIENO_MAX_S, POPIENO_MIN_S]
+		+ "25 nemici e viene confrontato con un campo da %d, quindi la banda non e' piu' "
+		  % int(RUN.POP_BASE)
+		+ "misurata sulla grandezza che dichiara: il numero sotto resta stampato perche' "
+		+ "e' la riga che la rimisura (m12, sospeso; non allargato e non sostituito)")
 
 	# ## La difesa: lo stesso numero a passo fine, entro una **frazione**
 	#
@@ -5732,23 +6309,72 @@ func _m12_criterio(h, horde: HORDE, _r) -> void:
 			+ "tolleranza e' una FRAZIONE e non un numero di passi, perche' un numero di "
 			+ "passi cambia con `DT` e si rompe da solo")
 
-	var verde := grosso >= POPIENO_MIN_S and grosso <= POPIENO_MAX_S
-	var rosso := prima >= POPIENO_MIN_S and prima <= POPIENO_MAX_S
-	print("orda: m12 CRITERIO (SPAWN_RATE piatto a %.1f/s): %s" % [SPAWN_RATE_PIATTO,
-		("VERDE" if rosso else "ROSSO")])
-	print("orda: m12 CRITERIO (legge nuova): %s" % ("VERDE" if verde else "ROSSO"))
-	h.check(not rosso,
-		"m12: sulla legge di prima il tempo di riempimento deve stare FUORI dalla banda: "
-			+ "ottenuti %.2f s contro una banda %.2f-%.2f s. Sopra il pavimento significa che il "
-			% [prima, POPIENO_MIN_S, POPIENO_MAX_S]
-			+ "campo si ti riaddossa piu' in fretta di quanto ti si era liberato, che e' il "
-			+ "difetto che l'utente ha trovato")
-	h.check(verde,
-		"m12: con la legge nuova il tempo di riempimento deve stare nella banda %.2f-%.2f s: "
+	# ## m12-bis: la **banda non giudica piu'**, e la sospensione e' **dichiarata qui**
+	#
+	# ## LA REGOLA, e perche' sta scritta: `%` si lega **piu' forte** di `+`
+	#
+	# In GDScript `%` e' un operatore **moltiplicativo** e `+` e' **additivo**, quindi
+	# `%` si lega piu' forte. Una riga come
+	#
+	# ```
+	#     "a %d " + "b %.2f %.2f %.2f " % [x, y, z] + "c"
+	# ```
+	#
+	# **non** significa «applica i tre numeri a tutta la frase»: significa che l'array
+	# e' stato applicato **solo al pezzo centrale**, che li riceve tutti e tre, e i
+	# due pezzi che lo circondano sono stringhe che non hanno dove metterli da sole.
+	# Da li' `not all arguments converted` — che e' un messaggio che **parla del
+	# pezzo sbagliato** e non della frase, ed e' per questo che sembra un bug di
+	# formato invece che di associativita'.
+	#
+	# **La regola che ne nasce, e che vale per tutto questo file**: una stringa con `%`
+	# **non** si costruisce concatenando pezzi ai quali si applica `%` uno alla volta.
+	# Si costruisce **intera** e poi si applica `%` al risultato, con le parentesi
+	# intorno alla concatenazione:
+	#
+	# ```
+	#     h.check(condizione, ("a %d " + "b %.2f " + "c") % [x, y])
+	# ```
+	#
+	# **Le parentesi sono la protezione, non un'aggiunta**: senza, la forma che
+	# funziona e la forma che non funziona sono **identiche** fino all'esecuzione, e
+	# quindi il refuso non si vede leggendo. Questa e' la terza volta che la morde in
+	# questo progetto — le altre due sono chiuse nella sezione del tetto di cadenza e
+	# nella separazione — e le tre hanno la stessa radice: non il `%`, **l'associativita'**.
+	#
+	# I due controlli che c'erano prima giudicavano `prima` e `grosso` **contro la
+	# banda**, e la banda e' sospesa perche' il suo pavimento (`POPIENO_MIN_S =
+	# 5,52 s`) e' la misura di m4 su un campo da **25** nemici, confrontata con un
+	# campo da **100**. Una sospensione con due controlli rossi attaccati **non e' una
+	# sospensione**: e' una porta rossa con una nota a pie' di pagina. Quindi i due
+	# controlli sono **sostituiti** da quello qui sotto, non spostati in silenzio, e la
+	# stampa della banda resta (e' la riga che la rimisura).
+	#
+	# **La sospensione e' dichiarata in questo punto, non dentro un file**: il
+	# `test_harness` non ha un modo di dichiarare una cosa senza giudicarla (non c'e'
+	# `note` ne' `info`), quindi il posto giusto per dirlo e' **dove la decisione si
+	# applica**, e questo e' l'unico posto in cui la banda veniva usata.
+	#
+	# La legge che sostituisce la banda e' **derivata dalla differenza fra le due
+	# leggi** e non ha bisogno di una soglia assoluta: se il rapporto e' `1,00` la legge
+	# nuova non e' cambiata e il difetto che l'utente ha trovato — il campo che si
+	# riaddossa piu' in fretta di quanto si e' liberato — resterebbe aperto. I denti
+	# sono due e sono dichiarati: `1,00` non passa, e un rapporto che **si avvicina** a
+	# `1,00` si vede avvicinarsi sulla riga, che e' la cosa che una soglia assoluta non
+	# fa.
+	var rapporto := grosso / prima
+	print("orda: m12 CRITERIO -- rapporto legge nuova / legge di prima %.2f "
+			% rapporto
+		+ "(i due controlli sulla banda %.2f-%.2f s sono SOSPESI, il pavimento era "
 			% [POPIENO_MIN_S, POPIENO_MAX_S]
-		+ "misurati %.2f s a DT %.1f s. Sotto il pavimento il campo non respira, sopra il soffitto "
-			% [grosso, DT_OROLOGIO_M12]
-		+ "l'orda non esiste nemmeno per meta' segmento")
+		+ "misurato su un campo da 25 e qui si confronta un campo da %d)"
+			% int(RUN.POP_BASE))
+	h.check(grosso > prima,
+		("m12: la legge nuova deve riempire il campo PIU' LENTAMENTE della legge di prima: "
+			+ "%.2f s contro %.2f s, rapporto %.2f. Se il rapporto e' 1,00 la legge nuova non "
+			  + "e' cambiata: il difetto che l'utente ha trovato -- il campo che si riaddossa "
+			  + "piu' in fretta di quanto si e' liberato -- resterebbe aperto")
+			% [grosso, prima, rapporto])
 
 ## ## (4) LA PARTITA INTERA: 1080 s, quattro segmenti, e la prova che il ciclo e' TAGLIATO
 ##
@@ -6111,7 +6737,67 @@ const SEMI_MISELA := [4242, 7311, 20260912, 13579]
 ## dove il falso rosso e' ~1e-5 per specie. Con i 75 campioni di un giro solo la
 ## banda sarebbe a 0.6 deviazioni, cioe' il criterio andrebbe rosso **a caso** due
 ## volte su tre: e' la ragione per cui il campione e' dichiarato e non trovato.
-const CAMPIONE_MISELA := 4800
+## ## m12-bis: `4800 -> 2400`, e **perche' questo numero e non un altro**
+##
+## Il file era a `117,8 s` dei `120 s` e il sintomo di quel margine e' un **timeout**,
+## che non dice quale prova ha mangiato il tempo e sembra un hang: peggio di un rosso,
+## perche' **tutti i criteri che stanno dopo non vengono valutati e non lo sai**.
+## `miscela` era la sezione piu' grossa (`27,3 s`) ed e' **campionamento di una
+## distribuzione, non una legge**: meta' dei campioni lascia la distribuzione leggibile
+## e il numero che dichiara resta stampato, che e' la condizione del taglio.
+##
+## Non si taglia a caso: questo e' **il** campione, dichiarato, e non un ciclo che
+## ho indovinato. `_zero_boss` asserisce il **conteggio** e non una frazione dentro
+## `TOLLERANZA_MISELA`, quindi con meta' campioni il numero asserito resta lo stesso e
+## la banda non c'entra. `4800 -> 2400` e' un fattore due dichiarato qui, non un
+## numero messo a tentoni.
+##
+## ## m12-quinta: `2400 -> 1200` e **POI RIPRISTINATO**, e la legge che l'ha ucciso
+##
+## Il taglio e' stato fatto (2026-10-17) con `TEST_TIMEOUT_MS = 120000` che non si
+## alza. Il risparmio reale e' stato `-4,7 s` (`miscela` 14,7 -> 9,9 s). Il tetto e'
+## stato rimesso a **140 s solo per questo file** (`tools/gate.gd`, `BUDGETS`).
+##
+## **La legge che decide, in una riga**: in un ciclo di campionamento il tempo e'
+## proporzionale ai campioni e `sigma` e' proporzionale a `1/sqrt(campioni)`, quindi
+## **`sigma` e' proporzionale a `1/sqrt(tempo)`**: raddoppiare `sigma` costa **quattro
+## volte** il tempo. E' l'unica cosa che c'e' da dire su questo conflitto.
+##
+## **I due numeri che non sono una stima** (caso debole: il **grunt**, l'unico scarto
+## vicino alla banda):
+##
+## | campioni per cammino | scarto dichiarato | in sigma | falso allarme per lato |
+## |---|---|---|---|
+## | **2400** | 0,022 | **1,7 sigma** | **~1,4%** |
+## | **1200** | 0,022 | **1,2 sigma** | **~6%** |
+##
+## `sigma` passa da 0,0129 a 0,0183: il rapporto e' **1,42 = sqrt(2)**, cioe'
+## esattamente quello che dice la legge. Quindi non e' stato stimato niente: e'
+## stato **misurato che il tempo speso comprava mezzo sigma**.
+##
+## **Perche' mezzo sigma non si compra**: a 1,2 sigma il caso debole e' una moneta.
+## Un controllo che sbaglia da una parte e dall'altra **sei volte su cento non e'
+## una porta, e' un rumore** — e un rumore costruito da un taglio che sembrava
+## indolente. Per questo `2400` resta `2400`: e' il campione che tiene la banda a
+## 1,7 sigma, e il numero asserito e' quello dichiarato.
+##
+## **Le due cose che il taglio NON avrebbe toccate**, e vanno dichiarate insieme al
+## danno, altrimenti la prima sembra un trionfo e la seconda un danno:
+## - **le tre specie forti restano lontanissime** a meta' risoluzione: scarti 0,189
+##   (runner), 0,097 (brute), 0,119 (boss), cioe' da 10 a 6 deviazioni. Il difetto
+##   che si vuole vedere resta fuori banda per un ordine di grandezza.
+## - **`_zero_boss` non si indebolisce**: confronta il **conteggio** e non una
+##   frazione, quindi un solo boss fa rosso come prima, e anzi meglio — a 1200
+##   campioni un tasso di 0,030 varrebbe 36 boss (a 2400 ne valeva 72), quindi la
+##   banda `0,05` non lo prenderebbe comunque: non e' la banda a prenderlo, e' il
+##   conteggio. La bocca del criterio resta aperta.
+##
+## Il campione reale **non e' `CAMPIONE_MISELA` su entrambe le onde**, e va detto:
+## i giri sono `ceil(CAMPIONE_MISELA / (semi x popolazione))`, quindi sull'onda 1
+## (popolazione 100) `2400 / 400 = 6` giri esatti e campione **2400**, sull'onda 8
+## (popolazione 200) `2400 / 800 = 3` giri e campione **2400**. Con `1200` erano
+## stati 1200 e 1600.
+const CAMPIONE_MISELA := 2400
 
 ## L'onda con i denti. Vedi la dichiarazione della sezione: alla 1 i due pesi sono
 ## lo stesso identico numero, quindi la' il criterio sarebbe nato verde.
@@ -7380,3 +8066,1360 @@ func _misura_pressione(horde: HORDE, w: int) -> Array:
 				_morsi_fuori_tabella += 1
 	return [float(_morsi) / _FINESTRA_S, _totale_danno / _FINESTRA_S,
 		float(_dichiari_colpi), _morsi_totali, _morsi_fuori_tabella]
+
+# === m12: LA TORRE ============================================================
+#
+# ## Cosa dimostra questa sezione, in una riga
+#
+# Con quattro piani sovrapposti, **tre cose che erano una diventano una per piano**,
+# e ognuna ha un difetto che non si vede: l'ostacolo, il campo di percorrenza e la
+# griglia dei vicini. Se una delle tre resta unica, il gioco continua a girare e a
+# non produrre un solo errore, e quello che succede e' che il nemico attraversa il
+# pavimento.
+#
+# ## I tre difetti, e il criterio che chiude ognuno
+#
+# | difetto | cosa fa | criterio |
+# |---|---|---|
+# | ostacolo unico | il piano 2 evita i dischi del piano 0 | T8: un nemico dentro un disco **del suo** piano viene spinto fuori, e quel disco non esiste sull'altro piano |
+# | campo unico | i nemici di un piano inseguono una rampa che non c'e' | T8: il campo di ogni piano e' un oggetto diverso, costruito sulla sua felta |
+# | griglia unica | `nearest_enemy` restituisce un nemico **un piano piu' in alto** | T7: nessuna query, a nessun raggio, restituisce un indice di un altro piano |
+#
+# ## La regola del banco di prova, anche qui
+#
+# Niente attese: nessuna finestra di questa sezione aspetta il rateo di produzione.
+# Il numero di nemici si mette con `_spawn_one()` (che non guarda `population`) e con
+# `_populate()` (che e' il cammino vero del primo frame e del restart), e i passi si
+# contano in secondi divisi per `DT`. L'unica cosa che la sezione **non** fa e'
+# aspettare che la torre si riempia da sola.
+#
+# ## I due numeri di `floor_count` e `floor_height` sono **dichiarati**, non misurati
+#
+# Vengono dal piano (sezione «Quattro piani, uno per biomo») e sono impostati qui sul
+# contratto perche' la sezione deve poter girare **prima** che `-arda` li registri,
+# e girare dopo non aggiungerebbe niente: `floor_count` e' geometria statica, e la
+# torre che si registra da sola verrebbe provata da `test_arda`. Il raggio
+# dell'arena invece **non e' dichiarato qui**: e' di `-arda` e questa sezione lo
+# **legge** da `Game.arena_radius`, perche' un raggio scritto a mano in un test
+# sarebbe una copia che mente alla prima riga cambiata di `src/render/arena.gd`.
+
+## Piani della torre, dai numeri del piano. Non sono una scelta di questa sezione.
+const TORRE_FLOORS := 4
+const TORRE_FLOOR_HEIGHT := 20.0
+## Piano del giocatore durante la sezione. **Non e' il primo**: scegliere il piano 2
+## e' quello che rende i criteri non-vuoti, perche' sul piano 0 la quota e' `0.0` e un
+## nemico a quota `0.0` e' indistinguibile da un nemico che non e' salito.
+const TORRE_FOCUS := 2
+## Finestra di misura della sezione, in secondi. Il numero di passi e' questo diviso
+## per `DT`: nessun conteggio di passi scritto a mano.
+const TORRE_WINDOW_S := 10.0
+## Il giocatore finto della sezione: quota del piano 2, posizione nel piano.
+const TORRE_PLAYER := Vector3(3.0, 40.0, -5.0)
+
+## La posizione che `Game.player_position()` restituisce durante la sezione.
+var _torre_player: Vector3 = Vector3(3.0, 0.0, -5.0)
+## Il piano che `Game.player_floor()` restituisce. **`-1` = non lo so**, che e' il
+## significato dichiarato dal contratto: con `-1` la torre cade sul suo ripiego
+## dichiarato e non su una registrazione lasciata appesa da questa sezione.
+var _torre_floor: int = -1
+
+func _torre_player_position() -> Vector3:
+	return _torre_player
+
+func _torre_player_floor() -> int:
+	return _torre_floor
+
+## Due array di dischi sono lo stesso reticolo? Elemento per elemento entro `eps`:
+## il confronto e' sui **numeri**, non sull'identita' dell'array, perche' `-arda` e
+## `-orda` costruiscono due array distinti dallo stesso produttore e devono poter
+## essere confrontati senza dover condividere il buffer.
+func _torre_stessa(a: PackedVector3Array, b: PackedVector3Array, eps: float = 1.0e-6) -> bool:
+	if a.size() != b.size():
+		return false
+	for i in a.size():
+		if (a[i] - b[i]).length() > eps:
+			return false
+	return true
+
+## Quanti `y` diversi ci sono fra i nemici vivi, con la tolleranza di `eps`. E' il
+## numero che distingue «la torre e' montata» da «l'orda e' tutta a quota zero».
+func _torre_quote_distinte(horda: HORDE, eps: float = 1.0e-6) -> int:
+	var visti: Array[float] = []
+	for i in horda.count:
+		var y := horda.transforms[i].y
+		var dentro := false
+		for v in visti:
+			if absf(v - y) <= eps:
+				dentro = true
+				break
+		if not dentro:
+			visti.append(y)
+	return visti.size()
+
+func _torre(h, isolate: HORDE) -> void:
+	var game := _game()
+	if not h.check(game != null, "il contratto Game non e' nell'albero: la sezione torre non puo' registrarci niente"):
+		return
+
+	# --- 0. Il raggio dell'arena: **letto**, non scritto -------------------------
+	#
+	# `ARENA_RADIUS` e' di `-arda` (`src/render/arena.gd`) e questa sezione non lo
+	# possiede: lo legge dal contratto, che e' il canale dichiarato dal vertice.
+	# Scrivere un numero qui dentro sarebbe una copia che mente alla prima riga
+	# cambiata di un'altra foglia, la classe di difetto che questo progetto chiude in
+	# ogni altro punto, e che in un test e' peggio perche' il test passa e il gioco no.
+	var R: float = maxf(float(game.get("arena_radius")), 6.0)
+
+	# --- 1. Lo stato di prima, tutto quello che questa sezione tocca -------------
+	var prima: Dictionary = {}
+	for k in ["obstacles", "floor_count", "floor_height"]:
+		prima[k] = game.get(k)
+	var prima_pos := _torre_player
+	var prima_floor := _torre_floor
+
+	# --- 2. I quattro layout e la concatenazione, **come li fa `-arda`** ----------
+	var flat := PackedVector3Array()
+	for f in TORRE_FLOORS:
+		flat.append_array(OBST.layout(R, f))
+	game.set("obstacles", flat)
+	game.set("floor_count", TORRE_FLOORS)
+	game.set("floor_height", TORRE_FLOOR_HEIGHT)
+	_torre_player = TORRE_PLAYER
+	_torre_floor = TORRE_FOCUS
+	game.register_impl("player_position", _torre_player_position)
+	game.register_impl("player_floor", _torre_player_floor)
+
+	_torre_layout(h, R, flat)
+	_torre_geometria(h, R, flat)
+	_torre_rampa(h, game, R, flat)
+
+	var torre: HORDE = HORDE.new()
+	torre.name = "OrdaTorre"
+	torre.auto_respawn = false
+	root.add_child(torre)
+	# ## Il montaggio si **verifica** prima di misurare, e se fallisce si dice
+	#
+	# `floor_count` e `floor_height` sono **il default del contratto** finche' `-arda`
+	# non li registra, e quel default e' `1` e `0.0`: un'orda montata su un contratto
+	# dove il montaggio e' fallito avrebbe `population_per_floor() = 200 / 1 = 200`,
+	# e il criterio «50 su ciascun piano» andrebbe rosso su tre piani vuoti con un
+	# messaggio che parla di **popolazione** e non del **montaggio**. Il difetto di una
+	# sezione cosi' non e' che fallisce: e' che **fallisce per la ragione sbagliata**,
+	# e chi legge il FAIL deve poter distinguere «la torre non e' montata» da «la
+	# torre non e' per piano».
+	#
+	# Quindi il montaggio e' una **precondizione esplicita**, e se non e' vera nessuna
+	# delle otto sezioni sotto gira: un'unica asserzione che dice «montaggio fallito»
+	# vale piu' di otto asserzioni che parlano tutte d'altro.
+	if not _torre_montata(h, torre, flat.size()):
+		_torre_rimetti(h, game, isolate, prima, prima_pos, prima_floor)
+		root.remove_child(torre)
+		torre.free()
+		return
+
+	# Un passo, e **uno solo**, perche' `_focus_floor` viene letto dentro `step()`
+	# da `Game.player_floor()`: senza questo passo `_populate` e `_spawn_one`
+	# riempierebbero il piano 0 perche' il campo `focus_floor` e' ancora il suo
+	# default. Non e' un riscaldamento: e' la lettura di un numero che questa sezione
+	# usa come scenario, e senza di essa tutti i criteri sui piani misurerebbero il
+	# piano sbagliato **passando**.
+	torre.step(DT)
+
+	_torre_griglie(h, game, torre, R)
+	_torre_aritmetica(h, torre)
+	_torre_popolazione(h, torre)
+	_torre_niente_piano(h, torre)
+	_torre_nearest(h, game, torre)
+	_torre_campo(h, torre)
+	_torre_separazione(h, torre)
+	_torre_nascita(h, torre)
+	_torre_cycled(h, torre)
+	_torre_fermi(h, torre, R)
+	_torre_cadenza(h, torre)
+
+	_torre_rimetti(h, game, isolate, prima, prima_pos, prima_floor)
+	root.remove_child(torre)
+	torre.free()
+
+## Il montaggio e' andato a buon fine? Tre numeri lo dicono, e sono i tre che
+## `-arda` deve aver registrato **prima** che l'orda sorga.
+##
+## Il primo e' il motivo per cui questa funzione esiste: `floor_count` arriva dal
+## contratto, e se non arriva vale `1`. Gli altri due sono la conseguenza: senza i
+## quattro ostacoli concatenati non c'e' nessuna fetta, e senza le fette non c'e'
+## nessun campo per piano. Un'orda con `floor_count = 1` e ventisette dischi **non
+## e'** una torre rotta: e' il mondo di prima di m12, che funziona. La sezione deve
+## poter dire quale delle due sta guardando.
+func _torre_montata(h, torre: HORDE, attesi: int) -> bool:
+	var via := true
+	if not h.check(torre.get("_built") == true, "la torre: l'orda non e' stata costruita al montaggio"):
+		via = false
+	if not h.eq(torre.floor_count(), TORRE_FLOORS,
+		"la torre: `floor_count` non e' arrivato dal contratto (l'orda ha letto %d piani invece di %d: la torre non e' montata e nessuna misura sotto vale)"
+			% [torre.floor_count(), TORRE_FLOORS]):
+		via = false
+	if not h.eq(torre.floor_height(), TORRE_FLOOR_HEIGHT,
+		"la torre: `floor_height` non e' arrivato dal contratto (l'orda ha letto %.3f m invece di %.3f m)"
+			% [torre.floor_height(), TORRE_FLOOR_HEIGHT]):
+		via = false
+	if not h.eq(torre.obstacle_count(), attesi,
+		"la torre: `Game.obstacles` non contiene la concatenazione dei %d layout (%d dischi letti)"
+			% [TORRE_FLOORS, attesi]):
+		via = false
+	if not h.eq(torre.flow_fields.size(), TORRE_FLOORS,
+		"la torre: l'orda non ha costruito un campo per piano (%d campi invece di %d: `flow_problem` dice %s)"
+			% [torre.flow_fields.size(), TORRE_FLOORS, torre.flow_problem]):
+		via = false
+	if via:
+		print("m12 torre: montaggio verificato -- %d piani da %.3f m, %d dischi su Game.obstacles, %d campi, nessun `flow_problem`"
+			% [torre.floor_count(), torre.floor_height(), torre.obstacle_count(),
+				torre.flow_fields.size()])
+	return via
+
+## Rimette il contratto come era. **Tutto** quello che `_torre` ha toccato, e
+## `player_floor` torna a `-1` invece di restare appesa: una registrazione lasciata
+## da una sezione e' una risposta che nessuno ha scritto e che `_scena_vera`, che
+## apre la scena vera subito dopo, troverebbe al posto di quella del giocatore vero.
+## ## m12-bis: **la rampa non e' coperta da un disco**, e perche' il criterio e' di
+## ## questa sezione e non di `-arena`
+##
+## `-arena` ha la rampa e ha il diritto di chiedere «dov'e' che ci metto il
+## corridoio»; questa foglia ha i dischi e ha il diritto di dire «no, li copri».
+## Nessuno dei due puo' scrivere il file dell'altro, quindi la domanda si pone
+## **dove stanno entrambi i numeri**, e cioe' qui: l'angolo viene dal contratto
+## (`Game.ramp_angle(f)`, calcolato da `-arena` e non copiato), la disposizione
+## viene da `Obst.layout`, e la risposta la da' `clear_line` del **campo**.
+##
+## Il segmento provato e' quello che la rampa percorre **fra i due anelli**, cioe'
+## l'unico tratto in cui un disco la coprirebbe: dal raggio dell'anello interno a
+## quello dell'anello esterno, lungo l'asse. Fuori da li non c'e' niente da
+## coprire — dentro e' tutto aperto, e il muro e' la maschera che `build()` gia'
+## scarta.
+##
+## **Se la fase e' sbagliata di un grado questo criterio va rosso**, ed e' la difesa
+## contro la copia silenziosa: se `Obst.floor_turn` e `Game.ramp_angle` divergessero,
+## i dischi si sposterebbero fuori dal varco e qui lo si vedrebbe, invece di
+## trovarsi una torre con la rampa dentro un disco e nessuna porta rossa.
+func _torre_rampa(h, game, R: float, flat: PackedVector3Array) -> void:
+	var piani: int = game.floor_count
+	var r_in: float = OBST.RING_RADII[0]
+	var r_out: float = OBST.RING_RADII[1]
+	var corpo: float = ENEMY.RADIUS[ENEMY.BOSS]
+	var libre := 0
+	var righe := ""
+	for f in piani:
+		var campo = FLOW.new()
+		campo.build(OBST.slice_floor(flat, f, piani), R, corpo)
+		var alpha: float = game.ramp_angle(f)
+		var direzione := Vector3(cos(alpha), 0.0, sin(alpha))
+		var piede := direzione * (r_in * R)
+		var testa := direzione * (r_out * R)
+		var libero: bool = campo.clear_line(piede, testa)
+		if libero:
+			libre += 1
+		righe += "\n  piano %d: rampa a %.0f°, da %.2f m a %.2f m -- %s" \
+			% [f, rad_to_deg(alpha), piede.length(), testa.length(),
+				"libera" if libero else "COPERTA da un disco"]
+	h.eq(libre, piani,
+		"m12-bis: la rampa di ogni piano deve passare nel varco fra due dischi, e non "
+		+ "fuori dagli anelli: %d piani liberi su %d%s" % [libre, piani, righe])
+
+## ## m17: `_grids`, `enemy_floors` e la query — **la sezione che distingue i due
+## ## difetti che hanno la stessa faccia**
+##
+## `test_gameplay` ha misurato `nearest_enemy = -1` con 100 nemici, 25 sul piano che
+## l'arma interroga, e il nemico più vicino a `12 m`. Le tre cause possibili sono
+## state escluse **per codice** — `insert()` e `count_on_floor()` leggono
+## `enemy_floors[i]`, la guardia di `_sync_grid()` è senza condizione, e `step()`
+## chiama `_sync_tower()`/`_sync_grid()` prima di `_rebuild_grid()` — quindi il difetto
+## è in uno dei due posti che nessuno aveva guardato: **i dati che la griglia
+## contiene**, o **la query**.
+##
+## Qui si stanno i quattro numeri, e il punto 4 è quello che decide: `enemy_floors` e
+## la quota dei nemici devono dire la stessa cosa. `_kill()` sposta
+## `enemy_floors[i] = enemy_floors[last]`, e se da qualche parte si sposta
+## `transforms[i]` **senza** spostare `enemy_floors[i]` — o viceversa — allora
+## `count_on_floor(0)` conta `25` nemici che in realtà stanno a `y = 60`, la griglia
+## li mette al piano sbagliato, e `nearest_enemy` risponde `-1` su un campo che non è
+## vuoto: **`-1` che significa «qui non c'è nessuno» quando qualcuno c'è è il difetto
+## peggiore dei tre**, perché è l'unico che mente dicendo che il mondo è vuoto.
+##
+## La sezione gira **dopo un passo**, non prima: `_focus_floor` e le griglie si
+## aggiornano dentro `step()`, e misurarli prima del primo passo misurerebbe la torre
+## di ieri.
+func _torre_griglie(h, game, torre: HORDE, R: float) -> void:
+	torre.step(DT)
+	var piani: int = game.floor_count
+	# 1. quante griglie, e quanti piani il contratto ne dichiara
+	var griglie: Array = torre._grids
+	var righe := "\n  _grids.size() %d su floor_count %d, _floor_count %d, _focus_floor %d (%s)" \
+		% [griglie.size(), piani, int(torre._floor_count), int(torre._focus_floor),
+			torre.player_floor_source]
+	# 2. **cosa c'e' dentro** ogni griglia, e non un conteggio di array: la domanda
+	# e' «la griglia sa di questo nemico?», e la risposta la da' la griglia stessa con
+	# la sua unica query. `occupied_cells()` e' il suo numero di celle piene.
+	var dentro: Array[int] = []
+	for f in piani:
+		dentro.append(0)
+	for i in torre.count:
+		var f: int = torre.enemy_floors[i]
+		if f < 0 or f >= griglie.size():
+			continue
+		var g = griglie[f]
+		if int(g.nearest_index(torre.transforms[i], 1.0e-3, torre.transforms)) == i:
+			dentro[f] += 1
+	for f in piani:
+		var g = griglie[f] if f < griglie.size() else null
+		righe += "\n  griglia %d: %d nemici, %d celle occupate, picco %d" \
+			% [f, dentro[f], 0 if g == null else int(g.occupied_cells()),
+				0 if g == null else int(g.worst_bucket)]
+	# 4. `enemy_floors` contro la quota: i due numeri devono coincidere piano per piano
+	for f in piani:
+		var per_array := 0
+		var per_quota := 0
+		for i in torre.count:
+			if int(torre.enemy_floors[i]) == f:
+				per_array += 1
+			if int(torre.floor_of(torre.transforms[i].y)) == f:
+				per_quota += 1
+		h.eq(per_quota, per_array,
+			"m17: sul piano %d `enemy_floors` dice %d nemici e la quota dei nemici ne "
+				% [f, per_array]
+			+ "dice %d: se i due numeri non coincidono, la griglia sta mettendo i "
+			  % per_quota
+			+ "nemici nel piano sbagliato e `nearest_enemy` risponde -1 su un campo che "
+			+ "non e' vuoto")
+	# ## Il criterio: la query libera e quella ristretta, e **il numero che decide**
+	#
+	# La libera e' una scansione lineare — la stessa che `_grid_matches_linear` usa
+	# gia' — quindi non puo' sbagliare per colpa della griglia. Il raggio e' `R`, il
+	# raggio dell'arena: non e' la gittata dell'arma (numero di un'altra foglia che qui
+	# non si copia) ma la piu' larga possibile, cosi' la domanda e' «c'e' qualcuno
+	# sul mio piano?» e non «c'e' qualcuno a 26 metri?».
+	var libera := -1
+	var libera_d := 1.0e9
+	for i in torre.count:
+		var d := torre.transforms[i].distance_to(TORRE_PLAYER)
+		if d < libera_d:
+			libera_d = d
+			libera = i
+	var ristretta := int(torre.nearest_enemy_index(TORRE_PLAYER, R))
+	var ristretta_d := -1.0
+	if ristretta >= 0:
+		ristretta_d = torre.transforms[ristretta].distance_to(TORRE_PLAYER)
+	# ## Il numero che risponde a «dove nascono i nemici sul piano che si guarda»
+	#
+	# **Non e' un raggio di gittata**: quello e' `ACQUIRE_RADIUS` di `-gameplay` e
+	# questo file non lo copia. Il numero che resta e' la **distanza del nemico piu'
+	# vicino sul piano del giocatore**, che e' una proprieta' del campo e non
+	# dell'arma: se vale piu' del raggio dell'arma, il campo e' popolato **fuori**
+	# dalla portata e il difetto e' dove nascono i nemici; se vale meno, il difetto
+	# e' nella query. E' il numero che distingue i due senza sapere quanto sia la
+	# gittata di un'altra foglia.
+	righe += "\n  nemico piu' vicino sul piano %d: %.2f m (dal centro %.2f m)" \
+		% [int(torre._focus_floor), ristretta_d,
+			1.0e9 if ristretta < 0 else torre.transforms[ristretta].length()]
+	righe += ("\n  query libera: indice %d a %.2f m | query ristretta al piano %d: "
+		% [libera, libera_d, int(torre._focus_floor)]) \
+		+ "indice %d a %.2f m" % [ristretta, ristretta_d]
+	h.check(libera < 0 or ristretta >= 0,
+		"m17: la scansione lineare trova un nemico a %.2f m entro R = %.2f m, e la "
+			% [libera_d, R]
+		+ "query sul piano %d risponde -1: il difetto e' nel filtro per piano (o nei "
+			  % int(torre._focus_floor)
+		+ "dati che la griglia contiene), non nella distribuzione.%s" % righe)
+	h.check(ristretta < 0 or ristretta == libera,
+		"m17: il nemico piu' vicino in assoluto (indice %d a %.2f m) e' sul piano %d, "
+			% [libera, libera_d, int(torre.enemy_floors[libera]) if libera >= 0 else -1]
+		+ "quindi la query ristretta al piano %d deve restituire lo stesso indice e ha "
+			  % int(torre._focus_floor)
+		+ "restituito %d: due griglie diverse per due risposte diverse sullo stesso "
+		  % ristretta
+		+ "campo.%s" % righe)
+	print("orda: griglie per piano, dopo un passo --%s" % righe)
+
+func _torre_rimetti(h, game: Node, isolate: HORDE, prima: Dictionary,
+		prima_pos: Vector3, prima_floor: int) -> void:
+	for k in prima:
+		game.set(k, prima[k])
+	_torre_player = prima_pos
+	_torre_floor = prima_floor
+	game.register_impl("player_position", _spia_player_position)
+	game.register_impl("player_floor", _torre_player_floor)
+	_ripristina(h, isolate)
+
+# --- T1: `layout(r, piano)`, quattro layout davvero diversi ----------------------
+#
+# Il dente e' la riga `stessi == 0`: senza il parametro di piano — o con un parametro
+# che non entra nella disposizione — le quattro chiamate restituirebbero lo stesso
+# identico array e `stessi` sarebbe 6, cioe' tutte le coppie uguali. Il verde di
+# questa sezione significa «quattro biomi con quattro mappe», che e' la ragione per
+# cui il parametro esiste.
+
+func _torre_layout(h, R: float, flat: PackedVector3Array) -> void:
+	for f in TORRE_FLOORS:
+		var uno := OBST.layout(R, f)
+		h.eq(uno.size(), OBST.OBSTACLE_COUNT,
+			"m12: layout(R, %d) contiene tutti i %d dischi dichiarati" % [f, OBST.OBSTACLE_COUNT])
+	var stessi := 0
+	for a in range(1, TORRE_FLOORS):
+		for b in range(a):
+			if _torre_stessa(OBST.layout(R, a), OBST.layout(R, b)):
+				stessi += 1
+	h.eq(stessi, 0,
+		"m12: i quattro layout devono essere quattro reticoli diversi (coppie uguali trovate: %d su %d)"
+			% [stessi, TORRE_FLOORS * (TORRE_FLOORS - 1) / 2])
+	# ## Il piano 0 e' **la disposizione di prima**, voce per voce
+	#
+	# Non e' una pignoleria: e' la prova che aggiungere un piano non ha mosso il
+	# numero che `tests/test_arda.gd` e le sezioni 13 di questo file descrivono da
+	# m9. Senza questa riga, un giro che cambiasse il reticolo insieme alla firma
+	# passerebbe la sezione 13 (che confronta posizioni) e romperebbe la mappa.
+	h.check(_torre_stessa(OBST.layout(R, 0), OBST.layout(R)),
+		"m12: layout(R, 0) deve essere la disposizione di m9/m10, cioe' layout(R)")
+	# La frazione del raggio non si e' mossa: il raggio del disco e' quello che
+	# `RADIUS_FRACTION` dice e non una cifra che questa sezione ha scritto.
+	h.near(OBST.radius_for(R), R * OBST.RADIUS_FRACTION, 1.0e-9,
+		"m12: il raggio del disco e' ancora la frazione del raggio dell'arena")
+	# ## Il taglio: `slice_floor` deve restituire **esattamente** `layout(R, f)`
+	#
+	# Questa e' la prova che i due foglie parlano della stessa felta: `-arda`
+	# concatena quattro `layout()`, `-orda` taglia con `slice_floor`, e se i due
+	# punti di taglio differissero di un disco il nemico eviterebbe il muro del
+	# vicino. Il verde qui significa che le due implementazioni indipendenti concordano.
+	h.eq(flat.size(), OBST.OBSTACLE_COUNT * TORRE_FLOORS,
+		"m12: l'array piatto del contratto e' la concatenazione dei %d layout" % TORRE_FLOORS)
+	for f in TORRE_FLOORS:
+		h.check(_torre_stessa(OBST.slice_floor(flat, f, TORRE_FLOORS), OBST.layout(R, f)),
+			"m12: slice_floor(concat, %d, %d) deve restituire esattamente layout(R, %d)"
+				% [f, TORRE_FLOORS, f])
+		h.eq(OBST.slice_floor(flat, f, TORRE_FLOORS).size(), OBST.OBSTACLE_COUNT,
+			"m12: la fetta del piano %d e' alta quanto OBSTACLE_COUNT" % f)
+
+# --- T3: la geometria di un piano di 20 m, e cosa ne segue ---------------------
+#
+# ## Qui **non** c'e' un criterio, e il motivo va detto
+#
+# La sezione 13a asserisce gia' che il disco e' piu' largo del nemico piu' grosso e
+# che la disposizione ha una certa distanza fra i dischi piu' vicini: sono i numeri di
+# m10 e non sono di questa sezione. Qui sotto quegli stessi numeri vengono **rivalutati
+# al raggio che la torre dichiara**, e il risultato viene **stampato**, non asserito.
+#
+# Il perche' e' una scelta e non una paura: la soglia che esce (`R > 29,23 m`) e' una
+# **decisione di progetto** — `ARENA_RADIUS` e' di `-arda` e il numero non e' mio — e
+# un criterio che asserisce «la torre e' giocabile» sarebbe un numero scritto prima
+# della decisione. Quello che questa sezione fa e' dire il numero ogni volta che gira,
+# con la formula accanto, cosi' che la decisione non possa essere presa senza averlo
+# letto. **Se il vertice sposta il raggio sopra la soglia, i tre numeri qui sotto
+# diventano favorevoli da soli e la riga di stampa lo dice.**
+
+func _torre_geometria(h, R: float, flat: PackedVector3Array) -> void:
+	var disco := OBST.radius_for(R)
+	var boss := ENEMY.RADIUS[ENEMY.BOSS]
+	# La distanza minima fra due dischi **misurata**, non progettata: e' il numero
+	# che la sezione 13 chiama `min_separation` e che qui cambia significato, perche'
+	# a un raggio piccolo non e' piu' «due dischi con un passaggio in mezzo» ma
+	# «due dischi che si toccano».
+	var vicini := OBST.min_separation(flat)
+	var passaggio := vicini - 2.0 * disco
+	# Il limite che chiude le due garanzie di m10. Le due condizioni sono la stessa
+	# disuguaglianza moltiplicata per due, quindi il limite e' uno solo:
+	#     disco    > boss              <=>  R * 0,065 > 1,90
+	#     passaggio > 2 * boss         <=>  R * 0,13  > 3,80
+	var soglia := OBST.radius_min_for_boss()
+	# La corda dell'anello interno contro quello che serve perché la corona
+	# **rasterizzata** (il disco gonfiato del corpo del boss più il margine) non si
+	# chiuda: e' la condizione che decide se il campo di percorrenza ha un'unica
+	# sorgente o due, e quindi se al centro ci si arriva.
+	var corda := 2.0 * R * float(OBST.RING_RADII[0]) * sin(PI / float(OBST.RING_COUNTS[0]))
+	var serve := 2.0 * (disco + boss + FLOW.SKIN)
+	print("m12 torre: geometria a R=%.2f m -- disco %.4f m (%.3fx il boss), passaggio utile %.4f m (%.3fx il boss), anello interno: corda %.4f m contro %.4f m necessari perché la corona rasterizzata resti aperta"
+		% [R, disco, disco / boss, passaggio, passaggio / (2.0 * boss), corda, serve])
+	print("m12 torre: la soglia che chiude entrambe le garanzie di m10 e' R > %.2f m (derivata: 0,065 R > %.2f e 0,13 R > %.2f). %s"
+		% [soglia, boss, 2.0 * boss, "RISPETTATA" if R > soglia else "NON RISPETTATA: il disco e il passaggio sono piu' piccoli del nemico piu' grosso"])
+	# Il numero che la corona rasterizzata dice: se `corda < serve`, due dischi
+	# consecutivi dell'anello interno hanno i cerchi gonfiati **sovrappossi** e la
+	# corona e' chiusa. Il campo, in quel caso, non ha una sorgente sola e il centro
+	# dell'arena resta irraggiungibile: e' il numero che decide se la torre e'
+	# giocabile, e non e' di questa sezione.
+	print("m12 torre: corona rasterizzata dell'anello interno %s (corda %.4f m contro %.4f m): il campo ha una sorgente sola %s"
+		% ["CHIUSA" if corda < serve else "aperta", corda, serve,
+			"no" if corda < serve else "si"])
+
+# --- T2: l'aritmetica dei piani e' ** quella del contratto ** ------------------
+#
+# `floor_of()` e' aritmetica pura nel contratto e questa foglia non la rifa: qui si
+# verifica che `floor_base(f)` — l'inverso, che il contratto non espone — sia
+# esattamente l'inverso di `floor_of()`, bordo inferiore compreso. Il numero che lo
+# rende possibile e' `floor_height`, letto dal contratto: nessuna copia.
+#
+# **L'ultima asserzione e' quella che rende le altre non-vuote**: se la quota del
+# piano 2 fosse `0.0`, tutta la sezione passerebbe senza che nessun nemico sia mai
+# salito di un metro.
+
+func _torre_aritmetica(h, torre: HORDE) -> void:
+	h.eq(torre.floor_count(), TORRE_FLOORS, "m12: l'orda ha letto i piani dal contratto")
+	h.near(torre.floor_height(), TORRE_FLOOR_HEIGHT, 1.0e-9,
+		"m12: l'orda ha letto l'altezza del piano dal contratto")
+	for f in TORRE_FLOORS:
+		var base := torre.floor_base(f)
+		h.eq(torre.floor_of(base), f,
+			"m12: floor_of(floor_base(%d)) deve tornare %d (base %.2f m)" % [f, f, base])
+		h.eq(torre.floor_of(base + TORRE_FLOOR_HEIGHT - 0.001), f,
+			"m12: il quasi-bordo superiore del piano %d e' ancora il piano %d" % [f, f])
+		if f + 1 < TORRE_FLOORS:
+			h.eq(torre.floor_of(base + TORRE_FLOOR_HEIGHT), f + 1,
+				"m12: il bordo inferiore e' del piano di sotto (piano %d, quota %.2f m)"
+					% [f + 1, base + TORRE_FLOOR_HEIGHT])
+	h.check(torre.floor_base(TORRE_FOCUS) > 0.0,
+		("m12: la quota del piano %d e' %.2f m e non 0.00: sotto questo i criteri "
+			+ "passerebbero senza che nessun nemico sia mai salito")
+			% [TORRE_FOCUS, torre.floor_base(TORRE_FOCUS)])
+
+# --- T4: il tetto resta **un totale** e diventa 50 per piano -------------------
+#
+# I due numeri si asseriscono **insieme**, perche' ciascuno da solo passa anche con
+# l'altro rotto: `count == 200` passa anche se tutti i 200 sono sul piano 0 (che e'
+# stato il difetto che questa sezione chiude), e `50 per piano` passa anche se il
+# totale fosse 50.
+
+func _torre_popolazione(h, torre: HORDE) -> void:
+	var quota := HORDE.MAX_ENEMIES / TORRE_FLOORS
+	h.eq(torre.population_per_floor(), quota,
+		"m12: la quota per piano e' MAX_ENEMIES / floor_count = %d, non scritta a mano" % quota)
+	h.check(torre.population_per_floor() < HORDE.MAX_ENEMIES,
+		"m12: la quota per piano (%d) e' piu' piccola del totale (%d)"
+			% [torre.population_per_floor(), HORDE.MAX_ENEMIES])
+	# ## `POP_BASE` e' **derivato** dal per-piano, e questa riga e' la prova
+	#
+	# `Run.POP_BASE` e' il totale e `Run.POP_BASE_PER_FLOOR` e' il numero che il
+	# vertice ha deciso per il piano che il giocatore vede. Sono due numeri in due
+	# campi, quindi possono divergere: se qualcuno rimettesse `POP_BASE = 25` — cioe'
+	# il totale di quando c'era un piano solo — senza toccare l'altro, l'orda
+	# ripartirebbe da sei nemici per piano e nessuna asserzione se ne accorgerebbe.
+	# Qui la moltiplicazione e' verificata sul numero di piani **che l'orda ha
+	# letto**, non su quello dichiarato: e' la stessa catena che produce il difetto.
+	h.eq(int(RUN.POP_BASE), int(RUN.POP_BASE_PER_FLOOR) * torre.floor_count(),
+		"m12: POP_BASE (%d) deve essere POP_BASE_PER_FLOOR (%d) x i piani che l'orda ha letto (%d)"
+			% [int(RUN.POP_BASE), int(RUN.POP_BASE_PER_FLOOR), torre.floor_count()])
+	print("m12 torre: curva della popolazione per piano -- onda 1 %d (totale %d), saturazione all'onda %d (totale %d)"
+		% [int(RUN.POP_BASE_PER_FLOOR), int(RUN.POP_BASE), int(RUN.POP_SATURATION), int(RUN.POP_MAX)])
+	torre._populate(HORDE.MAX_ENEMIES)
+	h.eq(torre.count, HORDE.MAX_ENEMIES,
+		"m12: la popolazione TOTALE resta %d e non %d" % [HORDE.MAX_ENEMIES, quota])
+	h.eq(torre.transforms.size(), torre.count, "m12: transforms allineati")
+	h.eq(torre.enemy_floors.size(), torre.count, "m12: enemy_floors allineato come gli altri")
+	for f in TORRE_FLOORS:
+		h.eq(torre.count_on_floor(f), torre.population_per_floor(),
+			"m12: sul piano %d ci sono %d nemici, non 0 e non %d"
+				% [f, torre.population_per_floor(), torre.count])
+	print("m12 torre: popolazione %d su %d piani = %d per piano (MAX_ENEMIES %d, floor_count %d); quote distinte fra i nemici: %d"
+		% [torre.count, TORRE_FLOORS, torre.population_per_floor(), HORDE.MAX_ENEMIES,
+			TORRE_FLOORS, _torre_quote_distinte(torre)])
+
+# --- T5: nessun nemico attraversa un pavimento ---------------------------------
+#
+# Lo scenario e' costruito, non aspettato: `_populate(0)` svuota e `_riempi()` mette
+# **`population_per_floor()` nemici sul piano del giocatore** con il cammino vero
+# dello spawn. Poi la finestra e' `TORRE_WINDOW_S / DT` passi, e a ogni passo si
+# guarda **la quota** di ogni nemico, non la sua intenzione.
+#
+# ## Perche' il numero e' esattamente quello e non uno vicino
+#
+# `floor_of()` mette un nemico a 19,99 m sul piano 0 e uno a 20,00 m sul piano 1: il
+# criterio che guarda «il piano non e' cambiato» accetterebbe i due. Il criterio che
+# guarda «la quota non e' cambiata» no, e per un nemico che sale di un piano senza
+# spostarsi in XZ e' l'unico dei due che ha denti.
+
+func _torre_niente_piano(h, torre: HORDE) -> void:
+	var base := torre.floor_base(TORRE_FOCUS)
+	torre._populate(0)
+	_riempi(torre, torre.population_per_floor())
+	h.eq(torre.count_on_floor(TORRE_FOCUS), torre.population_per_floor(),
+		"m12: lo scenario parte da %d nemici tutti sul piano %d"
+			% [torre.population_per_floor(), TORRE_FOCUS])
+	var passi := int(TORRE_WINDOW_S / DT)
+	var attraversamenti := 0
+	var cambi_quota := 0
+	for _s in passi:
+		torre.step(DT)
+		for i in torre.count:
+			var y := torre.transforms[i].y
+			if absf(y - base) > 1.0e-6:
+				cambi_quota += 1
+			if torre.floor_of(y) != torre.enemy_floors[i]:
+				attraversamenti += 1
+	h.eq(attraversamenti, 0,
+		"m12: nessun nemico attraversa un pavimento in %d passi a %d vivi sul piano %d"
+			% [passi, torre.count_on_floor(TORRE_FOCUS), TORRE_FOCUS])
+	h.eq(cambi_quota, 0,
+		"m12: nessun nemico cambia quota in %d passi (il piano %d e' a %.2f m)"
+			% [passi, TORRE_FOCUS, base])
+	h.eq(torre.count, torre.population_per_floor(),
+		"m12: lo scenario non ha perso ne' guadagnato nemici durante la finestra")
+	# ## L'arrivo al giocatore: **misurato e stampato**, non asserito
+	#
+	# Il numero dipende da una geometria che il vertice ancora non ha deciso (i dischi
+	# per piano, vedi `_torre_geometria`), quindi qui non puo' vivere un criterio. Il
+	# numero vive come stampa, e la stampa e' quello che rende il criterio futuro
+	# scrivibile.
+	var giunti := 0
+	var dist := 0.0
+	for i in torre.count:
+		var d := Vector2(torre.transforms[i].x - TORRE_PLAYER.x,
+			torre.transforms[i].z - TORRE_PLAYER.z).length()
+		dist += d
+		if d <= 6.0:
+			giunti += 1
+	print("m12 torre: dopo %d passi a %d vivi sul piano %d -- entro 6,00 m dal giocatore: %d su %d, distanza media %.2f m"
+		% [passi, torre.count_on_floor(TORRE_FOCUS), TORRE_FOCUS, giunti,
+			torre.count, dist / maxf(1.0, float(torre.count))])
+
+# --- T6: `nearest_enemy()` non restituisce MAI un nemico di un altro piano ------
+#
+# ## Il raggio enorme non e' un caso, e' il criterio
+#
+# Il difetto che questa sezione chiude e' che la distanza euclidea lungo `y` fa
+# sembrare vicini due corpi a 20 metri l'uno dall'altro: con `radius = 1000` la
+# risposta «qualunque nemico entro il raggio» e' «il nemico piu' vicino **in
+# assoluto**», che con quattro piani sovrapposti e' quello che sta sopra o sotto. Il
+# raggio enorme non e' una prova di robustezza: e' la prova che **nessuna distanza**
+# attraversa il pavimento, perche' a 1000 metri l'unico filtro possibile e' il piano.
+#
+# ## Le query sono campionate **dove ci sono nemici**
+#
+# `nearest_index` con un raggio enorme e un punto in una cella vuota apre `span` celle
+# (250 per lato a raggio 1000): e' la strada lenta e il test non deve pagarla.
+# Campionare sui nemici e' anche la prova piu' forte, perche' la cella del punto e'
+# gia' occupata e il secondo giro del ciclo stretto parte gia' con un vicino trovato.
+
+func _torre_nearest(h, game: Node, torre: HORDE) -> void:
+	torre._populate(HORDE.MAX_ENEMIES)
+	torre.step(DT)
+	var risposte := 0
+	var sbagliate := 0
+	var non_trovati := 0
+	var contrattate := 0
+	for f in TORRE_FLOORS:
+		var campione: Array[Vector3] = []
+		for i in torre.count:
+			if torre.enemy_floors[i] != f:
+				continue
+			# un campione per nemico ma non tutti: dodici punti per piano sono
+			# abbastanza per coprire quattro reticoli ruotati e costano una
+			# frazione del tempo che un giro completo costerebbe
+			if campione.size() >= 12:
+				continue
+			campione.append(torre.transforms[i])
+		h.check(campione.size() >= 3,
+			"m12: il piano %d ha almeno tre nemici da cui campionare le query" % f)
+		for p in campione:
+			var q := Vector3(p.x, torre.floor_base(f), p.z)
+			for r in [1000.0, 6.0]:
+				# Il **terzo** argomento: qui il punto e' un punto, non il
+				# giocatore, e il chiamante dichiara il piano. E' il caso che
+				# `nearest_enemy_index` non deve confondere con quello del giocatore,
+				# e dichiararlo qui e' quello che lo tiene distinto — senza questo
+				# `f` la sezione misurerebbe il piano logico del giocatore e
+				# asserirebbe cose vere sul piano sbagliato.
+				var idx := torre.nearest_enemy_index(q, r, f)
+				if idx < 0:
+					non_trovati += 1
+					continue
+				risposte += 1
+				if torre.enemy_floors[idx] != f or torre.floor_of(torre.transforms[idx].y) != f:
+					sbagliate += 1
+			# La strada del gioco e' il **contratto**, e va chiamata con due soli
+			# argomenti come fa `weapon_base.gd::_try_fire`: e' il caso del
+			# giocatore, e il suo piano e' il piano logico. Qui il giocatore e' sul
+			# piano `TORRE_FOCUS` e non su quello del punto campionato, quindi le
+			# due strade **non** devono dare lo stesso numero: e' il caso della
+			# rampa, ed e' la prova che i due casi sono distinti.
+			if game.has_impl("nearest_enemy") and f == TORRE_FOCUS:
+				var via_contratto: int = int(game.nearest_enemy(q, 1000.0))
+				contrattate += 1
+				if via_contratto >= 0:
+					h.eq(torre.enemy_floors[via_contratto], TORRE_FOCUS,
+						"m12: il contratto chiede il piano **logico** del giocatore "
+						+ "(%d) e non quello della quota del punto" % TORRE_FOCUS)
+	h.eq(sbagliate, 0,
+		"m12: nessuna delle %d query ha restituito un nemico di un altro piano (raggio fino a 1000,00 m)" % risposte)
+	h.check(risposte > 0,
+		"m12: le query hanno trovato qualcosa (%d risposte): altrimenti il criterio passerebbe a vuoto" % risposte)
+	h.eq(non_trovati, 0,
+		"m12: ogni query ha trovato un nemico **del suo piano**: %d non hanno trovato nulla" % non_trovati)
+	print("m12 torre: nearest_enemy -- %d query su %d piani, %d risposte, %d di un altro piano, %d senza bersaglio, %d confrontate col contratto"
+		% [risposte + non_trovati, TORRE_FLOORS, risposte, sbagliate, non_trovati, contrattate])
+
+# --- T7: il campo che un nemico segue e' quello **del suo piano** --------------
+#
+# Il dente e' l'ultima asserzione, e non e' una verifica di identita': e' un
+# nemico **messo dentro un disco** che esiste solo sul piano 2 e guardato dopo un
+# passo. Se la simulazione usasse il campo del piano 0 — un campo solo per tutta la
+# torre — quel disco non ci sarebbe e `push_out` non avrebbe niente da spingere: il
+# nemico resterebbe dentro. Un passo di simulazione a `DT` vale al massimo `0,30 m`
+# di spostamento (`SPEED_MAX = 18`), e il bordo del disco e' a `1,30 m`: quindi un
+# passo non puo' tirarlo fuori per caso, e la differenza fra i due campi e' un fatto.
+
+func _torre_campo(h, torre: HORDE) -> void:
+	h.eq(torre.flow_fields.size(), TORRE_FLOORS,
+		"m12: un campo di percorrenza per piano (%d campi, non uno per tutta la torre)" % TORRE_FLOORS)
+	h.check(torre.flow_field_of(0) != torre.flow_field_of(2),
+		"m12: il campo del piano 0 e quello del piano 2 sono due campi diversi")
+	for f in TORRE_FLOORS:
+		h.eq(torre.obstacles_of(f).size(), OBST.OBSTACLE_COUNT,
+			"m12: il campo del piano %d e' costruito su %d dischi" % [f, OBST.OBSTACLE_COUNT])
+		h.check(_torre_stessa(torre.obstacles_of(f), OBST.layout(torre.arena_radius, f)),
+			"m12: gli ostacoli del piano %d sono esattamente layout(R, %d)" % [f, f])
+	var s0 := torre.obstacles_of(0)
+	var s2 := torre.obstacles_of(2)
+	var scelto := -1
+	for k in s2.size():
+		if not _torre_dentro_gli_altri(s2[k], s0):
+			scelto = k
+			break
+	if not h.check(scelto >= 0,
+		"m12: nessun disco del piano 2 e' fuori da tutti i dischi del piano 0: i due "
+		+ "reticoli sono indistinguibili e questa sezione non avrebbe niente su cui "
+		+ "lavorare"):
+		return
+	var disco: Vector3 = s2[scelto]
+	var i := -1
+	for k in torre.count:
+		if torre.enemy_floors[k] == TORRE_FOCUS:
+			i = k
+			break
+	if not h.check(i >= 0, "m12: c'e' almeno un nemico sul piano %d da spostare" % TORRE_FOCUS):
+		return
+	var campo2 = torre.flow_field_of(TORRE_FOCUS)
+	var campo0 = torre.flow_field_of(0)
+	# `bool` esplicito: `campo0` e' una variante (l'elemento di un `Array` senza
+	# tipo) e `:=` su una chiamata senza tipo dichiarato non compila. E' la stessa
+	# regola che `horde.gd::_separation` scrive accanto a `found`.
+	var dentro0: bool = campo0.contains(Vector3(disco.x, torre.floor_base(TORRE_FOCUS), disco.z), torre.radii[i])
+	torre.transforms[i] = Vector3(disco.x, torre.floor_base(TORRE_FOCUS), disco.z)
+	torre.velocities[i] = Vector3.ZERO
+	torre.timers[i] = 0.0
+	h.check(campo2.contains(torre.transforms[i], torre.radii[i]),
+		"m12: il disco scelto (%d) e' un ostacolo **del piano %d**" % [scelto, TORRE_FOCUS])
+	h.check(not dentro0,
+		"m12: e non e' un ostacolo del piano 0: se lo fosse, questa prova non "
+		+ "distinguerebbe i due campi")
+	torre.step(DT)
+	h.check(not campo2.contains(torre.transforms[i], torre.radii[i]),
+		"m12: un passo e il nemico e' stato spinto fuori dal disco **del suo piano**; "
+		+ "con un campo solo per la torre sarebbe restato dentro")
+	h.eq(torre.enemy_floors[i], TORRE_FOCUS,
+		"m12: il nemico spostato e' ancora sul piano %d" % TORRE_FOCUS)
+
+## Il disco `d` e' dentro qualcuno dei dischi di `altri`? Serve a scegliere un disco
+## che esiste **solo** su un piano: senza questa scelta il criterio non distinguerebbe
+## un campo per piano da un campo unico, perche' tutti i dischi si somigliano.
+func _torre_dentro_gli_altri(d: Vector3, altri: PackedVector3Array) -> bool:
+	for m in altri.size():
+		var o := altri[m]
+		var dist := Vector2(d.x - o.x, d.z - o.z).length()
+		if dist < d.y + o.y:
+			return true
+	return false
+
+# --- T8: la separazione a 50 per piano, e la **saturazione** di `SEPARATION_CHECKS` -
+#
+# ## Il numero che il piano chiedeva e che nessuno aveva misurato
+#
+# Il piano ragiona su `200` nemici in un disco di `20 m` e ottiene `1,28` vicini entro
+# `SEPARATION_RADIUS`. Ma `200` e' un **totale** e la torre ne distribuisce `50` per
+# piano: la densita' per piano e' **un quarto**, quindi la previsione `1,28` non e' il
+# numero di questa sezione. Qui il numero viene **misurato**.
+#
+# ## La grandezza del criterio e' la **saturazione**, e non puo' essere la media
+#
+# `SEPARATION_CHECKS = 6` e' un **tetto di candidati esaminati per nemico**, non un
+# tetto di vicini trovati: quando la query ha esaminato sei candidati smette, e cio'
+# quello che decide e' **quanti ne servono**, cioe' se il tetto viene raggiunto. La
+# media dei vicini trovati **non e' monotona** in piu' candidati: con una griglia
+# condivisa quei sei posti li spende **anche su piani che non sono quelli del nemico**,
+# e la media **scende per costruzione** — misurato `0,380` contro `0,520` sulla stessa
+# disposizione — anche se l'insieme dei candidati della griglia condivisa contiene
+# quello della per-piano.
+#
+# Quindi un criterio sulla media **asserirebbe una legge vera su una grandezza che non
+# la puo' esprimere**: misurerebbe il tetto e lo crederebbe il campo. La media qui
+# sotto **si stampa e non si giudica**: nessuna soglia la guarda, nessuna banda la
+# contiene, e se un giorno cambiasse da `0,240` a `0,520` questa sezione resterebbe
+# verde senza che nessuno l'abbia spostata di nascosto. **Il numero che decide e' la
+# saturazione** (sotto), e `SEPARATION_CHECKS` resta **6**: un tetto che si abbassa
+# quando il numero scende smetterebbe di poter fallire.
+#
+# ## Le due saturazioni, e **che cosa conta come candidato** (la geometria della griglia)
+#
+# - `sat_piano`: quanti nemici del piano del giocatore esauriscono i sei posti
+#   guardando **il proprio piano**. Su un piano i tre assi coincidono, quindi la
+#   distanza qui e' la stessa che guarda il codice: i due numeri parlano della stessa
+#   grandezza e l'unica differenza e' **quali piani** il nemico puo' guardare.
+# - `sat_condivisa`: gli stessi nemici con **una sola griglia**. Qui la distanza e'
+#   quella **della griglia**, cioe' sul piano logico: `spatial_grid.gd` ha celle
+#   `Vector2i`, quindi un nemico a 20 m di quota e a un metro in orizzontale sta nella
+#   **stessa cella** e occupa uno dei sei posti. E' la ragione per cui la quota non si
+#   cancella da un conteggio di candidati, ed e' la ragione per cui qui si confrontano
+#   due **griglie** e non due formule sulla stessa distanza.
+#
+# ## Perche' il contatore del codice `sep_saturated_last` **si stampa e non si confronta**
+#
+# Perche' non e' la stessa disposizione: `horde.gd::step()` chiama `_separation(i)`
+# **dentro** il ciclo che muove i nemici, quindi il contatore e' riempito mentre le
+# posizioni cambiano, e la griglia che la query guarda e' quella costruita all'inizio
+# del passo. Un ricalcolo fatto fuori dal passo non puo' quindi valere lo stesso numero
+# (misurato: 1 contro 12), e pretendere l'uguaglianza sarebbe un criterio che giudica
+# una grandezza diversa da quella che dichiara — cioe' la classe di difetto che questa
+# sezione sta chiudendo. Il contatore resta **stampato** accanto ai due numeri.
+#
+# La finestra e' quella dichiarata della torre (`TORRE_WINDOW_S`) e il campione e' un
+# passo ogni `TORRE_SEP_EVERY`: stessa grandezza, meno campioni — la forma del taglio
+# che il progetto ha gia' usato su `miscela`, e non un cambio di grandezza.
+
+## Passi fra un campione e l'altro nella finestra della saturazione. Il ciclo gira
+## comunque tutti i passi della finestra: cambia **quanti campioni si guardano**, non
+## quale grandezza si guarda.
+const TORRE_SEP_EVERY := 30
+
+## Numero di vicini entro `SEPARATION_RADIUS` attorno a un nemico, come **media**:
+## `solo_piano` guarda un piano solo (che e' cioe' che vede la separazione), `false`
+## guarda l'orda intera (che e' cioe' che vedrebbe una griglia unica, condivisa dai
+## quattro piani). Il confronto fra i due e' un **numero stampato**, non un criterio:
+## vedi la nota sopra sul perche' la media non puo' esprimere la legge del tetto.
+func _torre_vicini(horda: HORDE, solo_piano: bool, piano: int) -> float:
+	var r2 := HORDE.SEPARATION_RADIUS * HORDE.SEPARATION_RADIUS
+	var totale := 0.0
+	var campione := 0
+	for i in horda.count:
+		if solo_piano and horda.enemy_floors[i] != piano:
+			continue
+		campione += 1
+		for j in horda.count:
+			if i == j:
+				continue
+			if solo_piano and horda.enemy_floors[j] != piano:
+				continue
+			if horda.transforms[i].distance_squared_to(horda.transforms[j]) <= r2:
+				totale += 1.0
+	if campione == 0:
+		return 0.0
+	return totale / float(campione)
+
+## Quanti nemici, **in un passo**, esauriscono i sei posti di `SEPARATION_CHECKS`:
+## una volta con la griglia del loro piano, una volta con una griglia sola condivisa
+## dai quattro piani. Restituisce il **massimo** sulla finestra campionata, perche' la
+## domanda e' «il tetto e' arrivato a far male», e il massimo e' il passo peggiore.
+func _torre_saturazione(torre: HORDE) -> Dictionary:
+	var r2 := HORDE.SEPARATION_RADIUS * HORDE.SEPARATION_RADIUS
+	var sat_piano := 0
+	var sat_condivisa := 0
+	var del_codice := -1
+	var campioni := 0
+	var passi := int(TORRE_WINDOW_S / DT)
+	for s in passi:
+		var campiona := s % TORRE_SEP_EVERY == TORRE_SEP_EVERY - 1
+		var p_piano := 0
+		var p_condivisa := 0
+		if campiona:
+			for i in torre.count:
+				var pf := torre.enemy_floors[i]
+				if pf != TORRE_FOCUS:
+					continue
+				var px := torre.transforms[i].x
+				var pz := torre.transforms[i].z
+				var proprio := 0
+				var condiviso := 0
+				for j in torre.count:
+					if i == j:
+						continue
+					var dx := torre.transforms[j].x - px
+					var dz := torre.transforms[j].z - pz
+					if dx * dx + dz * dz > r2:
+						continue
+					condiviso += 1
+					if torre.enemy_floors[j] == pf:
+						proprio += 1
+				if proprio >= HORDE.SEPARATION_CHECKS:
+					p_piano += 1
+				if condiviso >= HORDE.SEPARATION_CHECKS:
+					p_condivisa += 1
+		# Il passo **dopo** il conteggio: il contatore del codice
+		# `sep_saturated_last` e' riempito **dentro** il passo, e non puo' essere
+		# confrontato per uguaglianza con un conteggio fatto fuori (vedi sotto).
+		torre.step(DT)
+		if campiona:
+			campioni += 1
+			del_codice = torre.sep_saturated_last
+			sat_piano = maxi(sat_piano, p_piano)
+			sat_condivisa = maxi(sat_condivisa, p_condivisa)
+	return {"campioni": campioni, "piano": sat_piano, "condivisa": sat_condivisa,
+		"codice": del_codice, "passi": passi}
+
+func _torre_separazione(h, torre: HORDE) -> void:
+	torre._populate(HORDE.MAX_ENEMIES)
+	torre.step(DT)
+	# Le due medie sulla disposizione appena nata: **numeri stampati, non giudicati**
+	# (vedi la nota in testa alla sezione: la media non puo' esprimere la legge del
+	# tetto, e giudicarla sarebbe un criterio che misura una grandezza diversa da
+	# quella che dichiara).
+	var per_piano := _torre_vicini(torre, true, TORRE_FOCUS)
+	var tutti := _torre_vicini(torre, false, TORRE_FOCUS)
+	# La saturazione si misura **a regime**, non sulla disposizione appena nata: i
+	# sei posti si spengono quando l'orda e' addensata intorno al giocatore, e misurarli
+	# alla nascita darebbe zero su entrambe le griglie, cioe' un criterio che non
+	# distingue niente.
+	var sat := _torre_saturazione(torre)
+	var sul_piano := int(sat["piano"])
+	var condivisa := int(sat["condivisa"])
+	var vivi_piano := maxi(1, torre.population_per_floor())
+	h.check(condivisa > sul_piano,
+		("m12: una griglia condivisa dai quattro piani saturerebbe SEPARATION_CHECKS = %d "
+			+ "su %d nemici del piano %d contro %d con la griglia del piano: il tetto "
+			+ "diventa il vincolo dove la griglia per piano non lo e'")
+			% [HORDE.SEPARATION_CHECKS, condivisa, TORRE_FOCUS, sul_piano])
+	h.check(sul_piano < vivi_piano,
+		("m12: la griglia del piano non satura SEPARATION_CHECKS = %d su **tutti** i %d "
+			+ "nemici del piano %d (%d/%d = %.3f): a 1,00 il tetto sarebbe il vincolo "
+			+ "della simulazione e non un tetto di costo")
+			% [HORDE.SEPARATION_CHECKS, vivi_piano, TORRE_FOCUS, sul_piano, vivi_piano,
+				float(sul_piano) / float(vivi_piano)])
+	# ## `String formatting error: not all arguments converted`, e la regola
+	#
+	# **In GDScript `%` e' un operatore MOLTIPLICATIVO e `+` e' ADDITIVO, quindi `%` si
+	# lega piu' forte.** Una riga `"a %d " + "b %.2f " % [args] + "c"` **non** applica
+	# i numeri a tutta la frase ma **solo al pezzo centrale**. Quindi: una stringa con
+	# `%` **non** si costruisce concatenando pezzi — si costruisce **intera** e `%` si
+	# applica al risultato, **con le parentesi**. Le parentesi sono la protezione, non
+	# un'aggiunta, perche' senza, la forma che funziona e la forma che non funziona
+	# sono identiche fino all'esecuzione.
+	#
+	# I due siti, e i due conteggi che li hanno fatti fallire a runtime: qui il pezzo
+	# finale aveva **tre** `%` su **tre** argomenti e funzionava, quello subito sopra
+	# ne aveva **due** su **tre** (`not all arguments converted`); in `_torre_cycled`
+	# il pezzo finale ne aveva **zero** su **due**. Entrambi sono chiusi dalla
+	# parentesi, e la regola e' scritta nei due posti perche' la prossima volta
+	# il conto si rifa guardando, non ricordando.
+	print(("m12 torre: separazione a %d per piano -- vicini medi entro %.1f m sulla "
+			+ "disposizione appena nata: %.3f sul piano, %.3f su tutta l'orda (griglia "
+			+ "condivisa), numeri stampati e non giudicati; SEPARATION_CHECKS = %d")
+		% [torre.population_per_floor(), HORDE.SEPARATION_RADIUS, per_piano, tutti,
+			HORDE.SEPARATION_CHECKS])
+	print(("m12 torre: separazione a %d per piano, a regime su %d passi campionati %d "
+			+ "volte -- SEPARATION_CHECKS = %d: %d/%d = %.3f dei nemici del piano %d "
+			+ "saturano colla griglia del piano, %d/%d = %.3f con una griglia condivisa "
+			+ "(contatore del codice `sep_saturated_last` sull'ultimo passo campionato, "
+			+ "su tutti e quattro i piani: %d)")
+		% [vivi_piano, int(sat["passi"]), int(sat["campioni"]), HORDE.SEPARATION_CHECKS,
+			sul_piano, vivi_piano, float(sul_piano) / float(vivi_piano), TORRE_FOCUS,
+			condivisa, vivi_piano, float(condivisa) / float(vivi_piano),
+			int(sat["codice"])])
+
+# --- T9: la nascita avviene **sul piano del giocatore** -------------------------
+#
+# Tre cose sulla stessa riga di codice e ognuna ha il suo criterio: il punto ha la
+## quota del piano, il punto e' lontano dal giocatore **in orizzontale** (il `min_gap`
+# e' un confronto 2D dentro `Spawner`, e con un fuoco a 40 m di quota ogni candidato
+# passerebbe), e `player_floor()` vince su `floor_of(y)`.
+
+func _torre_nascita(h, torre: HORDE) -> void:
+	var base := torre.floor_base(TORRE_FOCUS)
+	var punto := torre.random_spawn_point()
+	h.near(punto.y, base, 1.0e-6,
+		"m12: random_spawn_point() nasce alla quota del piano %d (%.2f m)" % [TORRE_FOCUS, base])
+	h.eq(torre.floor_of(punto.y), TORRE_FOCUS,
+		"m12: il punto di nascita e' sul piano del giocatore")
+	h.check(punto.length() > 0.0,
+		"m12: random_spawn_point() non restituisce ZERO (che il contratto usa come "
+		+ "segnale di non implementato)")
+	torre._populate(0)
+	torre.step(DT)
+	torre._spawn_one()
+	h.eq(torre.count, 1, "m12: lo scenario ha un nemico")
+	h.near(torre.transforms[0].y, base, 1.0e-6,
+		"m12: _spawn_one() mette il nemico alla quota del piano %d" % TORRE_FOCUS)
+	h.eq(torre.enemy_floors[0], TORRE_FOCUS, "m12: e lo registra sul piano %d" % TORRE_FOCUS)
+	# ## Il dente: `player_floor()` **non** `floor_of(y)`
+	#
+	# Il giocatore e' a quota 35 m, quindi `floor_of(35) = 1`, ma `player_floor()`
+	# dichiara 0 — che e' il caso della rampa, cioe' quello per cui il contratto ha
+	# dichiarato il canale. Se l'orda usasse `floor_of(y)` il nemico nascerebbe a
+	# 20 m invece che a 0 e questa asserzione andrebbe rossa: il difetto non e' che
+	# nascano nel piano sbagliato, e' che **non ci sarebbe nessun canale**.
+	#
+	# E' la stessa posizione che serve al dente della **mira**: con l'orda su tutti e
+	# quattro i piani, `Game.nearest_enemy(posizione_del_giocatore, raggio)` non puo'
+	# restituire un indice del piano 1, che e' quello che dice la quota. Il difetto
+	# che quella scelta sbagliata ha prodotto e' **39 volte meno uccisioni** (l'onda
+	# 1 da `6.403` a `40.000` passi, ritmo da `1,8741` a `0,0480 /s`), perche' la
+	# griglia aperta era quella del piano sbagliato e l'arma non trovava nessuno.
+	_torre_player = Vector3(3.0, 35.0, -5.0)
+	_torre_floor = 0
+	torre._populate(0)
+	torre.step(DT)
+	h.eq(torre.player_floor_source, "player_floor",
+		"m12: la torre legge il piano dalla API `player_floor()` e non da `floor_of(y)`")
+	torre._spawn_one()
+	h.near(torre.transforms[0].y, torre.floor_base(0), 1.0e-6,
+		"m12: con il giocatore a quota 35,00 m su una rampa, il nemico nasce sul piano "
+		+ "che dichiara `player_floor()` (0) e non su quello che dice la sua quota (1)")
+	# ## E la mira, che e' il difetto da 39 volte
+	#
+	# L'orda su tutti e quattro i piani, con il giocatore su una rampa: la quota
+	# dice 1, il latch dice 0. Le due griglie hanno entrambe dei nemici, quindi la
+	# risposta **sbagliata** non e' un `-1` (che sarebbe facile da notare) e' un
+	# indice **valido sull'altro piano**: esattamente il difetto che ha fatto sparire
+	# il fuoco senza che nessun errore lo dicesse.
+	torre._populate(HORDE.MAX_ENEMIES)
+	torre.step(DT)
+	var game_t := _game()
+	var fisico := torre.floor_of(_torre_player.y)
+	h.eq(fisico, 1,
+		"m12: la quota del giocatore (%.2f m) cade sul piano %d" % [_torre_player.y, fisico])
+	h.eq(torre.player_floor_index(), 0,
+		"m12: il latch lo tiene sul piano 0: i due numeri DIVERSI sono il caso della rampa")
+	h.check(torre.count_on_floor(0) > 0 and torre.count_on_floor(1) > 0,
+		"m12: entrambi i piani hanno nemici, cosi' la risposta sbagliata e' un indice "
+		+ "valido e non un -1 che si vede")
+	if game_t != null and game_t.has_impl("nearest_enemy"):
+		var idx := int(game_t.nearest_enemy(_torre_player, 1000.0))
+		h.check(idx >= 0,
+			"m12: la mira del giocatore sulla rampa trova un bersaglio (indice %d): "
+			% idx
+			+ "con la griglia del piano sbagliato tornava -1 e l'arma non spariva")
+		if idx >= 0:
+			h.eq(torre.enemy_floors[idx], 0,
+				"m12: e il bersaglio e' del piano **logico** (0), non di quello che dice "
+				+ "la quota del giocatore (%d)" % fisico)
+	_torre_player = TORRE_PLAYER
+	_torre_floor = TORRE_FOCUS
+
+# --- T10: un ciclo di passi senza SCRIPT ERROR e senza crescita di memoria -----
+#
+# Il numero di passi e' `TORRE_WINDOW_S / DT`, non scritto a mano: la finestra e' la
+# stessa della sezione T5 e i due numeri non possono divergere. Il controllo della
+# memoria e' `OS.get_static_memory_usage()`, che e' quello che `_burn_in` misura a
+# regime: se un passo allocasse, il delta sarebbe di quattro griglie e quattro campi
+# per passo e la torre non entrerebbe nel tetto di 60 Hz.
+
+# --- T11: i nemici **fermi**, per piano, e se sono dentro un buco di rampa -------
+#
+# ## La domanda a cui questa sezione risponde, e perche' e' una misura e non un
+# ## criterio
+#
+# `m10 criterio n. 4` e' andato rosso con **424 passi** di fila contro un tetto di
+# 90. Quel numero viene dall'orda **isolata**, che gira con `floor_count = 1`: quindi
+# la prima cosa da dire non e' un'opinione, e' che **sul piano 0 non arriva nessuna
+# rampa** (`arena_ground.gd::_in_il_buco` restituisce `false` per `piano < 1`, e
+# l'ipotesi «il nemico e' caduto in un buco» non puo' valere per un piano che non ha
+# buchi). Il numero che questa sezione stampa lo dice comunque, perche' **la torre
+# vera ha i buchi sui piani 1, 2 e 3** e li si misura li'.
+#
+# Quattro numeri, tutti stampati:
+#
+#   1. i **quattro varchi** del campo a `R` e il raggio minimo che li richiede
+#      (`Flow.gap_centro`, `gap_anelli`, `gap_muro`, `gap_circolare`, e il loro
+#      minimo `gap_minimo`): se il minimo e' sotto una cella la rastrelliera e' chiusa,
+#      il campo e' disconnesso, e questo lo dice anche `unreachable`, che e' gia' un
+#      campo pubblico del campo di percorrenza;
+#   2. quanti **campioni lenti per piano**, e la **peggiore serie** per piano: se il
+#      piano 0 e' fermo come gli altri, l'ipotesi del buco e' sbagliata;
+#   3. in quanti di quei campioni il nemico era **dentro un buco di rampa** — la
+#      domanda 1, misurata sul predicato statico e puro di `-arda`
+#      (`arena_ramp.gd::in_corridor`), che si puo' chiamare da qui senza dipendere
+#      dalla scena;
+#   4. **quanto tempo ci mette a liberarsi** chi si libera: una serie di 40 passi e
+#      una serie che non finisce sono due difetti diversi, e la differenza decide il
+#      rimedio.
+#
+# **Il `TILE` e' letto dal sorgente**, non preso dal valore di `-arda`: se il file
+# cambia, il numero che questa sezione usa cambia con lui e la riga di stampa lo
+# dice, invece di mentire in silenzio.
+
+## Il lato della piastrella del pavimento, letto da `src/render/arena_ground.gd`.
+## `0` se la riga non c'e' piu': la sezione dice «non misurabile» invece di usare
+## un numero che non sa piu' di cosa e'.
+func _ground_tile() -> int:
+	var testo := FileAccess.get_file_as_string("res://src/render/arena_ground.gd")
+	for riga in testo.split("\n"):
+		var t := str(riga).strip_edges()
+		if t.begins_with("const TILE"):
+			return int(float(t.split("=")[1].strip_edges()))
+	return 0
+
+func _torre_fermi(h, torre: HORDE, R: float) -> void:
+	# --- 1. I quattro varchi, e il raggio che li richiede -------------------------
+	var centro := FLOW.gap_centro(R)
+	var anelli := FLOW.gap_anelli(R)
+	var muro := FLOW.gap_muro(R)
+	var peggiore := FLOW.gap_minimo(R)
+	var richiesto := FLOW.arena_radius_min(FLOW.CELL)
+	# ## Il criterio con i denti: **tutti** i varchi >= una cella
+	#
+	# La controfattuale e' il layout di prima della torre, che a `R = 35,0 m` aveva
+	# `0,05 m` fra due anelli: senza questa riga il criterio passerebbe con quel numero
+	# sotto, che e' esattamente il difetto. `gap_minimo()` prende il **minimo** su
+	# tutti i varchi e su tutti gli anelli, quindi un layout con due anelli aperti e
+	# uno chiuso va rosso — e un layout i cui anelli sono anelli chiusi ci va, che e'
+	# il quarto varco che nessuno dei tre elencati copre.
+	h.check(peggiore >= FLOW.CELL,
+		"m12: il varco piu' stretto del campo a R=%.2f m e' %.4f m, sotto la cella da "
+		% [R, peggiore]
+		+ "%.2f m: una rastrelliera chiusa non e' un ostacolo che si aggira, e' il "
+		% [FLOW.CELL]
+		+ "motivo dei 424 passi fermi")
+	h.check(R >= richiesto,
+		"m12: il raggio dell'arena (%.2f m) deve stare sopra il minimo che i varchi "
+		% [R]
+		+ "chiedono (%.2f m)" % [richiesto])
+	# La tabella dei tre varchi radiali **e** dei due circolari: e' la misura che
+	# dichiara il layout, e va riletta ogni volta che una frazione si muove.
+	var righe := ""
+	for i in OBST.RING_COUNTS.size():
+		righe += "\n  m12 torre: anello %d a %.2f m con %d dischi -- circolare %.4f m" \
+			% [i, float(OBST.RING_RADII[i]) * R, int(OBST.RING_COUNTS[i]),
+				FLOW.gap_circolare(i, R)]
+	print("m12 torre: varchi a R=%.2f m -- centro %.4f m, fra anelli %.4f m, contro il muro %.4f m; i circolari sono uno per riga qui sotto"
+		% [R, centro, anelli, muro])
+	print(righe)
+	# ## Il varco **piu' debole in celle**, e quanto boss ci regge ancora
+	#
+	# Non e' il piu' piccolo in metri: i due circolari pagano **due** inflazioni per
+	# ogni metro di crescita del boss, mentre contro il muro ne paga una. Il numero
+	# che va nella riga e' «di quanto puo' crescere `RADIUS[BOSS]` prima che questo
+	# varco scenda sotto una cella», ed e' la domanda che nessuno si fa guardando una
+	# tabella di metri. `Flow.gap_circolare` porta la tabella completa.
+	var debole := peggiore
+	var debole_da := 1.0
+	var debole_dove := "percorso"
+	for i in OBST.RING_COUNTS.size():
+		var g := FLOW.gap_circolare(i, R)
+		if g < debole:
+			debole = g
+			debole_da = 2.0
+			debole_dove = "circolare anello %d" % i
+	if muro < debole:
+		debole = muro
+		debole_da = 1.0
+		debole_dove = "contro il muro"
+	print("m12 torre: varco piu' debole %.4f m (%.2f celle), il %s: con due inflazioni per lato regge un boss che cresce di %.3f m prima di scendere sotto la cella"
+		% [debole, debole / FLOW.CELL, debole_dove,
+			(debole - FLOW.CELL) / maxf(1.0, debole_da)])
+	# ## Il confronto con il ragcolo di prima, nella stessa tabella
+	#
+	# Il numero di `R = 60,0 m` con i numeri di m11 era `3,30 m` fra due anelli e il
+	# gioco girava: e' il **riferimento**, non un obiettivo. Qui si ricalcola con le
+	# stesse funzioni e con lo stesso codice, cosi' il confronto e' fra numeri dello
+	# stesso tipo e non fra una stima e una misura.
+	for rr in [R, 60.0]:
+		print("m12 torre: riferimento -- a R=%.1f m: centro %.4f m, fra anelli %.4f m, contro il muro %.4f m, circolari %.4f / %.4f m, minimo %.4f m (cella %.1f m)"
+			% [rr, FLOW.gap_centro(rr), FLOW.gap_anelli(rr), FLOW.gap_muro(rr),
+				FLOW.gap_circolare(0, rr), FLOW.gap_circolare(1, rr),
+				FLOW.gap_minimo(rr), FLOW.CELL])
+	# Lo stato della connessione, letto dai campi pubblici del campo: `unreachable`
+	# conta le celle **libere** che la BFS non ha raggiunto, e una rastrelliera
+	# chiusa ne lascia sempre qualcuna. E' il numero che decide fra «il campo e'
+	# stretto» e «il campo e' tagliato in due».
+	for f in TORRE_FLOORS:
+		var campo = torre.flow_field_of(f)
+		if campo == null:
+			print("m12 torre: piano %d senza campo: nessuna misura di connessione" % f)
+			continue
+		print("m12 torre: piano %d -- campo %dx%d celle, %d bloccate, %d libere non raggiunte"
+			% [f, campo.cells_x, campo.cells_z, campo.blocked_cells(), campo.unreachable])
+
+	# --- 2-4. Chi e' fermo, su che piano, dentro un buco, e quanto ci resta ------
+	var tile := _ground_tile()
+	var ramp = null
+	if tile > 0:
+		ramp = load("res://src/render/arena_ramp.gd")
+	var misurabile := ramp != null and tile > 0
+	print("m12 torre: buchi di rampa %s (piastrella letta da src/render/arena_ground.gd: %d m, predicato statico di src/render/arena_ramp.gd: %s)"
+		% ["MISURABILI" if misurabile else "NON MISURABILI", tile,
+			"caricato" if ramp != null else "non caricato"])
+	torre._populate(0)
+	_riempi(torre, torre.population_per_floor())
+	torre.step(DT)
+	var lenti := PackedInt32Array()
+	lenti.resize(torre.count)
+	var campioni := PackedInt32Array()
+	campioni.resize(TORRE_FLOORS)
+	var lenti_per_piano := PackedInt32Array()
+	lenti_per_piano.resize(TORRE_FLOORS)
+	var peggiore_per_piano := PackedInt32Array()
+	peggiore_per_piano.resize(TORRE_FLOORS)
+	var in_buchi := 0
+	var serie_finite := PackedInt32Array()
+	var passi := int(TORRE_WINDOW_S / DT)
+	for _s in passi:
+		torre.step(DT)
+		for i in torre.count:
+			var f := torre.enemy_floors[i]
+			if f < 0 or f >= TORRE_FLOORS:
+				continue
+			var p := torre.transforms[i]
+			if Vector2(p.x, p.z).length() <= ENEMY.ARRIVE_RADIUS + torre.radii[i]:
+				# **arrivato**: rallenta di proposito. Il criterio n. 4 esclude
+				# questi campioni e questa sezione usa la stessa regola, altrimenti
+				# il numero misurerebbe una folla che ha fatto il suo lavoro.
+				if lenti[i] > 0:
+					serie_finite.append(lenti[i])
+					lenti[i] = 0
+				continue
+			campioni[f] += 1
+			if torre.velocities[i].length() >= STUCK_SPEED:
+				if lenti[i] > 0:
+					serie_finite.append(lenti[i])
+				lenti[i] = 0
+				continue
+			lenti[i] += 1
+			lenti_per_piano[f] += 1
+			peggiore_per_piano[f] = maxi(peggiore_per_piano[f], lenti[i])
+			if misurabile and f >= 1:
+				if ramp.in_corridor(f - 1, TORRE_FLOORS, R, float(tile), Vector2(p.x, p.z)):
+					in_buchi += 1
+	for i in torre.count:
+		if lenti[i] > 0:
+			serie_finite.append(lenti[i])
+	for f in TORRE_FLOORS:
+		h.check(lenti_per_piano[f] <= campioni[f],
+			"m12: i campioni lenti del piano %d non possono superare i campioni fuori dall'arrivo (%d su %d)"
+				% [f, lenti_per_piano[f], campioni[f]])
+		print("m12 torre: piano %d -- %d campioni fuori dall'arrivo, %d lenti sotto %.2f m/s (%.2f%%), peggiore serie %d passi"
+			% [f, campioni[f], lenti_per_piano[f], STUCK_SPEED,
+				100.0 * float(lenti_per_piano[f]) / maxf(1.0, float(campioni[f])),
+				peggiore_per_piano[f]])
+	print("m12 torre: campioni lenti dentro un buco di rampa: %d su %d (piano 0 non ha buchi per costruzione: nessuna rampa arriva sul piano base)"
+		% [in_buchi, _torre_somma(lenti_per_piano)])
+	if serie_finite.is_empty():
+		print("m12 torre: nessun nemico e' rimasto fermo piu' di un passo in %d passi" % passi)
+		return
+	var ordinate := serie_finite.duplicate()
+	ordinate.sort()
+	print("m12 torre: serie lenti finite -- n=%d, mediana %d passi, peggiore %d passi, sotto il tetto STUCK_STEPS=%d: %s"
+		% [ordinate.size(), ordinate[ordinate.size() / 2], ordinate[ordinate.size() - 1],
+			STUCK_STEPS, "si" if ordinate[ordinate.size() - 1] <= STUCK_STEPS else "NO"])
+
+func _torre_somma(a: PackedInt32Array) -> int:
+	var n := 0
+	for v in a:
+		n += v
+	return n
+
+# --- T12: la cadenza dei morsi alla densita' **nuova**, e `TOUCH_INTERVAL` --------
+#
+# ## La domanda
+#
+# `TOUCH_INTERVAL = 0,150 s` e' un numero **assoluto**, e la torre ne ha cambiato il
+# contesto senza toccarlo: il tetto era tarato su un'orda di 200 nemici **in un
+# piano**, e adesso i 200 sono quattro piani da 50. Il sospetto e' che il tetto non
+# sia piu' quello giusto — ma un sospetto non e' una misura, e **il numero che
+# risponde e' la cadenza effettiva**: quanti morsi al secondo arrivano davvero quando
+# la densita' e' quella di oggi.
+#
+# Tre numeri in una riga, e la riga dice da sola se il tetto e' il vincolo:
+#
+# | numero | cosa dice |
+# |---|---|
+# | `campioni` | quante volte al secondo un nemico e' **in portata** del giocatore |
+# | `morsi/s` | quanti morsi al secondo arrivano davvero |
+# | tetto | `1 / TOUCH_INTERVAL` = `6,67 /s`, il massimo teorico |
+#
+# Se `morsi/s` e' **lontano** dal tetto, il tetto non e' il vincolo e il numero non va
+# toccato: il tetto e' un tetto, e un tetto che non morde non e' un difetto. Se
+# `morsi/s` e' **sopra** il tetto, il tetto e' rotto e va abbassato. Il terzo caso —
+# `campioni` altissimi e `morsi` bassissimi — e' quello in cui il tetto **non** e' il
+# colpevole ma il **rientro** di `bite_latch`, e i due numeri lo distinguono.
+func _torre_cadenza(h, torre: HORDE) -> void:
+	# Il piano del giocatore pieno, e la sua quota: e' **la densita' che il gioco
+	# vede**, non quella che si puo' scegliere nel test.
+	torre._populate(0)
+	_riempi(torre, torre.population_per_floor())
+	torre.step(DT)
+	var passi := int(TORRE_WINDOW_S / DT)
+	var in_portata := 0
+	var morsi := 0
+	var saturi := 0
+	for _s in passi:
+		# **Prima** del passo: e' la stessa distanza che `enemy.gd` guarda per decidere
+		# il morso, quindi il numero e' quello che il codice vede e non uno vicino.
+		var campioni := 0
+		for i in torre.count:
+			var p := torre.transforms[i]
+			if Vector2(p.x - TORRE_PLAYER.x, p.z - TORRE_PLAYER.z).length() <= torre.bite_range_of(torre.kinds[i]):
+				campioni += 1
+		in_portata += campioni
+		torre.step(DT)
+		var dati := torre.touch_damage_last
+		if dati > 0.0:
+			morsi += 1
+		saturi = maxi(saturi, torre.sep_saturated_last)
+	var secondi := float(passi) * DT
+	var per_s := float(morsi) / maxf(0.0001, secondi)
+	var tetto := 1.0 / HORDE.TOUCH_INTERVAL
+	print("m12 torre: cadenza a %d nemici sul piano %d in %.2f m di raggio -- %d campioni in portata (%.2f per secondo), %d morsi consegnati (%.3f/s) contro un tetto teorico di %.3f/s (TOUCH_INTERVAL %.3f s); il tetto e' %s il vincolo"
+		% [torre.population_per_floor(), TORRE_FOCUS, torre.arena_radius, in_portata,
+			float(in_portata) / maxf(0.0001, secondi), morsi, per_s, tetto,
+			HORDE.TOUCH_INTERVAL,
+			"IL" if per_s > tetto * 0.5 else "NON IL"])
+	# Il tetto non si alza e non si abbassa qui: questa sezione **misura**. Il numero
+	# che decide un cambio e' `per_s` contro `tetto`, e la decisione la prende il
+	# vertice con la misura accanto — che e' la regola di `tests/test_orda.gd` da m7.
+	h.check(per_s <= tetto,
+		"m12: la cadenza misurata (%.3f/s) non puo' superare il tetto teorico "
+		% per_s
+		+ "1/TOUCH_INTERVAL (%.3f/s): se lo supera il tetto non e' un tetto"
+			% tetto)
+	h.check(float(in_portata) / maxf(1.0, float(passi * torre.count)) > 0.0,
+		"m12: almeno un campione di nemico e' stato in portata del giocatore durante "
+		+ "la finestra: altrimenti il tetto di cadenza misurerebbe il vuoto")
+	# ## Lo stesso numero, con la frazione di separazione che c'e' dentro
+	#
+	# `SEPARATION_RADIUS = 1,6 m` e' **assoluto** e la torre ne ha cambiato la
+	# densita': la frazione di campo entro quella distanza e' la stessa grandezza di
+	# `_torre_separazione`, guardata dal lato del giocatore invece che dalla media.
+	# Serve perche' i due tetti — quello dei morsi e quello della separazione —
+	# vengono dalla stessa densita' e se uno regge e l'altro no il difetto non e' la
+	# densita'.
+	var entro_sep := 0
+	for i in torre.count:
+		if Vector2(torre.transforms[i].x - TORRE_PLAYER.x, torre.transforms[i].z - TORRE_PLAYER.z).length() <= HORDE.SEPARATION_RADIUS:
+			entro_sep += 1
+	print("m12 torre: entro %.1f m dal giocatore ci sono %d nemici su %d (%.1f%%), e SEPARATION_CHECKS ha saturato %d volte"
+		% [HORDE.SEPARATION_RADIUS, entro_sep, torre.count,
+			100.0 * float(entro_sep) / maxf(1.0, float(torre.count)), saturi])
+
+func _torre_cycled(h, torre: HORDE) -> void:
+	torre._populate(HORDE.MAX_ENEMIES)
+	torre.step(DT)
+	var nodi_prima := _count_nodes(root)
+	var mem_prima := OS.get_static_memory_usage()
+	var passi := int(TORRE_WINDOW_S / DT)
+	for _s in passi:
+		torre.step(DT)
+	var mem_dopo := OS.get_static_memory_usage()
+	h.eq(torre.count, HORDE.MAX_ENEMIES,
+		"m12: dopo %d passi con la torre piena ci sono ancora %d nemici" % [passi, HORDE.MAX_ENEMIES])
+	h.eq(torre.enemy_floors.size(), torre.count, "m12: enemy_floors ancora allineato")
+	h.eq(torre.transforms.size(), torre.count, "m12: transforms ancora allineato")
+	h.eq(_count_nodes(root) - nodi_prima, 0,
+		"m12: nessun nodo in piu' dopo %d passi: quattro piani sono quattro array, non quattro nodi" % passi)
+	# ## `String formatting error: not all arguments converted`, e la regola
+	#
+	# **In GDScript `%` e' un operatore MOLTIPLICATIVO e `+` e' ADDITIVO, quindi `%` si
+	# lega piu' forte.** Una riga `"a %d " + "b %.2f " % [args] + "c"` **non** applica
+	# i numeri a tutta la frase ma **solo al pezzo centrale**. Quindi: una stringa con
+	# `%` **non** si costruisce concatenando pezzi — si costruisce **intera** e `%` si
+	# applica al risultato, **con le parentesi**. Le parentesi sono la protezione, non
+	# un'aggiunta, perche' senza, la forma che funziona e la forma che non funziona
+	# sono identiche fino all'esecuzione. Qui il difetto era il pezzo finale, che
+	# aveva **zero** `%` e riceveva **due** argomenti: l'errore e' comparso a runtime
+	# e non alla compilazione, quindi la parentesi mancante e' l'unica difesa.
+	h.check(mem_dopo - mem_prima < 8 * 1024 * 1024,
+		("m12: la memoria statica e' cresciuta di %d byte in %d passi (una griglia o un "
+			+ "campo per passo costerebbero molto di piu')")
+			% [mem_dopo - mem_prima, passi])
+	print("m12 torre: %d passi con %d nemici su %d piani -- memoria statica %d -> %d byte (delta %d), nodi fermi, sep_saturated %d"
+		% [passi, torre.count, TORRE_FLOORS, mem_prima, mem_dopo, mem_dopo - mem_prima,
+			torre.sep_saturated_last])

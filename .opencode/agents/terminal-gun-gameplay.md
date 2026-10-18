@@ -1,9 +1,9 @@
 ---
 description: "terminal-gun-gameplay: player, arma a fuoco automatico, proiettili in pool, danno, knockback, XP e level-up. Non tocca l'orda né il rendering."
 mode: subagent
-model: opencode/space-bunny-free#max
+model: opencode/beam-free
 color: "#22c55e"
-steps: 55
+steps: 150
 hidden: true
 permissions:
   # ==========================================================================

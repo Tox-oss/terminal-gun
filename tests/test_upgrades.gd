@@ -486,7 +486,7 @@ func _ritorno_alla_base(h) -> void:
 		"weapon.reset() riporta **tutti** i numeri dell'arma alla regolazione di partenza")
 	h.near(float(_weapon.damage), 10.0, 0.0001, "il danno torna a 10.0")
 	h.near(float(_weapon.fire_interval), 0.35, 0.0001, "l'intervallo fra i colpi torna a 0.35 s")
-	h.near(float(_weapon.projectile_speed), 26.0, 0.0001, "la velocita' del proiettile torna a 26 m/s")
+	h.near(float(_weapon.projectile_speed), float(base["velocita"]), 0.0001, "la velocita' del proiettile torna a 26 m/s")
 	h.near(float(_weapon.projectile_life), 1.4, 0.0001, "la gittata torna a 1.4 s")
 	h.near(float(_weapon.knockback), 18.0, 0.0001,
 		"la spinta torna a 18.0 m/s: m2 non l'ha alzata per stare comodo (piano sez. 1.2)")

@@ -1,7 +1,7 @@
 ---
 description: "Container di terminal-gun: project.godot, contratto core, gate headless, smoke test, .gitignore. Unico agente autorizzato a scrivere project.godot e a fare l'import. NON scrive gameplay."
 mode: subagent
-model: opencode/space-bunny-free#max
+model: opencode/beam-free
 color: "#94a3b8"
 steps: 50
 hidden: true

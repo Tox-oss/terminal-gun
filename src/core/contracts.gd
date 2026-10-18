@@ -73,6 +73,9 @@ const API := [
 	# `-arena`. La quota della superficie sotto il giocatore: l'unica via per salire
 	# la rampa senza introdurre un sistema di movimento. Vedi `surface_height_at`.
 	"surface_height_at",
+	# m12, 2026-10-18: `-orda`. L'intervallo con cui l'orda morde. Vedi `touch_interval`
+	# sotto perche' questa API e' stata aggiunta, e non come favore.
+	"touch_interval",
 ]
 
 # --- Dati esposti dalle foglie -------------------------------------------------
@@ -601,6 +604,26 @@ func verify_m2_surface() -> Array[String]:
 
 ## Implementazioni dei metodi, per nome di API. Stringhe perché GDScript non
 ## permette di riassegnare un `func` (vedi avvertenza in testa al file).
+##
+## **m12, 2026-10-17: il valore è un `Array` di `Callable`, non una `Callable`.**
+## Una sola voce per API faceva una cosa che nessuna porta vedeva: **l'ultima
+## registrazione vinceva, e se quel provider veniva liberato la voce restava
+## punta a un oggetto morto**. `_live()` allora la cancellava — giusto — ma
+## **dopo la cancellazione non poteva registrarsi nessuno**, perché nessun
+## `register_impl` riparte da solo: il contratto restava uno stub **per il resto
+## della partenza**, in silenzio.
+##
+## Lo ha misurato `tests/test_arena.gd`: sulla scena vera l'arma viva ha
+## `pool._free_top = 100` — nessuno slot mai ceduto — e `shots` fermo a `12`,
+## mentre `Game.spawn_projectile.get_object()` è **un altro oggetto** il cui
+## `shots` è `null`. In gioco non si vede, perché c'è un solo giocatore; ma un
+## contratto che regge solo perché il gioco ha un solo giocatore **non è un
+## contratto che misura qualcosa**, e la torre fa montare e liberare arene di
+## continuo.
+##
+## Quindi **l'ordine di registrazione non è più un canale**: `_live()` restituisce
+## l'ultima voce **viva** e butta via le morte. Un provider liberato non può più
+## togliere di mezzo il contratto a chi è ancora in albero.
 var _impl: Dictionary = {}
 
 ## Registra l'implementazione di un metodo del contratto.
@@ -625,7 +648,17 @@ func register_impl(api: String, impl: Variant) -> void:
 	if not callable.is_valid():
 		push_error("Game.register_impl(\"%s\"): l'oggetto non ha il metodo %s" % [api, api])
 		return
-	_impl[api] = callable
+	# Le voci dello **stesso oggetto** non si accumulano: registrarsi due volte
+	# non aggiunge una seconda fonte, aggiunge solo una voce che ripete la prima.
+	# Le voci di **oggetti diversi** invece si tengono tutte, e `_live()` sceglie.
+	var voci: Array = _impl.get(api, []) as Array
+	var oggetto := callable.get_object()
+	var tenute: Array[Callable] = []
+	for v: Callable in voci:
+		if v.get_object() != oggetto:
+			tenute.append(v)
+	tenute.append(callable)
+	_impl[api] = tenute
 	print("Game: %s implementato da %s" % [api, callable.get_object().get_class()])
 
 ## Un'API è registrata? Per i test e per il debug. Le foglie non ne hanno bisogno.
@@ -651,14 +684,25 @@ func has_impl(api: String) -> bool:
 ## a dire vero, che `_warned` non riporterebbe il fatto, e che il prossimo registro finirebbe
 ## sopra una voce che nessuno guarda. Un contratto che mente in silenzio è peggio di uno che
 ## non è montato, perché il secondo è rumoroso e il primo no.
+##
+## **m12: adesso le voci morte non si limitano a cancellarsi, si scartano a favore
+## dell'ultima viva.** Il caso che chiude `_live()` è proprio quello che `_live()` non
+## poteva risolvere cancellando: un provider **morto** e uno **vivo**, con il morto
+## registrato per ultimo. Cancellare la voce morta lasciava **nessuno**, e il contratto
+## diventava uno stub permanente in silenzio. Ora si scarta e si restituisce il vivo.
 func _live(api: String) -> Callable:
 	if not _impl.has(api):
 		return Callable()
-	var c: Callable = _impl[api]
-	if c.is_valid():
-		return c
-	_impl.erase(api)
-	return Callable()
+	var voci: Array = _impl[api] as Array
+	var vive: Array[Callable] = []
+	var scelta := Callable()
+	for v: Callable in voci:
+		if v.is_valid():
+			vive.append(v)
+			scelta = v          # l'ultima viva vince: l'ordine resta il criterio
+	if vive.size() != voci.size():
+		_impl[api] = vive      # le morte non tornano: nessun ripristino e' possibile
+	return scelta
 
 # --- API dichiarate ------------------------------------------------------------
 #
@@ -930,6 +974,38 @@ func surface_height_at(punto: Vector2, piano: int) -> float:
 	if c.is_valid():
 		return c.call(punto, piano) as float
 	_missing("surface_height_at", "terminal-gun-arena")
+	return -1.0
+
+## ## `TOUCH_INTERVAL` sul contratto, e perche' era una costante libera
+##
+## **m12, 2026-10-18.** `-gameplay` aveva `INVULN_AFTER_HIT = 0,25 s` come costante
+## propria, e `src/sim/horde.gd:519` aveva `TOUCH_INTERVAL = 0,15 s` come `const` — e
+## **le due non potevano essere messe a confronto perche' un `const` GDScript non si
+## legge da un'istanza**. La misura che ne e' uscita:
+##
+## ```
+## 65 offerte dell'orda a 0,1667 s   contro   36 accettate dal giocatore a 0,3167 s
+## la finestra e' PIU' LUNGA dell'intervallo che dovrebbe proteggere
+## il giocatore non puo' mai prendere due morsi di fila, per quanto sia accerchiato
+## ```
+##
+## Il difetto **non e' il numero**: e' che **i due numeri sono indipendenti** e
+## nessuno dei due puo' dire all'altro che esiste. La funzione di `INVULN_AFTER_HIT`
+## e' **una sola**: non contare due volte lo stesso morso. E per farlo **non serve un
+## numero proprio**: serve **lo stesso numero con cui l'orda morde**.
+##
+## > **una costante che compie una funzione se non ce n'e' un'altra sola non deve
+## > essere libera.** Se sono indipendenti, ognuna puo' essere giusta e insieme
+## > sbagliate — ed e' esattamente quello che e' successo: `0,25` contro `0,150`, **il
+## > primo piu' lungo del secondo**, che e' la direzione sbagliata per un
+## > antidoppio-conteggio.
+##
+## Percio' il canale esiste e `-gameplay` **deriva** invece di scrivere.
+func touch_interval() -> float:
+	var c := _live("touch_interval")
+	if c.is_valid():
+		return c.call() as float
+	_missing("touch_interval", "terminal-gun-orda")
 	return -1.0
 
 ## ## L'asse della rampa, perche' senza questo due foglie scrivono la stessa divisione

@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 ; -arena. La scena principale: `res://scenes/arena_main.tscn`, il path che
 ; project.godot dichiara come `run/main_scene`.
@@ -7,9 +7,13 @@
 ; far esistere il file, questa e' la scena vera.
 ;
 ; Cosa e' di chi, in questa scena:
-;   src/render/arena.gd           -arena   la radice, registra Game.arena_radius
-;                                             e Game.obstacles (m10)
+;   src/render/arena.gd           -arena   la radice, registra Game.arena_radius,
+;                                             Game.floor_count, Game.floor_height,
+;                                             Game.obstacles (m10), e le due API di
+;                                             -arena: ground_visible e
+;                                             surface_height_at (m12)
 ;   src/render/arena_ground.gd    -arena   pavimento, muro, casse (3 MultiMesh)
+;   src/render/arena_ramp.gd      -arena   le tre rampe della torre (m12)
 ;   src/render/arena_obstacles.gd -arena   i dischi su cui si scontra (1 MultiMesh)
 ;   src/render/horde_renderer.gd  -arena   i 200 nemici in UNA MultiMeshInstance3D
 ;   src/render/mortar_renderer.gd -arena   le cupole rosse dei colpi in volo (1 MultiMesh)
@@ -61,6 +65,7 @@
 [ext_resource type="Script" path="res://src/render/arena_obstacles.gd" id="8_obstacles"]
 [ext_resource type="Script" path="res://src/render/mortar_renderer.gd" id="9_mortar"]
 [ext_resource type="Script" path="res://src/render/mortar_shot_renderer.gd" id="10_shot"]
+[ext_resource type="Script" path="res://src/render/arena_ramp.gd" id="11_ramps"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_arena"]
 sky_top_color = Color(0.08, 0.09, 0.16, 1)
@@ -91,37 +96,67 @@ transform = Transform3D(0.825336, -0.363849, -0.431815, 0, 0.764842, -0.644218, 
 light_color = Color(1, 0.964706, 0.890196, 1)
 light_energy = 1.05
 shadow_enabled = true
-; ## LE OMBRE: 90 -> 120 -> 148, il debito lasciato aperto da m9 e poi
-; ## ricalcolato da m11 quando il raggio e' passato da 46 m a 60 m
+; ## LE OMBRE: 90 -> 120 -> 148 -> 98,2, il debito lasciato aperto da m9, poi
+; ## ricalcolato due volte: da m11 quando il raggio e' passato da 46 m a 60 m e da
+; ## m12 quando la mappa e' passata da un disco di 60 m a una torre di 35 m
 ;
 ; `directional_shadow_max_distance` e' la distanza **dalla camera** oltre la quale
 ; le ombre non sono piu' disegnate. Il valore di prima era **90** e l'arena aveva
 ; **92 m di diametro**, quindi la meta' piu' lontana del campo di gioco era
 ; letteralmente senza ombra: il difetto non si vedeva perche' la scena si
-; guardava al centro. m9 l'aveva portato a 120 con l'arena a 46 m.
+; guardava al centro. m9 l'aveva portato a 120 con l'arena a 46 m, m11 a 148 con
+; l'arena a 60 m.
 ;
 ; Il numero non e' scelto, e' **derivato dalla camera vera**
 ; (`src/render/arena_camera.gd`): la camera sta a `anchor + (0, HEIGHT, BACK)` e
-; l'ancora e' tagliata a `ARENA_RADIUS - EDGE_MARGIN = 54 m` dal centro. Il punto
+; l'ancora e' tagliata a `ARENA_RADIUS - EDGE_MARGIN = 29 m` dal centro. Il punto
 ; piu' lontano e' quello del bordo diametralmente opposto all'ancora:
 ;
-;     orizzontale  78 m (ancora a 54 m dalla parte della camera)
-;                 + 60 m (dal centro al bordo opposto)  = 138 m
-;     verticale   34 m
-;     distanza    sqrt(138^2 + 34^2) = 142,1 m     (era 115,1 m a 46 m)
+;     orizzontale  24 m (il ritardo BACK) + 29 m (ancora) + 35 m (bordo opposto)
+;                 = 88 m
+;     verticale   34 m  (HEIGHT, che **non cambia**: m12 ha cambiato il raggio e i
+;                      piani, non l'inquadratura)
+;     distanza    sqrt(88^2 + 34^2) = 94,3 m    (era 142,1 m a 60 m di raggio)
 ;
-; 120 tagliava tutto cio' che sta oltre 120 m dalla camera, cioe' **meta' arena**,
-; esattamente il difetto che il numero di prima aveva. **148** copre il caso
-; peggiore con lo stesso ~4% di margine dichiarato che aveva il 120 (148/142,1 =
-; 1,041, contro 120/115,1 = 1,042): non e' un numero estetico e non e' il 120
-; moltiplicato per 60/46, e' il massimo che la camera vera puo' raggiungere, piu'
-; un margine piccolo e scritto. `tests/test_arena.gd` lo rilegge e lo confronta,
-; e dichiara anche il **tetto**: `SHADOW_MARGIN = 1,25` volte il minimo
-; necessario, perche' un tetto che regge anche 10 km non dice niente.
-directional_shadow_max_distance = 148.0
+; **Il verticale non e' `floor_count * floor_height`.** Sembrava che dovesse
+; esserlo, e non e' cosi': la camera **segue il giocatore in verticale** dal m12,
+; quindi il punto piu' lontano **non e' mai al fondo della torre**. Il numero che
+; conta e' la distanza **da quel pezzo di scena che si vede**, e quel pezzo e' il
+; disco che la camera sta guardando. Per questo `98,2` copre il caso peggiore con
+; lo stesso ~4% di margine dichiarato che avevano 120 e 148 (98,2/94,3 = 1,041,
+; contro 148/142,1 = 1,041 e 120/115,1 = 1,042): non e' un numero estetico e non
+; e' il 148 moltiplicato per 35/60, e' il massimo che la camera vera puo'
+; raggiungere, piu' un margine piccolo e scritto.
+;
+; `tests/test_arena.gd::_ombre` lo rilegge e lo confronta **anche dal basso**: il
+; numero deve coprire il minimo necessario e non superarlo di `SHADOW_MARGIN =
+; 1,25` volte, quindi un 148 lasciato qui andrebbe rosso — un tetto che copre il
+; doppio non dice niente su quello che copre davvero.
+directional_shadow_max_distance = 98.2
 
 [node name="Ground" type="Node3D" parent="."]
 script = ExtResource("2_ground")
+
+; ## LE RAMPE, e PERCHE' STANNO **DOPO** `Ground`
+;
+; `src/render/arena_ramp.gd` (-arena) possiede la geometria che fa salire dal
+; piano `i` al piano `i+1`, e ne produce tre per quattro piani. Sono tre istanze
+; di una `MultiMesh` piu' tre scatole di collisione sotto **un** `StaticBody3D`:
+; cinque nodi, che non crescono col numero di piani.
+;
+; L'ordine e' **perche' il pavimento deve sapere dove sono le rampe**: e'
+; `Ground` che ritaglia nel proprio pavimento il rettangolo di ogni rampa che
+; arriva su un piano, altrimenti la rampa finisce contro il soffitto. Quel
+; ritaglio e' `arena_ramp.gd::in_corridor()`, che e' **statica e pura** per
+; esattamente questa ragione: `Ground` e' un fratello che sta **prima** qui, e il
+; suo `_ready()` gira prima, quindi non puo' chiedere nulla a questo nodo che non
+; si sia ancora svegliato. Le funzioni statiche rispondono a partire dai numeri del
+; contratto, che `src/render/arena.gd` ha gia' registrato in `_enter_tree()`.
+;
+; Quindi l'ordine **non** e' una dipendenza: nessuno dei due nodi legge l'altro.
+; E' leggibilita' della scena: prima il pavimento, poi i buchi, poi la rampa.
+[node name="Ramps" type="Node3D" parent="."]
+script = ExtResource("11_ramps")
 
 [node name="Obstacles" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("8_obstacles")

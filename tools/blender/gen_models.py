@@ -126,6 +126,44 @@ def add_material_vertex_color(obj, name):
         obj.data.materials.append(mat)
 
 
+def _build_player():
+    import bpy
+    import math
+
+    bpy.ops.object.text_add(location=(0, 0, 0))
+    txt = bpy.context.active_object
+    txt.data.body = "@"
+    txt.data.align_x = "CENTER"
+    txt.data.align_y = "CENTER"
+    txt.data.resolution_u = 2
+    txt.data.extrude = 0.12
+    txt.data.bevel_depth = 0.02
+    txt.data.bevel_resolution = 1
+
+    # In verticale rivolto verso il fronte/camera
+    txt.rotation_euler[0] = math.radians(90)
+    bpy.ops.object.convert(target="MESH")
+    obj = bpy.context.active_object
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+    # Scala a larghezza X esatta di 0.90 m (raggio 0.45 m = TOUCH_REACH)
+    target_width = 0.90
+    scale = target_width / obj.dimensions.x
+    obj.scale = (scale, scale, scale)
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+    # Centra il baricentro sui tre assi
+    min_c = [min(v.co[i] for v in obj.data.vertices) for i in range(3)]
+    max_c = [max(v.co[i] for v in obj.data.vertices) for i in range(3)]
+    center = [(min_c[i] + max_c[i]) / 2.0 for i in range(3)]
+    for v in obj.data.vertices:
+        v.co[0] -= center[0]
+        v.co[1] -= center[1]
+        v.co[2] -= center[2]
+    obj.data.update()
+    return obj
+
+
 def build(name):
     import bpy
     if name == "enemy_small":
@@ -135,7 +173,9 @@ def build(name):
     elif name == "enemy_boss":
         bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=1.0)
     elif name == "player":
-        bpy.ops.mesh.primitive_cone_add(vertices=8, radius1=0.45, depth=1.1)
+        obj = _build_player()
+        obj.name = name
+        return obj
     elif name == "ground_tile":
         bpy.ops.mesh.primitive_plane_add(size=2.0)
     elif name == "crate":

@@ -10,6 +10,159 @@ extends RefCounted
 ## Il produttore dei numeri di m10. Nessun `preload` circolare: quel file non
 ## preloada niente.
 const OBST = preload("res://src/sim/obstacles.gd")
+## La tabella delle specie, per il raggio del nemico piu' grosso. `enemy.gd` non
+## preloada niente, quindi nemmeno questo preload puo' diventare un riferimento
+## circolare (`spawner.gd` fa lo stesso).
+const E = preload("res://src/sim/enemy.gd")
+
+## Il raggio minimo perché **tutti** i varchi restino larghi quanto una cella,
+## derivato dalla forma del layout e non scritto.
+##
+## ## La formula, e perché i fattori sono quelli
+##
+## Ogni disco che il campo rasterizza è gonfiato di `RADIUS[BOSS] + SKIN`: quando due
+## cerchi gonfiati si toccano la rastrelliera è un muro. Fra due cerchi **si
+## sottraeggono due inflazioni, una per lato**; contro il **centro** e contro il
+## **muro** se ne sottrae **una**, perché il centro non è un ostacolo e il muro è la
+## maschera `fuori` — celle fuori arena, che la BFS non attraversa ma che **non
+## sono gonfiate**. Poi ogni varco libero deve contenere **una cella** (`CELL`), o
+## non è un varco per questa griglia.
+##
+## Con `k` anelli, `f` le frazioni, `D = RADIUS[BOSS] + SKIN` e `c = CELL`:
+##
+##     centro     R x (f1 - 0,065)                >=  D + c
+##     fra anelli R x ((f[k] - f[k-1]) - 2 x 0,065) >=  2D + c
+##     muro       R x (1 - f[k])                  >=  D + c
+##     percorso   R x (1 - 2k x 0,065)            >=  2k D + (k+1) c
+##
+## L'ultima e' la somma degli altri: percorso del centro al muro si attraversano `2k`
+## inflazioni e `k + 1` celle libere. **È la riga che ha bocciato i tre anelli**:
+## con `k = 3` dà `R x 0,61 >= 21,50` cioè **`R >= 35,246 m`** mentre ne avevamo
+## `35,00`. Non « stretto »: fuori di `0,25 m`. Con i due anelli di oggi dà `20,27 m`,
+## e il massimo delle quattro righe è `22,41 m`, che è il numero che va guardato.
+##
+## ## Perche' la cella e' un **parametro** e non una costante letta
+##
+## `CELL` è dichiarata **più in basso** in questo file di questa funzione, e non si
+## apposta a quell'ordine. La cella è la dimensione della griglia: questa funzione
+## risponde «quanto deve essere il raggio **per questa cella**», e il chiamante la
+## conosce già perché l'altra metà di questa sezione la stampa accanto ai varchi.
+static func arena_radius_min(cell: float) -> float:
+	var k := OBST.RING_RADII.size()
+	if k <= 0:
+		return 0.0
+	var d := E.RADIUS[E.BOSS] + SKIN
+	var peggiore := 0.0
+	var lato := d + cell
+	var f1 := float(OBST.RING_RADII[0]) - OBST.RADIUS_FRACTION
+	if f1 > 0.0:
+		peggiore = maxf(peggiore, lato / f1)
+	var fn := 1.0 - float(OBST.RING_RADII[k - 1])
+	if fn > 0.0:
+		peggiore = maxf(peggiore, lato / fn)
+	for i in range(1, k):
+		var salto := float(OBST.RING_RADII[i]) - float(OBST.RING_RADII[i - 1]) \
+			- 2.0 * OBST.RADIUS_FRACTION
+		if salto > 0.0:
+			peggiore = maxf(peggiore, (2.0 * d + cell) / salto)
+	var libero := 1.0 - 2.0 * float(k) * OBST.RADIUS_FRACTION
+	if libero > 0.0:
+		peggiore = maxf(peggiore, (2.0 * float(k) * d + float(k + 1) * cell) / libero)
+	return peggiore
+
+## L'inflazione di un disco: quanto la rastrelliera si sposta dal centro del disco.
+## È il numero da cui escono tutti i varchi, e va detto una volta sola perché
+## «una inflazione o due» è la domanda che ha fatto sbagliare la prima stima.
+static func inflate_for(arena_radius: float) -> float:
+	return OBST.radius_for(arena_radius) + E.RADIUS[E.BOSS] + SKIN
+
+## **Varco 1: dal centro al primo anello.** Una inflazione e una cella.
+## È il disco libero in cui il giocatore sta e in cui i nemici devono poter stare:
+## sotto `CELL` il centro è una stanza troppo stretta perché la BFS ci metta una
+## sorgente comoda e il campo comincia a inseguire da fuori.
+static func gap_centro(arena_radius: float) -> float:
+	if OBST.RING_RADII.is_empty():
+		return 0.0
+	return float(OBST.RING_RADII[0]) * arena_radius - inflate_for(arena_radius)
+
+## **Varco 2: fra due anelli consecutivi.** **Due** inflazioni — una per lato — più
+## una cella. È il numero che a `R = 35,0 m` con i numeri di prima valeva `0,05 m`
+## sotto tre anelli, e che produceva i 424 passi fermi: sotto `CELL` la rastrelliera
+## è chiusa e il campo ha **due** sorgenti invece di una.
+static func gap_anelli(arena_radius: float) -> float:
+	if OBST.RING_RADII.size() < 2:
+		return 0.0
+	var peggiore := 1.0e9
+	for i in range(1, OBST.RING_RADII.size()):
+		var salto := (float(OBST.RING_RADII[i]) - float(OBST.RING_RADII[i - 1])) * arena_radius
+		peggiore = minf(peggiore, salto - 2.0 * inflate_for(arena_radius))
+	return peggiore
+
+## **Varco 3: dall'ultimo anello al muro.** Una inflazione e una cella, **non due**:
+## il muro è la maschera `fuori`, che la BFS già scarta e che `build()` non gonfia.
+## Sottraerne due sarebbe la trappola inversa — aprire il varco interno e chiudere
+## quello esterno — ed è il numero che ha fatto scrivere `0,685` invece di `0,814`
+## come tetto per la frazione esterna. Il varco così calcolato è più generoso di
+## quanto serva e **la verifica resta quella**: `>= CELL`.
+static func gap_muro(arena_radius: float) -> float:
+	if OBST.RING_RADII.is_empty():
+		return 0.0
+	var ultimo := float(OBST.RING_RADII[OBST.RING_RADII.size() - 1]) * arena_radius
+	return arena_radius - ultimo - inflate_for(arena_radius)
+
+## **Varco 4: fra due dischi dello stesso anello, cioè l'apertura di un anello.**
+##
+## Non e' fra i tre che il piano elenca, e senza questo quarto numero il criterio
+## passa con un layout i cui anelli sono **anelli chiusi**: un anello rasterizzato
+## chiuso non è un ostacolo che si aggira, è un muro che isola l'interno dall'esterno,
+## e il sintomo è lo stesso del varco fra anelli. Quindi la misura esiste.
+##
+## Il caso peggiore e' con il **jitter al massimo** (`ANGLE_JITTER`), cioe' due dischi
+## consecutivi il cui passo angolare si e' ridotto del 10%: e' la ragione per cui il
+## numero e' `sin(passo x (1 - jitter))` e non `sin(passo)`. Il criterio di m10 e la
+## dichiarazione di questa testa dicono entrambe che il jitter e' limitato proprio
+## per non toccare la garanzia, e questa e' la funzione che quella promessa verifica.
+##
+## ## Quale dei cinque varchi **cede per primo**, e di quanto
+##
+## Ogni varco cala di `delta` per ogni metro di crescita di `RADIUS[BOSS]`, e i due
+## circolari calano di **`2 x delta`** perché l'inflazione è da due lati. Quindi il
+## primo a cedere non è quello che sembra più stretto in assoluto (`gap_muro`, che a
+## `R = 35` è il più piccolo dei cinque con `3,175 m`), ma quello che ha **meno
+## margine in celle** e ne ha **due** inflazioni da pagare. Misurato sui numeri di
+## oggi:
+##
+## | varco | oggi | quante celle | cede a un boss di |
+## |---|---|---|---|
+## | circolare anello 1 | 2,390 m | 1,20 | **+0,195 m** |
+## | circolare anello 2 | 2,732 m | 1,37 | +0,366 m |
+## | contro il muro | 3,175 m | 1,59 | +1,175 m |
+## | fra anelli | 5,650 m | 2,83 | +1,825 m |
+## | centro | 8,075 m | 4,04 | +3,038 m |
+##
+## Cioè: **`RADIUS[BOSS]` può crescere di `0,41 m` — un terzo della sua taglia —
+## prima che il varco contro il muro si accorga di qualcosa, e già a `0,195 m` il
+## primo anello si chiude.** Il numero che va scritto qui, perché nessuno lo scopra
+## spostando una costante di `enemy.gd` e ritrovandolo in un crash tre settimane dopo.
+static func gap_circolare(i: int, arena_radius: float) -> float:
+	if i < 0 or i >= OBST.RING_COUNTS.size() or i >= OBST.RING_RADII.size():
+		return 0.0
+	var n: int = maxi(int(OBST.RING_COUNTS[i]), 1)
+	var r := float(OBST.RING_RADII[i]) * arena_radius
+	var passo := PI / float(n)
+	var peggiore := sin(passo * maxf(0.0, 1.0 - OBST.ANGLE_JITTER))
+	return 2.0 * r * peggiore - 2.0 * inflate_for(arena_radius)
+
+## Il **minimo** dei varchi del layout a un raggio dato: il numero che il criterio
+## confronta con `CELL`. `minimo` su tutti i varchi **e su tutti gli anelli**, e non
+## una media: un layout con un varco buono e uno chiuso e' un layout chiuso.
+static func gap_minimo(arena_radius: float) -> float:
+	var peggiore := gap_centro(arena_radius)
+	peggiore = minf(peggiore, gap_anelli(arena_radius))
+	peggiore = minf(peggiore, gap_muro(arena_radius))
+	for i in OBST.RING_COUNTS.size():
+		peggiore = minf(peggiore, gap_circolare(i, arena_radius))
+	return peggiore
 ##
 ## ## L'algoritmo, e perche' questo e non un altro
 ##

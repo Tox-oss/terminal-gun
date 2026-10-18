@@ -43,6 +43,62 @@ il codice non ci arriva è il difetto che questo progetto vieta più spesso.
 Se per far cadere un criterio metti un blocco di prova, **tiralo fuori dal file** prima di
 finire. Una prova lasciata dentro è un numero che il prossimo leggerà come se fosse vivo.
 
+## Il muro è meccanico, non dichiarato (2026-10-18)
+
+La sezione «il primo canale» diceva «muro di vetro: dice che c'è, ma non impedisce niente».
+**Era sbagliato, e in un modo che contava.** Il muro **esiste ed è meccanico**, e non è la
+disciplina di kiro:
+
+> **Il vertice fa `git add` con percorsi espliciti, mai `-A`.** Quindi **qualsiasi scrittura
+> fuori dai percorsi che dichiara resta sporca e non entra mai in un commit.**
+
+Una scrittura di kiro in `src/**` o in `tests/**` **non viene pubblicata**: resta modificata
+e visibile nel `git status` del vertice, che la vede prima di ogni commit. **La contenzione non
+richiede che kiro obbedisca: richiede solo che il vertice non faccia `git add -A`.** È la stessa
+forma del resto del progetto — **una porta che non si puo' aggirare vale piu' di una regola che
+si puo' dimenticare.**
+
+## Dove puo' scrivere, e dove no
+
+```
+PUO'   docs/piramide/diagnosi/*.md          file nuovi, mai toccati da altri
+NON    src/**        il codice ha un proprietario per file, e tu non sei un file di agente
+NON    tests/**      idem: i test sono scope di una foglia
+NON    tools/**      la porta e' del vertice
+NON    docs/piramide/piano.md        il piano e' l'unica fonte di verita' ed e' del vertice
+NON    docs/piramide/KIRO.md         questo contratto non si modifica da solo
+NON    .opencode/**                   allowlist, fuori per costruzione
+```
+
+**Il motivo della riga su `src/**` e' di governance, non dicapacita'.** La garanzia su cui
+regge tutta la piramide e' **un proprietario per file**: `tools/check_perms.py` confronta i
+file di agente opencode contro `LEAVES` e `SCOPE`. **Un agente che non e' un file di agente non
+e' coperto da nessuna di quelle porte**, quindi **qualsiasi cosa che scrive non ha un
+proprietario** — e un file senza proprietario non e' una versione, e' un artefatto. **Questo
+canale fa diagnosi e non produce artefatti.**
+
+## Cosa gli si affida, e perche' e' la classe giusta
+
+Il costo di un'onda non e' scrivere codice: e' **il ping-pong seriale**. Il difetto di
+`test_arena` ha attraversato **undici passaggi** fra `-arena` e `-gameplay`, e in undici di
+quelli le due foglie si sono passati **un numero alla volta** — perche' **nessuna foglia puo'
+leggere lo scope dell'altra**.
+
+Una diagnosi che deve leggere `src/**` e `tests/**` insieme e' **impossibile per una foglia e
+banale per un agente senza allowlist**. E il canale esiste per quello: **quota separata**, quindi
+il lavoro non compete con le foglie.
+
+I tre incarichi, in ordine di ritorno misurato:
+
+1. **Localizzazione cross-scope, sola lettura.** Per ogni riga `FAIL` che la porta stampa:
+   `file:line` del guard che la produce, il valore della sua condizione in quell'istante, e
+   **lo scope che lo possiede**.
+2. **`SCRIPT ERROR` → riga e perche'.** Il formato `at: GDScript::reload (res://X.gd:541)`
+   contiene gia' tutto; in questa sessione ne sono successi quattro e ognuno ha costato un giro.
+3. **Censimento delle copie.** Il difetto della **quarta copia di un numero** e' ricorso almeno
+   quattro volte in due settimane: due funzioni con lo stesso nome per lo stesso numero, un
+   raggio in tre file, un ripiego `-1`. **Un agente che legge tutto lo trova in un passata.**
+
 ## Cosa deve contenere il rapporto finale
 
 Cinque righe, e ognuna con il numero o con la parola che la rende inutile:

@@ -2,11 +2,16 @@
 
 ; -ui (m2, m6, m17, m13-w2). L'HUD: ventisette nodi, sempre gli stessi.
 ;
-; Otto venivano da -arena (vite, testo vite, nemici, punteggio, livello, arma).
-; m2 aggiunge cinque: la barra dell'XP, il suo testo, il contatore d'onda, la
-; barra dell'onda e la schermata di game over. Il passaggio di proprieta' e'
-; dichiarato in piano sez. 3.3 e 4.1: -arena aveva gia' chiuso il suo scope e
-; riaprirgli un file e' il difetto che la regola 1 vieta.
+; Sei venivano da -arena (vite, testo vite, nemici, punteggio, livello, arma):
+; sei voci e sei nodi, `Health`, `HealthText`, `Enemies`, `Score`, `Level`,
+; `Weapon`.
+;
+; m2 aggiunge sei: la barra dell'XP (`Xp`), il suo testo (`XpText`), il
+; contatore d'onda (`Wave`), la barra dell'onda (`WaveBar`) e la schermata di
+; game over, che e' **due** nodi e non uno (`GameOver` il pannello,
+; `GameOverText` la scritta). Il passaggio di proprieta' e' dichiarato in piano
+; sez. 3.3 e 4.1: -arena aveva gia' chiuso il suo scope e riaprirgli un file e'
+; il difetto che la regola 1 vieta.
 ;
 ; m17 aggiunge uno: `Clock`, il tempo di partita. E uno solo perche' il numero
 ; non e' di questa foglia: `Run.elapsed_s`, di `-orda`. Qui dentro non c'e' un
@@ -24,6 +29,33 @@
 ; vale per `GameOver`: un nodo che nasce a meta' partita e' un nodo che si
 ; aggiunge a ogni livello, e `tests/test_ui.gd` conta i nodi dell'HUD per
 ; verificare che fra due partite non ne cresca nessuno.
+;
+; ## LA SOMMA CHIUDE, e come si controlla senza contare nodo per nodo
+;
+; Sei (m1) + sei (m2) + undici (m6) + uno (m17) + uno (m13-w2) = **25
+; discendenti** di `Root`; piu' `Root` e piu' `Hud` = **27**.
+;
+; Questa riga c'e' perche' il conto **prima non chiudeva**: le milestone
+; dichiaravano **26** nodi contro i **25** reali, e il nome che mancava era
+; `GameOverText`. La riga di m2 contava **voci** ("la schermata di game over")
+; mentre l'albero ha **nodi**, e `GameOver` era gia' contato: la schermata sono
+; due, e `GameOverText` non e' mai stato di m1 perche' una schermata senza
+; scritta non e' una schermata. La riga di m1 dichiarava "otto" e ne enumerava
+; sei: sei sono quelli che ci sono, quindi l'otto era un numero che non aveva un
+; nome dietro.
+;
+; Un conteggio per milestone che non chiude e' un numero che aspetta che qualcuno
+; aggiunga un nodo senza dirlo: e' la stessa forma del difetto che produce un
+; tetto senza scomposizione, quindi la somma e' dichiarata qui **per poter essere
+; ricalcolata** quando una milestone aggiunge nodi, e non per essere ricordata.
+;
+; Il **27** e' un numero **misurato**, non un tetto: `tests/test_ui.gd` lo
+; stampa a ogni avvio (`test_ui: nodi dell'HUD per avvio: 27 / 27 / 27`) e
+; asserisce che l'HUD non cresca mentre e' montato. Quindi se la scena
+; crescesse, il numero cambierebbe da solo e questa riga diventerebbe falsa da
+; sola, che e' il modo in cui un numero deve accorgersi di essere vecchio. Il
+; tetto di 120 e' di m1 e vive in `tests/test_arena.gd`, che non e' di questa
+; foglia: qui dentro non c'e' nessun tetto.
 ;
 ; Il numero di carte e' un fatto di **layout**, non di gameplay: quante carte
 ; ci stanno sullo schermo e' una decisione di questa foglia. **Quante offerte

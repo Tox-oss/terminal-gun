@@ -52,6 +52,36 @@ var life := 1.4
 var radius := RADIUS
 var pierce := 0
 
+## ## m12: il piano su cui e' stato sparato, e perche' vive **qui**
+##
+## Il pool lo scrive una volta sola in `acquire()`, **prima** che il proiettile
+## voli, e da li in avanti non cambia piu': il contatto di ogni passo legge questo
+## numero e non rilegge il contratto.
+##
+## Il perche' e' una scelta e non una scorciatoia: il piano e' una proprieta' del
+## **colpo**, non del giocatore in quel momento. Se il pool chiedesse
+## `Game.player_floor()` a ogni passo, un proiettile gia' sparato cambierebbe
+## bersaglio quando il giocatore sale un piano mentre il colpo e' in volo — e
+## quello e' il difetto che m12 chiude, ripetuto dentro il fix.
+var piano := 0
+## m15: da quale dei due **controfattuali** e' partito questo colpo (`true` =
+## l'arma ha anticipato il bersaglio). E' un flag e nient'altro, e senza di questo
+## il confronto fra i due bracci non avrebbe un numeratore per ciascuno: vedi i
+## due campi in testa al file `projectile_pool.gd` e la sezione
+## `_tasso_col_controfattuale` di `tests/test_progression.gd`.
+var anticipato := false
+
+## ## m15: la **distanza minima** che il segmento di questo colpo ha raggiunto da
+## un centro nemico, in metri quadrati, su tutto il volo.
+##
+## E' il numero che dice «il predetto cade dentro il reach? e di quanto?», ed e'
+## l'unico che regge: **un indice non e' un'identita'** e l'orda compatta i suoi
+## array a ogni morte, quindi seguire il bersaglio fra un frame e l'altro non e'
+## possibile (vedi il blocco lungo in `projectile_pool.gd`). Qui invece la minima
+## e' calcolata **dentro il frame** e accumulata, e il confronto avviene quando il
+## colpo lascia il pool. `INF` = il colpo non ha incontrato nessuno.
+var scarto_min2 := INF
+
 ## Indici dei nemici già colpiti da questo proiettile, e quanti sono validi.
 ## È QUI che vive la regola "danno una volta sola": un proiettile che resta
 ## dentro un nemico per tre frame non deve spammare `damage_enemy`, e un
@@ -73,6 +103,9 @@ func launch(p_pos: Vector3, p_dir: Vector3, p_speed: float, p_damage: float,
 	life = p_life
 	pierce = clampi(p_pierce, 0, MAX_PIERCE)
 	hit_count = 0
+	# m15: il minimo riparte da capo a ogni lancio, altrimenti un record riusato
+	# porterebbe dentro il volo precedente il suo scarto. Vedi il blocco sopra.
+	scarto_min2 = INF
 
 ## Un passo di integrazione. Solo movimento: la collisione la fa il pool, che è
 ## l'unico che può vedere gli indici dell'orda senza dipendere dal suo script.

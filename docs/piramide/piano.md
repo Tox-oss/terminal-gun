@@ -1263,6 +1263,8 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
+**Onda pendente (registrata, quota non disponibile):** cambio di design — rimuovere la torre, scorrimento in direzione W (avanti sullo schermo, la direzione di W). Foglie coinvolte, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale, un agente alla volta). Il vertice non ha congelato alcuna superficie in `contracts.gd` per questa onda: il contratto della torre resta intatto finché il design non è specificato. `PERM: 15/15` verificato il 2026-10-18 prima di fermarsi. Nessuna foglia lanciata.
+
 **Stato al 2026-10-16, sommario.** Il sommario sotto è del **2026-10-15** e vale per m1–m18: non
 è stato riscritto, perché riscriverlo a ogni onda è il modo di far perdere la sostanza. **La sezione
 più recente è §1.14-ventiseiesima (m19)**: tetti di difficoltà rimossi, legge nuova verde con denti

@@ -782,16 +782,8 @@ func health_ratio() -> float:
 
 # --- Interno ------------------------------------------------------------------
 
-## Compatibilita' con vecchi chiamanti: senza torre il giocatore e' sempre al piano 0.
-func _player_floor() -> int:
-	return 0
-
-## Senza torre tutti gli ostacoli appartengono al giocatore.
-func ostacoli_per_piano() -> int:
-	return obstacles.size()
-
-func _blocco_piano() -> Vector2i:
-	return Vector2i(0, obstacles.size())
+## Piano unico: nessun piano da campionare, nessuna divisione per piano.
+## Gli ostacoli sono tutti quelli registrati dal contratto.
 
 func _player_position() -> Vector3:
 	return global_position

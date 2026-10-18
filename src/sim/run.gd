@@ -307,42 +307,22 @@ const CATCHUP_SAFETY := 4.0
 #      secondi — e la riga che li tiene separati e' `horde.gd::_sync_wave` /
 #      `_sync_population`, che restano sulla curva e non sull'orologio.
 
-## Nemici vivi contemporaneamente sull'onda 1, **sul piano del giocatore**.
-## `25` per piano = `100` in totale su quattro piani: vedi la derivazione sotto.
-const POP_BASE_PER_FLOOR := 25
-## Nemici vivi contemporaneamente sull'onda 1: un ottavo della capienza **per
-## piano**. Il totale che `population_of(w)` restituisce e' `questo per floor_count`,
-## e la moltiplicazione la fa **`horde.gd::_sync_population()`**, che e' l'unica
-## foglia che sa quanti piani ci sono (`Game.floor_count`): qui dentro non si sa, e
-## un `x4` scritto a mano sarebbe una copia che mente se i piani non sono quattro.
+## Nemici vivi contemporaneamente sull'onda 1. **Totale**, su un piano solo: non
+## c'e' piu' una torre, quindi non si moltiplica per il numero di piani.
 ##
-## ## m12: **perche' il totale e' passato da 25 a 100**
+## ## m18: riduzione della densita' iniziale (feedback di gioco)
 ##
-## Il difetto non e' stato un numero sbagliato: e' stato un numero **giusto in un
-## mondo che non esiste piu'**. `25` era la capienza di **un** piano, e con quattro
-## piani significa `6` per piano — misurato da `-gameplay`: «25 nemici vivi = 6 per
-## piano». Sei nemici non sono un'onda: sono un tavolo con tre candelieri. Il
-## giocatore ne ammazza sei, gli altri stanno su tre piani dove non li raggiunge, e
-## l'onda 1 chiede `200` uccisioni che il campo non riporta mai.
-##
-## Il numero che il giocatore **vede intorno a se'** all'avvio e' `25`, e quello e'
-## stato il metro: il tetto resta `POP_MAX` e resta **totale**, cioe' `50` per piano,
-## cosi' il rapporto fra base e tetto **per piano** passa da `8x` a `2x`. E' una
-## conseguenza della torre, non una scelta: si sta dividendo fra quattro superfici
-## un numero che era tarato per una.
-##
-## | | prima (un piano) | adesso (quattro piani) |
-## |---|---|---|
-## | `POP_BASE` per piano | 25 | **25** (invariato) |
-## | `POP_BASE` totale | 25 | **100** |
-## | `POP_MAX` per piano | 200 | **50** |
-## | curva per piano | 25, 50, 75, 100, 125, 150, 175, 200 | 25, 31, 37, 43, 50 |
-##
-## `POP_STEP` resta `25`: e' l'ampiezza **totale** della rampa, e la rampa per piano
-## passa da sette gradini a quattro. La curva resta quindi una rampa, non un gradino:
-## quello che e' cambiato e' l'**ampiezza**, che e' la meta' di prima perche' i
-## gradini sono metà di prima quanto i piani sono quattro.
-const POP_BASE := 100
+## Misurato prima di questa modifica su `tests/test_orda.gd`: l'onda 1 partiva a
+## 25 nemici vivi (`Run.POP_BASE` precedente), e il gioco risultava gia' troppo
+## denso al primo frame. Il valore nuovo e' **12**: circa la meta' della densita'
+## iniziale, scelto perche' lascia un campo che si guarda e si spara fin dal
+## primo frame senza svuotare l'onda (che resta di `WAVE_BASE = 200` uccisioni).
+## La crescita per onda (`POP_STEP = 25`) e il tetto (`POP_MAX = Horde.MAX_ENEMIES`)
+## non si toccano: solo il punto di partenza scende, e la saturazione si sposta
+## di un gradino (da onda 8 a onda 9) perche' la curva ha un gradino in piu' da
+## fare. Il numero non e' copiato da nessun altro file: viene da questa misura.
+const POP_BASE_PER_FLOOR := 12
+const POP_BASE := 12
 ## Quanti in piu' vivi a ogni onda.
 const POP_STEP := 25
 ## Tetto della popolazione: **deve valere `Horde.MAX_ENEMIES`**, ed e' scritto
@@ -363,7 +343,7 @@ const POP_MAX := 200
 ## continua a crescere — ed e' la difesa dell'invariante 1 contro una `POP_BASE` che
 ## salisse ancora: se `POP_BASE` tornasse a `25` questo numero non tornerebbe a `8` e
 ## la sezione che verifica i due lati dell'invariante andrebbe rossa.
-const POP_SATURATION := 5
+const POP_SATURATION := 9
 
 ## # m12-w1a: LA LEGGE DEL RATEO DI NASCITA
 ##

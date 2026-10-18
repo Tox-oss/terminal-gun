@@ -2233,7 +2233,7 @@ func _restart_run(h) -> void:
 		# quota. Se la stampa dicesse `true` quella conclusione cadrebbe, ed e'
 		# per questo il numero c'e' invece di essere un fatto.
 		var prima_pos: Vector3 = player.position
-		var prima_piano: int = int(player.call("_player_floor"))
+		var prima_piano: int = 0
 		var prima_idx: int = int(game.nearest_enemy(prima_pos, float(weapon.acquire_radius)))
 		var canale: bool = game.has_impl("surface_height_at")
 		var prima_cd: float = float(weapon.cooldown)
@@ -2249,7 +2249,7 @@ func _restart_run(h) -> void:
 		# `cooldown -= delta` e' l'unica scrittura del campo.
 		print("m2 restart %d: `step()` dell'arma derivati dal cooldown (`cooldown -= DT` a ogni step e nient'altro tocca il campo, quindi stepi = -cooldown / DT): %d subito dopo restart_run(), %d dopo la PRIMA horde_vera.step(DT), %d dopo la seconda, %d dopo la player.step() del criterio. Lettura: se il numero sale gia' alla prima horde_vera.step e il primo e' %d, allora e' l'orda (o chi lei chiama) a steppare il giocatore; se sale solo dopo la seconda, e' la seconda; se non sale mai fino alla player.step(), allora nessuno la steppa e il -0,02 s che m12 misura arriva da qualche altra parte"
 			% [giro + 1, stepi_0, stepi_1, stepi_2, stepi_3, stepi_1])
-		var dopo_piano: int = int(player.call("_player_floor"))
+		var dopo_piano: int = 0
 		var dopo_idx: int = int(game.nearest_enemy(dopo_pos, float(weapon.acquire_radius)))
 		# Il nemico **piu' vicino** letto dall'orda, non dal contratto: e' l'unico
 		# modo di distinguere «la griglia che l'arma interroga non ha nessuno» da
@@ -5688,7 +5688,7 @@ func _m10_ostacoli_del_contratto(h) -> void:
 				# piano non deve collidere con i dischi che sono `20 m` sotto di lui.
 				# I tre numeri sono presi **qui**, sulla scena montata, nello stesso
 				# istante del confronto.
-				var blocco: Vector2i = p.call("_blocco_piano")
+				var blocco: Vector2i = Vector2i(0, p.obstacles.size())
 				var piani_giocatore := {}
 				var y_del_giocatore := 0.0
 				var letti := 0
@@ -5704,7 +5704,7 @@ func _m10_ostacoli_del_contratto(h) -> void:
 				print("m10 i tre numeri: il contratto ha %d dischi su %d piani; il giocatore ne usa %d, indici [%d, %d), e i loro raggi vanno da %.3f a %.3f m; il suo piano logico e' %d a quota %.3f m. **Il numero 1 che avevo stampato era letto con l'argomento sbagliato**: `floor_of` applicato a `obs[i].y` dava `0` per tutti i 48, e non perche' i 48 fossero sul piano 0, ma perche' **`y` non e' la quota** — l'elemento e' `Vector3(centro_x, RAGGIO, centro_z)` (`contracts.gd:247`), quindi **l'elemento non porta l'altitudine** e su un elemento non si puo' fare `floor_of`: il piano di un disco e' nel suo **indice**, che e' perche' `ostacoli_per_piano()` **divide** (`player.gd:994`) invece di raggruppare per quota. La dichiarazione di `obstacle_count()` (`player.gd:1025`) e' **per piano** e scrive il perche'"
 					% [n, int(game.get("floor_count")), int(p.obstacle_count()), blocco.x, blocco.y,
 						raggi.x, raggi.y,
-						int(p.call("_player_floor")), y_del_giocatore])
+						0, y_del_giocatore])
 				# ## Il criterio riscritto: **esattamente** i dischi del suo piano, e nessuno
 				# degli altri
 				#
@@ -5741,8 +5741,8 @@ func _m10_ostacoli_del_contratto(h) -> void:
 				# concatenazione che `ostacoli_per_piano()` divide. Quindi il secondo
 				# dente e' esattamente la divisione, verificata sulle sue due parti:
 				# `per` dischi per piano e `k = _player_floor()` come blocco.
-				var piano_logico := int(p.call("_player_floor"))
-				var per: int = p.call("ostacoli_per_piano")
+				var piano_logico := 0
+				var per: int = p.obstacles.size()
 				h.eq(blocco, Vector2i(piano_logico * per, (piano_logico + 1) * per),
 					"m10: il blocco del giocatore e' la fetta [%d, %d) della concatenazione, cioe' `piano logico %d x %d dischi per piano`: leggere troppo e' un errore diverso dal leggere poco, e questo criterio vede entrambi"
 					% [piano_logico * per, (piano_logico + 1) * per, piano_logico, per])

@@ -1284,7 +1284,9 @@ func _resize_arrays(n: int) -> void:
 	bites.resize(n)
 	mortar_timers.resize(n)
 	mortar_fire.resize(n)
-	# (removed enemy_floors resize)
+	enemy_floors.resize(n)
+	for i in n:
+		enemy_floors[i] = 0
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -1422,7 +1424,8 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	# n. 4 di m8). `radii` non e' derivato da `transforms` ne' dalla tinta: e'
 	# l'unico posto in cui la taglia attraversa la foglia.
 	radii[i] = E.radius_of(kind)
-
+	enemy_floors[i] = 0
+ 
 # --- Simulazione --------------------------------------------------------------
 
 ## Un passo. Chiamato da `_physics_process`; il test lo chiama direttamente
@@ -1890,17 +1893,7 @@ func _kill(i: int) -> void:
 		bites[i] = bites[last]
 		mortar_timers[i] = mortar_timers[last]
 		mortar_fire[i] = mortar_fire[last]
-		# ## m12: `enemy_floors` partecipa allo scambio come tutti gli altri
-		#
-		# **Senza questa riga il difetto e' invisibile e compare a caso.** Il nemico
-		# che prende il posto di quello ucciso ha la sua posizione e la sua vita ma
-		# **il piano del morto**: inseguirebbe col campo di un piano in cui non si
-		# trova, cercherebbe i vicini nella griglia sbagliata e i proiettili lo
-		# raggiungerebbero con l'indice giusto e con il bersaglio sbagliato. Non e'
-		# un crash, non e' un valore fuori range: e' un nemico che appartiene a due
-		# piani, e la prima volta che si vede e' a tre minuti dalla causa, in una
-		# sezione che non c'entra niente con i piani.
-		# (removed)
+		enemy_floors[i] = enemy_floors[last]
 	count = last
 	_resize_arrays(count)
 	kills += 1

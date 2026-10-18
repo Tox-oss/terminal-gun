@@ -18,12 +18,60 @@ var _sources: Array[PackedScene] = []
 var _written_crates: Array[Transform3D] = []
 var _written_floor: Array[Transform3D] = []
 var _written_wall: Array[Transform3D] = []
+var _base_crates: Array[Transform3D] = []
+var _base_floor: Array[Transform3D] = []
+var _base_wall: Array[Transform3D] = []
+var _scroll_offset: Vector3 = Vector3.ZERO
 var _contract_cache: Node = null
 var _built: bool = false
 var _radius: float = 0.0
 
 func _ready() -> void:
 	_build()
+
+func _process(_delta: float) -> void:
+	var p := _player_position()
+	_apply_scroll(Vector3(0.0, 0.0, p.z))
+
+func _player_position() -> Vector3:
+	var game := _contract()
+	if game != null and game.has_method("player_position"):
+		return game.player_position()
+	if game != null:
+		var pl = game.get("player")
+		if pl is Node3D:
+			return (pl as Node3D).global_position
+	return Vector3.ZERO
+
+func _apply_scroll(offset: Vector3) -> void:
+	if offset == _scroll_offset:
+		return
+	_scroll_offset = offset
+	# riscrive i buffer con lo scorrimento applicato
+	if _floor != null and _floor.multimesh != null:
+		var mm := _floor.multimesh
+		_written_floor.clear()
+		for i in _base_floor.size():
+			var t := _base_floor[i]
+			t.origin += offset
+			mm.set_instance_transform(i, t)
+			_written_floor.append(t)
+	if _wall != null and _wall.multimesh != null:
+		var mm := _wall.multimesh
+		_written_wall.clear()
+		for i in _base_wall.size():
+			var t := _base_wall[i]
+			t.origin += offset
+			mm.set_instance_transform(i, t)
+			_written_wall.append(t)
+	if _crates != null and _crates.multimesh != null:
+		var mm := _crates.multimesh
+		_written_crates.clear()
+		for i in _base_crates.size():
+			var t := _base_crates[i]
+			t.origin += offset
+			mm.set_instance_transform(i, t)
+			_written_crates.append(t)
 
 func _build() -> void:
 	if _built:
@@ -37,6 +85,9 @@ func _build() -> void:
 	_crates = _add_multimesh("Crates", CRATE_SCENE)
 	_build_crates(_crates, _radius)
 	_fit_aabbs(_radius)
+	_base_floor = _written_floor.duplicate()
+	_base_wall = _written_wall.duplicate()
+	_base_crates = _written_crates.duplicate()
 
 func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3D:
 	var mi := MultiMeshInstance3D.new()

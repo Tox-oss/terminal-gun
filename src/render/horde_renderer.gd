@@ -212,6 +212,7 @@ var _contract_cache: Node = null
 var _source: PackedScene = null
 
 var _time: float = 0.0
+var _scroll_offset: Vector3 = Vector3.ZERO
 var _built: bool = false
 var _last_drawn: int = 0
 var _last_radius: float = -1.0
@@ -232,6 +233,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
+	_update_scroll_offset()
 	refresh()
 
 # --- Costruzione --------------------------------------------------------------
@@ -505,7 +507,7 @@ func instance_transform(pos: Vector3, radius: float, i: int) -> Transform3D:
 	# i piedi restano sul pavimento a ogni taglia invece che a una sola.
 	var lift: float = 0.5 * s * _mesh_height
 	return Transform3D(_shared_rotation().scaled(Vector3(s, s, s)),
-		Vector3(pos.x, pos.y + lift + bob, pos.z))
+		Vector3(pos.x - _scroll_offset.x, pos.y + lift + bob, pos.z - _scroll_offset.z))
 
 ## La rotazione che hanno in comune tutti i nemici. Cambia solo con l'orologio,
 ## quindi si ricostruisce una volta per frame e non una volta per nemico. Con 200
@@ -518,6 +520,17 @@ func _shared_rotation() -> Basis:
 		_basis_time = _time
 		_basis = Basis(Vector3.UP, _time * SPIN_SPEED)
 	return _basis
+
+func _update_scroll_offset() -> void:
+	var game := _contract()
+	var p := Vector3.ZERO
+	if game != null and game.has_method("player_position"):
+		p = game.player_position()
+	elif game != null:
+		var pl = game.get("player")
+		if pl is Node3D:
+			p = (pl as Node3D).global_position
+	_scroll_offset = Vector3(0.0, 0.0, p.z)
 
 func _resolve_horde() -> Node:
 	if _horde != null and is_instance_valid(_horde):

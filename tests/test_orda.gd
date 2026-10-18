@@ -718,7 +718,7 @@ const DPS_RATIO_MAX := 7.5
 ## I quattro casi misurati: semi e popolazione. I primi due sono l'onda 1 (25
 ## vivi) su due semi diversi, il terzo la curva a meta' strada, il quarto
 ## l'onda 8 (200 vivi). Primo e quarto sono i due estremi che il piano dichiara.
-const TOUCH_CASES := [[4242, 25], [7311, 25], [20260912, 75], [20260912, 200]]
+const TOUCH_CASES := [[4242, 12], [7311, 12], [20260912, 75], [20260912, 200]]
 
 ## Accumuli dello spia. Sono **campi** e non variabili locali di questa funzione:
 ## una lambda di GDScript cattura per valore, e la callback qui e' un metodo,

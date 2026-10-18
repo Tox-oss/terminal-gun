@@ -100,11 +100,41 @@ const OBSTACLE_SINK := 0.25
 ## vuota). Quindi l'unico modo di controllare davvero *che cosa* e' stato scritto e'
 ## ricordarlo qui, che e' allocato una volta sola all'avvio e non cresce mai.
 var _written: Array[Transform3D] = []
+var _base_written: Array[Transform3D] = []
+var _scroll_offset: Vector3 = Vector3.ZERO
 var _built: bool = false
 var _contract_cache: Node = null
 
 func _ready() -> void:
 	_build()
+
+func _process(_delta: float) -> void:
+	var off := _scroll_offset_value()
+	if off != _scroll_offset:
+		_scroll_offset = off
+		_apply_scroll(off)
+
+func _scroll_offset_value() -> Vector3:
+	var game := _contract()
+	if game != null and game.has_method("player_position"):
+		var p: Vector3 = game.player_position()
+		return Vector3(0.0, 0.0, p.z)
+	if game != null:
+		var pl = game.get("player")
+		if pl is Node3D:
+			return Vector3(0.0, 0.0, (pl as Node3D).global_position.z)
+	return Vector3.ZERO
+
+func _apply_scroll(offset: Vector3) -> void:
+	if multimesh == null:
+		return
+	var mm := multimesh
+	for i in _base_written.size():
+		var scrolled := _base_written[i]
+		scrolled.origin = _base_written[i].origin + offset
+		mm.set_instance_transform(i, scrolled)
+		if i < _written.size():
+			_written[i] = scrolled
 
 # --- Costruzione --------------------------------------------------------------
 
@@ -145,6 +175,7 @@ func build(list: PackedVector3Array) -> void:
 		var t := obstacle_transform(list[i])
 		mm.set_instance_transform(i, t)
 		_written.append(t)
+	_base_written = _written.duplicate()
 	mm.visible_instance_count = n
 
 ## La mesh del disco: un cilindro di un metro di raggio e di un metro di altezza,

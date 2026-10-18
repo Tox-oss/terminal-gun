@@ -1263,7 +1263,11 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
-**Onda pendente (registrata, quota non disponibile):** cambio di design — rimuovere la torre, scorrimento in direzione W (avanti sullo schermo, la direzione di W). Foglie coinvolte, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale, un agente alla volta). Il vertice non ha congelato alcuna superficie in `contracts.gd` per questa onda: il contratto della torre resta intatto finché il design non è specificato. `PERM: 15/15` verificato il 2026-10-18 prima di fermarsi. Nessuna foglia lanciata.
+**Onda pendente (registrata, quota ripristinata 2026-10-18):** cambio di design — rimuovere la torre, scorrimento in direzione W (avanti sullo schermo, la direzione di W). Foglie coinvolte, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale, un agente alla volta).
+
+Scope derivato dal report di -orda (analisi read-only, nessuna modifica): `src/sim/horde.gd` (`_floor_count`, `_floor_height`, `_focus_floor`, `enemy_floors`, `flow_fields`, `_grids`, `_obs_slices`, `_sync_tower`, `floor_of`, `floor_base`, `player_floor_index`, `_piano_di_nascita`, `count_on_floor`), `src/sim/run.gd` (`POP_BASE_PER_FLOOR`, `POP_BASE`, `POP_SATURATION`, `population_of`), `src/sim/spawner.gd` (nessun simbodo piano diretto). Il neutro «nessuna torre» esiste già in `contracts.gd` (`floor_count=1`, `floor_height=0,0`): l'orda può implementare «rimuovere la torre» rendendo il sim a piano unico senza toccare il contratto. `contracts.gd` resta intatto in questa onda.
+
+Prima foglia lanciata: **orda** (task: sim a piano unico, griglia unica, popolazione totale, spawn non basato su piano; aggiornare `tests/test_orda.gd` e `tests/test_gameloop.gd`; non toccare `contracts.gd`). `PERM: 15/15` verificato prima del lancio.
 
 **Stato al 2026-10-16, sommario.** Il sommario sotto è del **2026-10-15** e vale per m1–m18: non
 è stato riscritto, perché riscriverlo a ogni onda è il modo di far perdere la sostanza. **La sezione

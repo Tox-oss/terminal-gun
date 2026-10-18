@@ -46,4 +46,10 @@ func _run_checks() -> void:
 		h.check(str(hud.call("enemy_text")) != "", "HUD enemies vuoto")
 		h.check(str(hud.call("clock_text")) != "", "HUD timer vuoto")
 		h.check(str(hud.call("xp_text")) != "", "HUD xp vuoto")
+	# piano unico: nessuna rampa, nessun nodo torre
+	h.check(_arena.get_node_or_null("Ramp") == null, "nodo Ramp presente")
+	h.check(_arena.get_node_or_null("ArenaRamp") == null, "nodo ArenaRamp presente")
+	# scorrimento: campo scroll_offset presente
+	var so = _arena.get("scroll_offset") if _arena != null else null
+	h.check(so is Vector3, "scroll_offset mancante")
 	quit(h.finish("test_arena"))

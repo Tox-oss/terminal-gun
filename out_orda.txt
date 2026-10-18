@@ -1,0 +1,400 @@
+Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
+
+WARNING: Horde: ostacoli assenti, l'inseguimento resta in linea retta -- Game.obstacles e' vuoto: un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _avvisa_ostacoli (res://src/sim/horde.gd:1187)
+       [1] _load_obstacles (res://src/sim/horde.gd:1116)
+       [2] _build (res://src/sim/horde.gd:1010)
+       [3] _ready (res://src/sim/horde.gd:692)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+orda: avvio a 100 nemici (Run.POP_BASE), portati a 200 in 100 richiami di `_riempi` (NON e' una rampa di nascite: il rateo e' 2.0408/s e non e' stato usato per il riempimento, che viene misurato altrove)
+orda: 200 nemici su 1225 celle, specie [98, 65, 37, 0, 0], raggio 35.0 m
+orda: 200 nemici vivi con 3 nodi in tutta la scena (criterio: sotto 120)
+orda: raggio dal contratto 35.0 m, fallback dichiarato in horde.gd 35.0 m
+orda: griglia e scansione lineare coincidono su 300 query (88 con raggio vuoto)
+orda: campionamento su un quadrato di 35.0 m di mezzo (raggio 35.0 m): 793 query su 1000 dentro il disco, 811 con un vicino entro 6.0 m
+orda: 1000 query x 8 giri su 200 nemici, raggio 6.0 m
+orda: griglia min 6905 us, mediana 7170 us | lineare min 8058 us, mediana 8280 us
+orda: la griglia e' 1.17 volte piu' rapida sul minimo, 1.15 sulla mediana
+orda: griglia per giro [6905, 7055, 6931, 6998, 7170, 7203, 7305, 7228]
+orda: lineare per giro [8096, 8105, 8136, 8058, 8328, 8526, 8424, 8280]
+orda: secchiello piu' affollato 5 su 32, traboccamenti: false
+orda: pool, 100000 cicli acquire/release, oggetti creati in tutto: 32
+orda: 600 passi e 120 morti, nodi 3 -> 3, oggetti 1499 -> 1499, memoria +0 KB
+orda: svuotata e riempita di nuovo, uccisioni in tutto 200, specie [92, 59, 38, 11, 0]
+orda: svuotata e riempita di nuovo mettendo i corpi: 125 richiami da 0 a 125, 75 richiami da 125 a 200 (Run.SPAWN_RATE = 2.0408/s, non usato per il riempimento)
+m10: 16 dischi di raggio 2.27 m su un'arena di 35.0 m
+m10: dischi piu' vicini a 14.70 m, passaggio utile 10.15 m (boss: 3.80 m)
+m10: campo 44x44 celle da 2.0 m, 262 bloccate, gonfiatura 5.94 m
+m10: contratto NON montato, misuro sui 16 dischi dichiarati in src/sim/obstacles.gd
+m10: finestra 30 s a 200 vivi: 0 nemici dentro un ostacolo, picco 0 in un passo
+m10: retta interrotta, tutto il percorso (avvicinamento incluso): 14.7% (7079 su 48000 campioni)
+m10: retta interrotta, solo finestra di regime: 9.5% (3414 su 36000 campioni)
+m10: primo arrivo 0.00 s, meta' dell'orda 0.00 s
+m10: campo ricostruito 0 volte in 2400 passi (bersaglio fermo al centro)
+m10: ostacoli dal contratto, 16 dischi
+m10: in 30 s nessun nemico e' restato fermo piu' di 90 passi (1.5 s); passo peggiore 23 su 90
+m10: sotto 0.30 m/s fuori dall'arrivo, 4850 campioni su 360000 (4850 nemici-passo su 360000)
+m10: colpevole i=100 (brute, r=1.00 m), fermo sotto 0.30 m/s per 23 passi di fila: traccia di 10 passi
+m10:   passo 0 p=(   1.098,   0.220) |p|=  1.12 v=(  0.359,  2.275) |v|=2.3026 disco=  7.417 clear=true steer=(-0.980,-0.197)
+m10:   passo 1 p=(   1.107,   0.260) |p|=  1.14 v=(  0.581,  2.363) |v|=2.4337 disco=  7.385 clear=true steer=(-0.974,-0.228)
+m10:   passo 2 p=(   1.117,   0.302) |p|=  1.16 v=(  0.554,  2.561) |v|=2.6207 disco=  7.351 clear=true steer=(-0.965,-0.261)
+m10:   passo 3 p=(   1.113,   0.337) |p|=  1.16 v=( -0.183,  2.058) |v|=2.0662 disco=  7.333 clear=true steer=(-0.957,-0.289)
+m10:   passo 4 p=(   1.100,   0.364) |p|=  1.16 v=( -0.821,  1.621) |v|=1.8176 disco=  7.327 clear=true steer=(-0.949,-0.314)
+m10:   passo 5 p=(   1.077,   0.385) |p|=  1.14 v=( -1.384,  1.298) |v|=1.8979 disco=  7.332 clear=true steer=(-0.942,-0.337)
+m10:   passo 6 p=(   1.046,   0.403) |p|=  1.12 v=( -1.872,  1.047) |v|=2.1452 disco=  7.346 clear=true steer=(-0.933,-0.359)
+m10:   passo 7 p=(   1.007,   0.417) |p|=  1.09 v=( -2.294,  0.857) |v|=2.4484 disco=  7.368 clear=true steer=(-0.924,-0.382)
+m10:   passo 8 p=(   0.977,   0.437) |p|=  1.07 v=( -1.840,  1.205) |v|=2.2000 disco=  7.380 clear=true steer=(-0.913,-0.408)
+m10:   passo 9 p=(   0.947,   0.463) |p|=  1.05 v=( -1.796,  1.555) |v|=2.3755 disco=  7.388 clear=true steer=(-0.898,-0.439)
+m10: denti del criterio n. 2 -- campo spento: 17710 nemici dentro un ostacolo in 2400 passi su 2400 (picco 41 in un passo); a R=46,0 m erano 17524 in 1306 passi (picco 55)
+m10: denti del criterio n. 2 -- campo acceso (sezione 13b): 0 nemici dentro un ostacolo a R=35.0 m, come a R=46,0 m
+m10: ostacoli dal contratto, 16 dischi
+m10: 24 semi, 4800 punti di spawn e 4800 posizioni iniziali, nessuno dentro un disco (raggio 1.90 m)
+m11: griglia del campo -- R=46.0 m: 55x55 = 3025 celle da 2.0 m, 348 bloccate, gonfiatura 6.65 m (53.2 KB) | R=35.0 m: 44x44 = 1936 celle, 262 bloccate, gonfiatura 5.94 m (34.0 KB)
+m11: ostacoli -- R=46.0 m: 16 dischi di 2.99 m, i due piu' vicini a 19.32 m, passaggio utile 13.34 m (3.51x il boss), area 6.8% | R=35.0 m: 16 dischi di 2.27 m, i due piu' vicini a 14.70 m, passaggio utile 10.15 m (2.67x il boss), area 6.8%
+m11: griglia dei vicini -- disposizione iniziale: R=46.0 m: 1849 celle riscaldate, picco 3 | R=35.0 m: 1225 celle riscaldate, picco 6 (GRID_CEILING = 8 e' la costante di tests/test_arena.gd, file di -arena: questa sezione la stampa e non la tocca, e i due numeri ci stanno sotto)
+m11: griglia dei vicini -- a regime, 200 addensati sul bersaglio: R=46.0 m: picco 27 | R=35.0 m: picco 30, nessun traboccamento su 32 slot (e' la misura che ha fatto scegliere BUCKET_SLOTS = 32, e non il numero che descrive GRID_CEILING)
+m11: criterio n. 2 e campo fermo -- R=46.0 m: 0 nemici dentro un ostacolo, campo ricostruito 0 volte | R=35.0 m: 0 nemici dentro un ostacolo, campo ricostruito 0 volte (in 840 passi a 200 vivi, bersaglio fermo al centro)
+m11: costo per passo con 200 nemici -- R=46.0 m: min 2.994 ms, medio 3.114 ms | R=35.0 m: min 3.006 ms, medio 3.091 ms (1.00 volte il minimo di prima; a 46 m il numero dichiarato era 3,2 ms, il 19% di un core a 60 fps, e a 60 m un core e' 16.667 ms)
+orda: morso, tabella per specie nell'ordine del peso:  runner 0.7/1.60/1.00s grunt 1.0/2.29/1.20s brute 2.6/5.94/1.93s mortar 3.2/7.31/2.14s boss 6.0/13.71/2.93s
+Game: player_position implementato da SceneTree
+Game: damage_player implementato da SceneTree
+orda: morso seme 4242, 25 vivi: 1 a portata, 2.77 morsi/s, 1.82 hp per morso, 5.04 hp/s, 19.8 s da fermo (solo morso)
+orda: morso seme 4242, anche i colpi del mortar: 0 impatti, 0.00 hp/s, 19.8 s da fermo con tutte e due le fonti
+orda: morso seme 4242, morsi per specie: runner(1.60 hp) x56 grunt(2.29 hp) x27 brute(5.94 hp) x0 boss(13.71 hp) x0 mortar(7.31 hp) x0
+orda: morso seme 7311, 25 vivi: 2 a portata, 2.07 morsi/s, 1.87 hp per morso, 3.86 hp/s, 25.9 s da fermo (solo morso)
+orda: morso seme 7311, anche i colpi del mortar: 0 impatti, 0.00 hp/s, 25.9 s da fermo con tutte e due le fonti
+orda: morso seme 7311, morsi per specie: runner(1.60 hp) x38 grunt(2.29 hp) x24 brute(5.94 hp) x0 boss(13.71 hp) x0 mortar(7.31 hp) x0
+orda: morso seme 20260912, 75 vivi: 2 a portata, 3.40 morsi/s, 2.29 hp per morso, 7.79 hp/s, 12.8 s da fermo (solo morso)
+orda: morso seme 20260912, anche i colpi del mortar: 0 impatti, 0.00 hp/s, 12.8 s da fermo con tutte e due le fonti
+orda: morso seme 20260912, morsi per specie: runner(1.60 hp) x63 grunt(2.29 hp) x27 brute(5.94 hp) x12 boss(13.71 hp) x0 mortar(7.31 hp) x0
+orda: morso seme 20260912, 200 vivi: 3 a portata, 4.87 morsi/s, 2.40 hp per morso, 11.70 hp/s, 8.6 s da fermo (solo morso)
+orda: morso seme 20260912, anche i colpi del mortar: 0 impatti, 0.00 hp/s, 8.6 s da fermo con tutte e due le fonti
+orda: morso seme 20260912, morsi per specie: runner(1.60 hp) x71 grunt(2.29 hp) x57 brute(5.94 hp) x18 boss(13.71 hp) x0 mortar(7.31 hp) x0
+orda: morso, 30 s per caso: 3.86-11.70 hp/s, 2.77-4.87 morsi/s, 8.6-19.8 s da fermo con 100 hp, orda piena 3.03 volte l'onda piccola
+orda: contatto per specie, treno a 13.65 m/s (il minimo e' il caso peggiore):
+  runner: portata 1.98 m | contatto libero min 0.000 s (0.0 passi) | contatto fermo min 0.300 s (18.0 passi) | episodi 1 su 3 attraversamenti | morsi 1 | conto a mano 2xR/v 0.290 s
+orda: contatto per specie, treno a 13.65 m/s (il minimo e' il caso peggiore):
+  grunt: portata 2.49 m | contatto libero min 0.133 s (8.0 passi) | contatto fermo min 0.367 s (22.0 passi) | episodi 3 su 3 attraversamenti | morsi 2 | conto a mano 2xR/v 0.365 s
+orda: contatto per specie, treno a 13.65 m/s (il minimo e' il caso peggiore):
+  brute: portata 3.85 m | contatto libero min 0.533 s (32.0 passi) | contatto fermo min 0.567 s (34.0 passi) | episodi 3 su 3 attraversamenti | morsi 3 | conto a mano 2xR/v 0.564 s
+orda: contatto per specie, treno a 13.65 m/s (il minimo e' il caso peggiore):
+  boss: portata 6.91 m | contatto libero min 1.000 s (60.0 passi) | contatto fermo min 1.000 s (60.0 passi) | episodi 3 su 3 attraversamenti | morsi 3 | conto a mano 2xR/v 1.012 s
+orda: contatto per specie, treno a 13.65 m/s (il minimo e' il caso peggiore):
+  mortar: portata 5.21 m | contatto libero min 0.767 s (46.0 passi) | contatto fermo min 0.767 s (46.0 passi) | episodi 3 su 3 attraversamenti | morsi 3 | conto a mano 2xR/v 0.763 s
+orda: contatto -- caso FERMO 0.300 s (il minimo, e' quello che sceglie il tetto) contro caso LIBERO 0.000 s; conto a mano 2 x 1.980 / 13.65 = 0.290 s
+orda: contatto: sezione intera in 892225 us, tetto di cadenza 0.150 s contro 0.300 s di contatto runner misurati
+WARNING: Horde: ostacoli assenti, l'inseguimento resta in linea retta -- Game.obstacles e' vuoto: un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _avvisa_ostacoli (res://src/sim/horde.gd:1187)
+       [1] _load_obstacles (res://src/sim/horde.gd:1116)
+       [2] _build (res://src/sim/horde.gd:1010)
+       [3] _ready (res://src/sim/horde.gd:692)
+       [4] _sonda_corpo (res://tests/test_orda.gd:4339)
+       [5] _scala_corpo_avvelenata (res://tests/test_orda.gd:4359)
+       [6] _banda_morso (res://tests/test_orda.gd:4399)
+       [7] _run (res://tests/test_orda.gd:310)
+       [8] _process (res://tests/test_orda.gd:249)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+WARNING: Horde: ostacoli assenti, l'inseguimento resta in linea retta -- Game.obstacles e' vuoto: un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _avvisa_ostacoli (res://src/sim/horde.gd:1187)
+       [1] _load_obstacles (res://src/sim/horde.gd:1116)
+       [2] _build (res://src/sim/horde.gd:1010)
+       [3] _ready (res://src/sim/horde.gd:692)
+       [4] _sonda_corpo (res://tests/test_orda.gd:4339)
+       [5] _scala_corpo_avvelenata (res://tests/test_orda.gd:4370)
+       [6] _banda_morso (res://tests/test_orda.gd:4399)
+       [7] _run (res://tests/test_orda.gd:310)
+       [8] _process (res://tests/test_orda.gd:249)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+orda: m11-quarta, fattore corpo 3.4000 (default dichiarato sul contratto 3.4000, e NON e' una copia: il test avvelena il contratto a 99.0 e l'orda montata in quel momento legge 99.0, poi il contratto torna a 3.4000 e un'altra orda lo rivede: il canale da SIZE_FACTOR funziona nei due sensi)
+orda: m11-quarta, morsi entro / banda per specie (scala 3.40): runner=1.98/0.00 grunt=2.49/0.00 brute=3.85/0.00 boss=6.91/0.00 mortar=5.21/0.00
+orda: m11-quarta: sezione intera in 61821 us, 8 passi di un passo, 5 specie x 2 distanze
+orda: m13, tabelle allineate 1:1 su 5 specie (HP/SPEED/RADIUS/MASS/KNOCKBACK_RESIST/COLOR), le quattro specie hanno ancora hp 14/34/110/900 e massa 0.7/1.0/2.6/6.0 | morso  runner 0.7/1.60/1.00s grunt 1.0/2.29/1.20s brute 2.6/5.94/1.93s mortar 3.2/7.31/2.14s boss 6.0/13.71/2.93s
+orda: m17, _m13_peso_fonte (sonda di nascita) porta l'orologio a 180.0 s scrivendo `run.elapsed_s` (le leve dichiarate, come `wave_killed`): il gioco ci arriverebbe in 10800 passi a DT 0.0167, e la soglia non ha cache, quindi il numero che segue e' lo stesso stato, non un'approssimazione | pesi dichiarati [50.0, 30.0, 17.0, 0.0, 3.0], pesi senza il mortar [50.0, 30.0, 17.0, 0.0, 0.0], soglia aperta true
+orda: m13, telegrrafo 0.8293 s (49.8 passi a DT=0.0167) x raggio 5.2100 m, margine 2.00 (fuga minima 0.4147 s: 13.65 m/s x 0.4147 s >= 5.2100 + 0.45 m), ricarica 2.1381 s, fermata a 15.6300 m, danno 13.7143 hp
+WARNING: Horde: ostacoli assenti, l'inseguimento resta in linea retta -- Game.obstacles e' vuoto: un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _avvisa_ostacoli (res://src/sim/horde.gd:1187)
+       [1] _load_obstacles (res://src/sim/horde.gd:1116)
+       [2] _build (res://src/sim/horde.gd:1010)
+       [3] _ready (res://src/sim/horde.gd:692)
+       [4] _m13_sonda (res://tests/test_orda.gd:4986)
+       [5] _m13_canale (res://tests/test_orda.gd:4938)
+       [6] _mortar (res://tests/test_orda.gd:4731)
+       [7] _run (res://tests/test_orda.gd:319)
+       [8] _process (res://tests/test_orda.gd:249)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+WARNING: Horde: ostacoli assenti, l'inseguimento resta in linea retta -- Game.obstacles e' vuoto: un insieme vuoto e' un errore, non un mondo senza muri (contratto di m10, punto 5)
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _avvisa_ostacoli (res://src/sim/horde.gd:1187)
+       [1] _load_obstacles (res://src/sim/horde.gd:1116)
+       [2] _build (res://src/sim/horde.gd:1010)
+       [3] _ready (res://src/sim/horde.gd:692)
+       [4] _m13_sonda (res://tests/test_orda.gd:4986)
+       [5] _m13_canale (res://tests/test_orda.gd:4952)
+       [6] _mortar (res://tests/test_orda.gd:4731)
+       [7] _run (res://tests/test_orda.gd:319)
+       [8] _process (res://tests/test_orda.gd:249)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+orda: m13, canale -- contratto avvelenato a 99.0 s / -7.0 m, l'orda montata in quel momento scrive 0.8293 s / 5.2100 m (default dichiarato sul contratto 1.00 / 4.00), poi il contratto torna a 0.8293 / 5.2100 e un'altra orda lo rivede
+orda: m13, il colpo in volo -- caduta su (0.00, 8.00), residui 0.8293 -> 0.8126 -> 0.7960 -> 0.7793 -> 0.7626 -> 0 in 49 passi (0.8293 s a DT 0.0167), danno 13.71 hp all'istante della caduta
+orda: m13, schivata -- fuori di 5.26 m dal punto di caduta, 0.0000 hp presi in 50 passi (contro 13.7143 hp presi restando fermo dentro): la finestra e' abbastanza per uscire e il raggio di esplosione e' quello dichiarato
+orda: m13, fermo dentro -- 109.71 hp in 954 passi (15.90 s), 8 colpi caduti, danno solo all'impatto (0 violazioni su 954 passi)
+orda: m13, sezione intera in 220354 us
+orda: m11-bis-b, 100 vivi: due restart dallo stesso punto di partenza 100/100 diverse, due partite consecutive 100/100 diverse, tetto 90
+orda: m11-bis-b: controllo a seme 20260912 dopo il reroll, 0/100 diverse (identiche: era true)
+orda: m11-bis-b: sezione intera in 5981 us, 6 ripopolamenti da 100 nemici, nessun passo di simulazione
+orda: m11-ter, scala 1.00 -- onde 1..10: 100/125/150/175/200/200/200/200/200/200 | Run.population_of: 100/125/150/175/200/200/200/200/200/200 | scala 0.50: 50/63/75/88/100/100/100/100/100/100
+orda: m11-ter: onda 1 in campo 100 nemici a scala 1.0 e 50 a scala 0.50 (Run.POP_BASE = 100, MAX_ENEMIES = 200)
+orda: m11-ter: sezione intera in 31294 us (5 restart_run() e 18 step(), zero allocazioni nel ciclo di gioco)
+orda: pesi onda 1  runner 50.0 grunt 30.0 brute 17.0 boss 0.0 mortar 3.0 | pesi piatti  runner 50.0 grunt 30.0 brute 17.0 boss 3.0 mortar 3.0 | la varianta e' il solo boss, e vale 0.0
+orda: onde >= 2 -- wave_weights(2)  runner 47.5 grunt 30.0 brute 18.8 boss 5.0 mortar 3.0, dichiarato  runner 47.5 grunt 30.0 brute 18.8 boss 5.0 mortar 3.0: bit per bit
+orda: onde >= 2 -- la rampa oltre la 2: onda 3  runner 45.0 grunt 30.0 brute 20.6 boss 7.0 mortar 3.0 | onda 4  runner 42.5 grunt 30.0 brute 22.4 boss 9.0 mortar 3.0 | onda 8  runner 32.5 grunt 30.0 brute 29.6 boss 17.0 mortar 3.0
+orda: m17, _miscela_respawn (due cammini, onde 1 e 8) porta l'orologio a 180.0 s scrivendo `run.elapsed_s` (le leve dichiarate, come `wave_killed`): il gioco ci arriverebbe in 10800 passi a DT 0.0167, e la soglia non ha cache, quindi il numero che segue e' lo stesso stato, non un'approssimazione | pesi dichiarati [50.0, 30.0, 17.0, 0.0, 3.0], pesi senza il mortar [50.0, 30.0, 17.0, 0.0, 0.0], soglia aperta true
+orda: miscela onda 1 seme 4242 (12 giri per cammino) -- iniziale: runner 596/1200=0.497 grunt 386/1200=0.322 brute 182/1200=0.152 boss 0/1200=0.000 mortar 36/1200=0.030 | respawn: runner 573/1200=0.477 grunt 394/1200=0.328 brute 201/1200=0.168 boss 0/1200=0.000 mortar 32/1200=0.027
+orda: miscela onda 1 seme 7311 (12 giri per cammino) -- iniziale: runner 576/1200=0.480 grunt 390/1200=0.325 brute 199/1200=0.166 boss 0/1200=0.000 mortar 35/1200=0.029 | respawn: runner 577/1200=0.481 grunt 371/1200=0.309 brute 224/1200=0.187 boss 0/1200=0.000 mortar 28/1200=0.023
+orda: miscela onda 1 seme 20260912 (12 giri per cammino) -- iniziale: runner 648/1200=0.540 grunt 324/1200=0.270 brute 196/1200=0.163 boss 0/1200=0.000 mortar 32/1200=0.027 | respawn: runner 614/1200=0.512 grunt 351/1200=0.292 brute 194/1200=0.162 boss 0/1200=0.000 mortar 41/1200=0.034
+orda: miscela onda 1 seme 13579 (12 giri per cammino) -- iniziale: runner 599/1200=0.499 grunt 362/1200=0.302 brute 200/1200=0.167 boss 0/1200=0.000 mortar 39/1200=0.033 | respawn: runner 616/1200=0.513 grunt 357/1200=0.297 brute 188/1200=0.157 boss 0/1200=0.000 mortar 39/1200=0.033
+orda: miscela onda 1, iniziale (n=4800): runner 2419/4800=0.504 grunt 1462/4800=0.305 brute 777/4800=0.162 boss 0/4800=0.000 mortar 142/4800=0.030
+orda: miscela onda 1, respawn   (n=4800): runner 2380/4800=0.496 grunt 1473/4800=0.307 brute 807/4800=0.168 boss 0/4800=0.000 mortar 140/4800=0.029 | pesi dell'onda: runner 50.0 grunt 30.0 brute 17.0 boss 0.0 mortar 3.0 | pesi piatti: runner 50.0 grunt 30.0 brute 17.0 boss 3.0 mortar 3.0
+orda: zero boss onda 1 -- iniziale 0/4800, respawn 0/4800 (atteso 0 su entrambi i cammini)
+orda: quota mortar onda 1 -- iniziale 142/4800 = 0.0296 | respawn 140/4800 = 0.0292 | banda 0.02-0.04, dichiarata iniziale 0.0300 e piatta 0.0291
+orda: miscela onda 8 seme 4242 (6 giri per cammino) -- iniziale: runner 346/1200=0.288 grunt 290/1200=0.242 brute 366/1200=0.305 boss 163/1200=0.136 mortar 35/1200=0.029 | respawn: runner 348/1200=0.290 grunt 326/1200=0.272 brute 309/1200=0.258 boss 187/1200=0.156 mortar 30/1200=0.025
+orda: miscela onda 8 seme 7311 (6 giri per cammino) -- iniziale: runner 331/1200=0.276 grunt 320/1200=0.267 brute 335/1200=0.279 boss 184/1200=0.153 mortar 30/1200=0.025 | respawn: runner 333/1200=0.278 grunt 354/1200=0.295 brute 309/1200=0.258 boss 173/1200=0.144 mortar 31/1200=0.026
+orda: miscela onda 8 seme 20260912 (6 giri per cammino) -- iniziale: runner 345/1200=0.287 grunt 322/1200=0.268 brute 309/1200=0.258 boss 185/1200=0.154 mortar 39/1200=0.033 | respawn: runner 337/1200=0.281 grunt 316/1200=0.263 brute 321/1200=0.268 boss 183/1200=0.153 mortar 43/1200=0.036
+orda: miscela onda 8 seme 13579 (6 giri per cammino) -- iniziale: runner 352/1200=0.293 grunt 313/1200=0.261 brute 311/1200=0.259 boss 183/1200=0.153 mortar 41/1200=0.034 | respawn: runner 359/1200=0.299 grunt 321/1200=0.268 brute 303/1200=0.253 boss 192/1200=0.160 mortar 25/1200=0.021
+orda: miscela onda 8, iniziale (n=4800): runner 1374/4800=0.286 grunt 1245/4800=0.259 brute 1321/4800=0.275 boss 715/4800=0.149 mortar 145/4800=0.030
+orda: miscela onda 8, respawn   (n=4800): runner 1377/4800=0.287 grunt 1317/4800=0.274 brute 1242/4800=0.259 boss 735/4800=0.153 mortar 129/4800=0.027 | pesi dell'onda: runner 32.5 grunt 30.0 brute 29.6 boss 17.0 mortar 3.0 | pesi piatti: runner 50.0 grunt 30.0 brute 17.0 boss 3.0 mortar 3.0
+orda: miscela onda 1 seme 4242 (12 giri per cammino) -- iniziale: runner 596/1200=0.497 grunt 386/1200=0.322 brute 182/1200=0.152 boss 36/1200=0.030 mortar 0/1200=0.000 | respawn: runner 555/1200=0.463 grunt 392/1200=0.327 brute 198/1200=0.165 boss 33/1200=0.028 mortar 22/1200=0.018
+orda: miscela onda 1 seme 7311 (12 giri per cammino) -- iniziale: runner 559/1200=0.466 grunt 376/1200=0.313 brute 198/1200=0.165 boss 32/1200=0.027 mortar 35/1200=0.029 | respawn: runner 560/1200=0.467 grunt 351/1200=0.292 brute 221/1200=0.184 boss 41/1200=0.034 mortar 27/1200=0.022
+orda: miscela onda 1 seme 20260912 (12 giri per cammino) -- iniziale: runner 628/1200=0.523 grunt 312/1200=0.260 brute 194/1200=0.162 boss 34/1200=0.028 mortar 32/1200=0.027 | respawn: runner 595/1200=0.496 grunt 350/1200=0.292 brute 188/1200=0.157 boss 27/1200=0.022 mortar 40/1200=0.033
+orda: miscela onda 1 seme 13579 (12 giri per cammino) -- iniziale: runner 583/1200=0.486 grunt 354/1200=0.295 brute 194/1200=0.162 boss 32/1200=0.027 mortar 37/1200=0.031 | respawn: runner 596/1200=0.497 grunt 356/1200=0.297 brute 186/1200=0.155 boss 24/1200=0.020 mortar 38/1200=0.032
+orda: denti, boss a 3.0 -- iniziale 134/4800 | respawn 125/4800 (fra le frazioni 0.028 e 0.026)
+orda: denti, sezione in 4648275 us, peso tornato a 0.0 e orda rimessa all'onda 1
+orda: miscela onda 1 seme 4242 (12 giri per cammino) -- iniziale: runner 607/1200=0.506 grunt 396/1200=0.330 brute 197/1200=0.164 boss 0/1200=0.000 mortar 0/1200=0.000 | respawn: runner 595/1200=0.496 grunt 396/1200=0.330 brute 209/1200=0.174 boss 0/1200=0.000 mortar 0/1200=0.000
+orda: miscela onda 1 seme 7311 (12 giri per cammino) -- iniziale: runner 606/1200=0.505 grunt 383/1200=0.319 brute 211/1200=0.176 boss 0/1200=0.000 mortar 0/1200=0.000 | respawn: runner 595/1200=0.496 grunt 382/1200=0.318 brute 223/1200=0.186 boss 0/1200=0.000 mortar 0/1200=0.000
+orda: miscela onda 1 seme 20260912 (12 giri per cammino) -- iniziale: runner 671/1200=0.559 grunt 328/1200=0.273 brute 201/1200=0.168 boss 0/1200=0.000 mortar 0/1200=0.000 | respawn: runner 629/1200=0.524 grunt 365/1200=0.304 brute 206/1200=0.172 boss 0/1200=0.000 mortar 0/1200=0.000
+orda: miscela onda 1 seme 13579 (12 giri per cammino) -- iniziale: runner 616/1200=0.513 grunt 377/1200=0.314 brute 207/1200=0.172 boss 0/1200=0.000 mortar 0/1200=0.000 | respawn: runner 642/1200=0.535 grunt 352/1200=0.293 brute 206/1200=0.172 boss 0/1200=0.000 mortar 0/1200=0.000
+orda: denti quota, peso a 0.0 -- iniziale 0/4800 = 0.0000 | respawn 0/4800 = 0.0000
+orda: m17, _denti_quota_mortar (peso ripristinato) porta l'orologio a 180.0 s scrivendo `run.elapsed_s` (le leve dichiarate, come `wave_killed`): il gioco ci arriverebbe in 10800 passi a DT 0.0167, e la soglia non ha cache, quindi il numero che segue e' lo stesso stato, non un'approssimazione | pesi dichiarati [50.0, 30.0, 17.0, 0.0, 3.0], pesi senza il mortar [50.0, 30.0, 17.0, 0.0, 0.0], soglia aperta true
+orda: miscela onda 1 seme 4242 (12 giri per cammino) -- iniziale: runner 596/1200=0.497 grunt 386/1200=0.322 brute 182/1200=0.152 boss 0/1200=0.000 mortar 36/1200=0.030 | respawn: runner 573/1200=0.477 grunt 394/1200=0.328 brute 201/1200=0.168 boss 0/1200=0.000 mortar 32/1200=0.027
+orda: miscela onda 1 seme 7311 (12 giri per cammino) -- iniziale: runner 576/1200=0.480 grunt 390/1200=0.325 brute 199/1200=0.166 boss 0/1200=0.000 mortar 35/1200=0.029 | respawn: runner 577/1200=0.481 grunt 371/1200=0.309 brute 224/1200=0.187 boss 0/1200=0.000 mortar 28/1200=0.023
+orda: miscela onda 1 seme 20260912 (12 giri per cammino) -- iniziale: runner 648/1200=0.540 grunt 324/1200=0.270 brute 196/1200=0.163 boss 0/1200=0.000 mortar 32/1200=0.027 | respawn: runner 614/1200=0.512 grunt 351/1200=0.292 brute 194/1200=0.162 boss 0/1200=0.000 mortar 41/1200=0.034
+orda: miscela onda 1 seme 13579 (12 giri per cammino) -- iniziale: runner 599/1200=0.499 grunt 362/1200=0.302 brute 200/1200=0.167 boss 0/1200=0.000 mortar 39/1200=0.033 | respawn: runner 616/1200=0.513 grunt 357/1200=0.297 brute 188/1200=0.157 boss 0/1200=0.000 mortar 39/1200=0.033
+orda: quota mortar onda 1 -- iniziale 142/4800 = 0.0296 | respawn 140/4800 = 0.0292 | banda 0.02-0.04, dichiarata iniziale 0.0300 e piatta 0.0291
+orda: denti quota, sezione in 8856537 us, peso tornato a 3.0 e orda rimessa all'onda 1
+orda: miscela, sezione intera in 26713021 us, 4 semi x 2 cammini x 2 onde, banda 0.05, campione 4800 per cammino
+orda: m17, _m17_orologio (lato aperto) porta l'orologio a 180.0 s scrivendo `run.elapsed_s` (le leve dichiarate, come `wave_killed`): il gioco ci arriverebbe in 10800 passi a DT 0.0167, e la soglia non ha cache, quindi il numero che segue e' lo stesso stato, non un'approssimazione | pesi dichiarati [50.0, 30.0, 17.0, 0.0, 3.0], pesi senza il mortar [50.0, 30.0, 17.0, 0.0, 0.0], soglia aperta true
+orda: m17, soglia -- chiusa (orologio 0.0 s): 0 mortar su 2400 nascite | denti (soglia 1000000000.0 s): 0 su 2400 | ripristinata a 180.0 s: 82 su 2400 = 0.0342
+orda: m17, terzo minuto = **onda 2** -- misurata su 3 semi ([4242, 20260912, 13579]) a DT 0.2 s con 1 uccisioni per passo = 5.0 uccisioni/s, 900 passi fino alla soglia + 5880 oltre `population_scale` 0.25; il primo mortar e' comparso [1004, 1138, 1967] passi dopo la soglia, da solo. Il numero vale per QUELLA cadenza (un giocatore vero uccide piu' lento, quindi vede un'onda minore o uguale) e non dipende dal seme: a 180 s conta il ritmo delle uccisioni, non chi e' morto
+orda: m17, sezione intera in 892127 us
+orda: m12, tempo di riempimento -- legge di oggi: 49.00 s a DT 0.2 (245.0 passi) e 49.00 s a DT 0.0167 (2940.0 passi) | legge di PRIMA (piatta a 8.0/s): 12.50 s | banda 5.52-90.00 s (il pavimento 5,52 s e' la misura di m4: 25 nemici entro 6 m)
+orda: m12 CRITERIO (SPAWN_RATE piatto a 8.0/s): VERDE
+orda: m12 CRITERIO (legge nuova): VERDE
+orda: m12, TAGLIO verificato -- 1080 s a DT 0.2 s, 5400 passi, cadenza dichiarata 2.040816 uccisioni/s, `population_scale` 0.25 | t=0 livello 1 rateo 2.040816/s | t=1080 livello 47 rateo 2.040816/s | il livello e' salito di 46 e il rateo non si e' mosso di 0
+  segmento 1 (  0-180 s) | rateo 2.0408/s | livello  1 | uccisioni  2.04/s | vivi media  23.8 su  25 (max  25, vuoto  0.0% dei passi)
+  segmento 2 (180-360 s) | rateo 2.0408/s | livello 19 | uccisioni  2.04/s | vivi media  23.8 su  31 (max  24, vuoto  0.0% dei passi)
+  segmento 3 (360-540 s) | rateo 2.0408/s | livello 27 | uccisioni  2.04/s | vivi media  23.8 su  44 (max  24, vuoto  0.0% dei passi)
+  segmento 4 (540-720 s) | rateo 2.0408/s | livello 33 | uccisioni  6.12/s | vivi media  23.8 su  50 (max  24, vuoto  0.0% dei passi)
+orda: m12, al boss (720 s) il giocatore era al livello 38 e aveva chiuso l'onda 6; a 1080 s e' all'onda 8 con 2204 uccisioni. `LAW_HORIZON_WAVE` = 61 NON e' la fine della partita: e' l'orizzonte tarato della legge di m19, e il debito di ricalibrarlo e' 53 onde
+orda: m12, fine partita: il rateo e' 2.040816/s contro un tetto meccanico di 1/DT = 60.0/s a DT 0.0167 s (rapporto 0.0340): DENTRO il meccanismo, con un fattore 29.4 di margine. La legge di prima ne chiedeva ~1.300/s nell'ultimo segmento, cioe' 260 volte il tetto a DT 0,2 s: un numero che la meccanica schiaccia senza dirlo, e che per questo e' stato tolto invece che smorzato
+orda: m12, fine partita: il rateo e' dentro il meccanismo, vedi la riga sopra
+orda: m12, fallout fuori da questa foglia -- riempiri 200 nemici a 2.0408/s e DT 0.0167 servono 5880 passi = 98.00 s; `test_gameplay.gd:M16_PASSI_PIENI` letto dal sorgente = 6000 passi = 100.00 s; margine 120 passi (2.0 per cento)
+orda: m12, sezione intera in 5390614 us (budget del file sotto)
+m14 onda   3: morsi dichiarati   31, morsi arrivati   31 (scarto +0) | consegnato 218.6497 hp, media per morso 7.0532 hp, scala dell'onda 17.1586
+m14 onda   3: media per morso misurata 7.0532 hp (tabella TOUCH_DAMAGE_BASE 1.6000: le specie piu' grandi non arrivano addosso, e per questo la tabella non e' la media di quello che arriva)
+m14 onda  13: morsi dichiarati   31, morsi arrivati   31 (scarto +0) | consegnato 193818.5646 hp, media per morso 6252.2118 hp, scala dell'onda 15209.9771
+m14 onda  13: media per morso misurata 6252.2118 hp (tabella TOUCH_DAMAGE_BASE 1.6000: le specie piu' grandi non arrivano addosso, e per questo la tabella non e' la media di quello che arriva)
+m14 onda  61: morsi dichiarati   31, morsi arrivati   31 (scarto +0) | consegnato 1.16e14 hp, media per morso 3.75e12 hp, scala dell'onda 9.13e12
+m14 onda  61: media per morso misurata 3.75e12 hp (tabella TOUCH_DAMAGE_BASE 1.6000: le specie piu' grandi non arrivano addosso, e per questo la tabella non e' la media di quello che arriva)
+m14 ingresso/uscita -- tetto morso 6.67/s, scala di fine partita 61, potenziale del giocatore = danno/intervallo dell'arma vera
+  onda   3 | scala        17.1586 | morsi  3.88/s (tetto 58%) | media/morso    7.0532 hp | ingresso       218.6497 hp/s | uscita liv  20       361.2339 hp/s | ing/usc    0.6053 | legge di prima    0.0529
+  onda  13 | scala     15209.9771 | morsi  3.88/s (tetto 58%) | media/morso 6252.2118 hp | ingresso    193818.5646 hp/s | uscita liv  66    138272.5194 hp/s | ing/usc    1.4017 | legge di prima   3.69e-4
+  onda  61 | scala        9.13e12 | morsi  3.88/s (tetto 58%) | media/morso   3.75e12 hp | ingresso        1.16e14 hp/s | uscita liv 213        2.23e13 hp/s | ing/usc    5.2246 | legge di prima  2.29e-12
+Game: ground_visible implementato da Node3D
+Game: surface_height_at implementato da Node3D
+Game: player_floor implementato da Node3D
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+Game: spawn_projectile implementato da Node3D
+Game: player_position implementato da Node3D
+Game: damage_player implementato da Node3D
+m14 uscita: livello  1 --  0 potenziamenti, danno     10.00, intervallo 0.3500 s, DPS        28.57 hp/s (previsto        28.57, 1.0x sul livello 1)
+m14 uscita: livello  5 --  4 potenziamenti, danno     15.63, intervallo 0.2975 s, DPS        52.52 hp/s (previsto        52.52, 1.8x sul livello 1)
+m14 uscita: livello 10 --  9 potenziamenti, danno     19.53, intervallo 0.2149 s, DPS        90.87 hp/s (previsto        90.87, 3.2x sul livello 1)
+m14 uscita: livello 20 -- 19 potenziamenti, danno     47.68, intervallo 0.1320 s, DPS       361.23 hp/s (previsto       361.23, 12.6x sul livello 1)
+m14 uscita: livello 30 -- 29 potenziamenti, danno     93.13, intervallo 0.0689 s, DPS      1351.58 hp/s (previsto      1351.58, 47.3x sul livello 1)
+m14 uscita: livello 40 -- 39 potenziamenti, danno    181.90, intervallo 0.0423 s, DPS      4298.49 hp/s (previsto      4298.49, 150.4x sul livello 1)
+m14 uscita: livello 61 -- 60 potenziamenti, danno    867.36, intervallo 0.0136 s, DPS     63937.21 hp/s (previsto     63937.21, 2237.8x sul livello 1)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+m14 fine partita (onda 61): colpi 3.88/s su un tetto di 6.67/s (58%), uscita (potenziale del giocatore al livello 213) 2.23e13 hp/s
+     con la legge di oggi  ingresso 1.16e14 hp/s = 5.2246 volte l'uscita
+     con la legge di PRIMA  ingresso 50.9714 hp/s = 2.29e-12 volte l'uscita
+m14 CRITERIO (legge di PRIMA, 0,25/onda con tetto 4,0): ROSSO
+m14 CRITERIO (legge di oggi): VERDE
+orda: m14, sezione in 7006955 us
+Game: player_position implementato da SceneTree
+Game: player_floor implementato da SceneTree
+m12 torre: geometria a R=35.00 m -- disco 2.2750 m (1.197x il boss), passaggio utile -4.5500 m (-1.197x il boss), anello interno: corda 14.8122 m contro 9.0500 m necessari perché la corona rasterizzata resti aperta
+m12 torre: la soglia che chiude entrambe le garanzie di m10 e' R > 29.23 m (derivata: 0,065 R > 1.90 e 0,13 R > 3.80). RISPETTATA
+m12 torre: corona rasterizzata dell'anello interno aperta (corda 14.8122 m contro 9.0500 m): il campo ha una sorgente sola si
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+m12 torre: montaggio verificato -- 4 piani da 20.000 m, 64 dischi su Game.obstacles, 4 campi, nessun `flow_problem`
+orda: griglie per piano, dopo un passo --
+  _grids.size() 4 su floor_count 4, _floor_count 4, _focus_floor 2 (player_floor)
+  griglia 0: 25 nemici, 1225 celle occupate, picco 3
+  griglia 1: 25 nemici, 1225 celle occupate, picco 2
+  griglia 2: 25 nemici, 1225 celle occupate, picco 2
+  griglia 3: 25 nemici, 1225 celle occupate, picco 2
+  query libera: indice 74 a 17.08 m | query ristretta al piano 2: indice 74 a 17.08 m
+ERROR: String formatting error: not all arguments converted during string formatting.
+   at: validated_evaluate (core/variant/variant_op.h:770)
+   GDScript backtrace (most recent call first):
+       [0] _torre_aritmetica (res://tests/test_orda.gd:8192)
+       [1] _torre (res://tests/test_orda.gd:7859)
+       [2] _run (res://tests/test_orda.gd:386)
+       [3] _process (res://tests/test_orda.gd:249)
+m12 torre: curva della popolazione per piano -- onda 1 25 (totale 100), saturazione all'onda 5 (totale 200)
+m12 torre: popolazione 200 su 4 piani = 50 per piano (MAX_ENEMIES 200, floor_count 4); quote distinte fra i nemici: 4
+WARNING: Game.damage_player() non e' ancora registrata: tocca a terminal-gun-gameplay farlo con Game.register_impl("damage_player", self) nel proprio _ready().
+   at: push_warning (core/variant/variant_utility.cpp:1033)
+   GDScript backtrace (most recent call first):
+       [0] _missing (res://src/core/contracts.gd:996)
+       [1] damage_player (res://src/core/contracts.gd:719)
+       [2] _apply_bites (res://src/sim/horde.gd:1593)
+       [3] step (res://src/sim/horde.gd:1509)
+       [4] _torre_niente_piano (res://tests/test_orda.gd:8263)
+       [5] _torre (res://tests/test_orda.gd:7861)
+       [6] _run (res://tests/test_orda.gd:386)
+       [7] _process (res://tests/test_orda.gd:249)
+m12 torre: dopo 600 passi a 50 vivi sul piano 2 -- entro 6,00 m dal giocatore: 45 su 50, distanza media 4.70 m
+m12 torre: nearest_enemy -- 96 query su 4 piani, 96 risposte, 0 di un altro piano, 0 senza bersaglio, 12 confrontate col contratto
+ERROR: String formatting error: not all arguments converted during string formatting.
+   at: validated_evaluate (core/variant/variant_op.h:770)
+   GDScript backtrace (most recent call first):
+       [0] _torre_separazione (res://tests/test_orda.gd:8483)
+       [1] _torre (res://tests/test_orda.gd:7864)
+       [2] _run (res://tests/test_orda.gd:386)
+       [3] _process (res://tests/test_orda.gd:249)
+ERROR: String formatting error: not all arguments converted during string formatting.
+   at: validated_evaluate (core/variant/variant_op.h:770)
+   GDScript backtrace (most recent call first):
+       [0] _torre_separazione (res://tests/test_orda.gd:8487)
+       [1] _torre (res://tests/test_orda.gd:7864)
+       [2] _run (res://tests/test_orda.gd:386)
+       [3] _process (res://tests/test_orda.gd:249)
+ERROR: String formatting error: not all arguments converted during string formatting.
+   at: validated_evaluate (core/variant/variant_op.h:770)
+   GDScript backtrace (most recent call first):
+       [0] _torre_separazione (res://tests/test_orda.gd:8491)
+       [1] _torre (res://tests/test_orda.gd:7864)
+       [2] _run (res://tests/test_orda.gd:386)
+       [3] _process (res://tests/test_orda.gd:249)
+m12 torre: separazione a 50 per piano -- vicini medi entro 1.6 m: 0.440 sul piano, 0.360 su tutta l'orda (griglia condivisa); SEPARATION_CHECKS = 6, 0 nemici hanno saturato, 273 vicini trovati in tutto
+ERROR: String formatting error: not all arguments converted during string formatting.
+   at: validated_evaluate (core/variant/variant_op.h:770)
+   GDScript backtrace (most recent call first):
+       [0] _torre_cycled (res://tests/test_orda.gd:8888)
+       [1] _torre (res://tests/test_orda.gd:7866)
+       [2] _run (res://tests/test_orda.gd:386)
+       [3] _process (res://tests/test_orda.gd:249)
+m12 torre: 600 passi con 200 nemici su 4 piani -- memoria statica 44339952 -> 44339952 byte (delta 0), nodi fermi, sep_saturated 5
+m12 torre: varchi a R=35.00 m -- centro 8.0750 m, fra anelli 5.6500 m, contro il muro 3.1750 m; i circolari sono uno per riga qui sotto
+
+  m12 torre: anello 0 a 12.60 m con 5 dischi -- circolare 5.7622 m
+  m12 torre: anello 1 a 27.30 m con 11 dischi -- circolare 6.3326 m
+m12 torre: varco piu' debole 3.1750 m (1.59 celle), il percorso: con due inflazioni per lato regge un boss che cresce di 1.175 m prima di scendere sotto la cella
+m12 torre: riferimento -- a R=35.0 m: centro 8.0750 m, fra anelli 5.6500 m, contro il muro 3.1750 m, circolari 5.7622 / 6.3326 m, minimo 3.1750 m (cella 2.0 m)
+m12 torre: riferimento -- a R=60.0 m: centro 15.4500 m, fra anelli 12.9000 m, contro il muro 7.0500 m, circolari 13.0923 / 14.0702 m, minimo 7.0500 m (cella 2.0 m)
+m12 torre: piano 0 -- campo 44x44 celle, 262 bloccate, 0 libere non raggiunte
+m12 torre: piano 1 -- campo 44x44 celle, 255 bloccate, 0 libere non raggiunte
+m12 torre: piano 2 -- campo 44x44 celle, 255 bloccate, 0 libere non raggiunte
+m12 torre: piano 3 -- campo 44x44 celle, 262 bloccate, 0 libere non raggiunte
+m12 torre: buchi di rampa MISURABILI (piastrella letta da src/render/arena_ground.gd: 2 m, predicato statico di src/render/arena_ramp.gd: caricato)
+m12 torre: piano 0 -- 0 campioni fuori dall'arrivo, 0 lenti sotto 0.30 m/s (0.00%), peggiore serie 0 passi
+m12 torre: piano 1 -- 0 campioni fuori dall'arrivo, 0 lenti sotto 0.30 m/s (0.00%), peggiore serie 0 passi
+m12 torre: piano 2 -- 26934 campioni fuori dall'arrivo, 94 lenti sotto 0.30 m/s (0.35%), peggiore serie 3 passi
+m12 torre: piano 3 -- 0 campioni fuori dall'arrivo, 0 lenti sotto 0.30 m/s (0.00%), peggiore serie 0 passi
+m12 torre: campioni lenti dentro un buco di rampa: 0 su 94 (piano 0 non ha buchi per costruzione: nessuna rampa arriva sul piano base)
+m12 torre: serie lenti finite -- n=91, mediana 1 passi, peggiore 3 passi, sotto il tetto STUCK_STEPS=90: si
+m12 torre: cadenza a 50 nemici sul piano 2 in 35.00 m di raggio -- 3161 campioni in portata (316.10 per secondo), 29 morsi consegnati (2.900/s) contro un tetto teorico di 6.667/s (TOUCH_INTERVAL 0.150 s); il tetto e' NON IL il vincolo
+m12 torre: entro 1.6 m dal giocatore ci sono 5 nemici su 50 (10.0%), e SEPARATION_CHECKS ha saturato 8 volte
+Game: player_position implementato da SceneTree
+Game: player_floor implementato da SceneTree
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+Game: ground_visible implementato da Node3D
+Game: surface_height_at implementato da Node3D
+Game: player_floor implementato da Node3D
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+Game: spawn_projectile implementato da Node3D
+Game: player_position implementato da Node3D
+Game: damage_player implementato da Node3D
+m8 scena vera: corpo visibile del giocatore, raggio 0.4500 m
+m8 scena vera: scarto minimo mai visto (giocatore - bordo del corpo) -0.9928 m
+m8 scena vera: scarto dei 299477 nemici entro 6 m -- min -0.9928, mediana 3.4726, max 5.9999 m
+m8 scena vera: portata 0.00 m -> 6 nemici a portata di morso su 200
+m8 scena vera: portata 0.15 m -> 8 nemici a portata di morso su 200
+m8 scena vera: portata 0.30 m -> 9 nemici a portata di morso su 200
+m8 scena vera: portata 0.45 m -> 13 nemici a portata di morso su 200
+m8 scena vera: portata 0.60 m -> 15 nemici a portata di morso su 200
+m8 scena vera: portata 0.90 m -> 22 nemici a portata di morso su 200
+m8 scena vera: portata 1.20 m -> 25 nemici a portata di morso su 200
+m8 scena vera: 133 morsi offerti in 30 s (4.43/s), 75 accettati dal giocatore, 157.49 hp persi
+m8 scena vera: 2.10 hp per morso accettato, 5.25 hp/s, 58 morsi su 133 scartati dall'invulnerabilita'
+m8 scena vera: giocatore fermo al centro, 200 vivi: morto dopo 22.20 s (calcolato 19.05 s)
+Game: nearest_enemy implementato da Node3D
+Game: damage_enemy implementato da Node3D
+Game: random_spawn_point implementato da Node3D
+m10: contratto -- 64 ostacoli registrati, raggio 2.28 m, i due piu' vicini a 0.00 m
+m10: orda che gioca -- 64 ostacoli, flow_problem vuoto, campo attivo, 0 ricostruzioni
+orda: SEZIONI (provvisorio) totale 112.522 s
+  avvio                    27.664 s
+  touch                    21.377 s
+  attraversamento           0.893 s
+  banda_morso               0.063 s
+  mortar                    0.222 s
+  reroll+scale              0.052 s
+  miscela                  26.713 s
+  orologio                  0.893 s
+  m12                       5.391 s
+  difficolta                7.007 s
+  torre                     4.603 s
+  scena_vera               17.642 s
+  ostacoli_contratto        0.003 s
+orda: tutto il file in 112523 ms, ne restano 7477 dei 120000 del test
+FAIL orda: m12: sulla legge di prima il tempo di riempimento deve stare FUORI dalla banda: ottenuti 12.50 s contro una banda 5.52-90.00 s. Sopra il pavimento significa che il campo si ti riaddossa piu' in fretta di quanto ti si era liberato, che e' il difetto che l'utente ha trovato
+  anche: m12: i quattro layout devono essere quattro reticoli diversi (coppie uguali trovate: 1 su 6): atteso 0, ottenuto 1
+  anche: m12: una griglia condivisa dai quattro piani ne avrebbe trovati almeno quanto la griglia del piano (%.3f contro %.3f): il criterio sul tetto sarebbe stato misurato sul caso facile
+  anche: m10 criterio n. 1: nessuna coppia di dischi si tocca (min 0.00 m, diametro 4.55 m)

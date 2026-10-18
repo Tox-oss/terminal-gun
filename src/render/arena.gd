@@ -15,6 +15,10 @@ var _warned_empty_layout: bool = false
 var _warned_no_body_scale_field: bool = false
 var _camera_cache: Node3D = null
 var _warned_no_camera: bool = false
+## Scorrimento orizzontale in direzione W: quanto il mondo si e' spostato
+## lungo l'asse W (Z) man mano che il giocatore avanza. Parte da zero e segue
+## la posizione del giocatore; in headless (nessun input) resta zero.
+var scroll_offset: Vector3 = Vector3.ZERO
 
 func _enter_tree() -> void:
 	_register()
@@ -99,12 +103,19 @@ func _camera() -> Node3D:
 	return _camera_cache
 
 func _process(_delta: float) -> void:
+	_update_scroll_offset()
 	if _hud == null or not _hud.has_method("set_state"):
 		if not _warned_no_hud:
 			_warned_no_hud = true
 			push_warning("arena: nessun HUD con set_state()")
 		return
 	_hud.set_state(_health(), _health_max(), _kills(), _weapon_text(), _enemies(), _level())
+
+func _update_scroll_offset() -> void:
+	var p := _player()
+	if p != null and is_instance_valid(p):
+		# Scorrimento solo lungo W (Z): la direzione di avanzamento sullo schermo.
+		scroll_offset = Vector3(0.0, 0.0, (p as Node3D).global_position.z)
 
 func _health() -> float:
 	var player := _player()

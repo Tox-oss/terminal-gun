@@ -52,18 +52,6 @@ var life := 1.4
 var radius := RADIUS
 var pierce := 0
 
-## ## m12: il piano su cui e' stato sparato, e perche' vive **qui**
-##
-## Il pool lo scrive una volta sola in `acquire()`, **prima** che il proiettile
-## voli, e da li in avanti non cambia piu': il contatto di ogni passo legge questo
-## numero e non rilegge il contratto.
-##
-## Il perche' e' una scelta e non una scorciatoia: il piano e' una proprieta' del
-## **colpo**, non del giocatore in quel momento. Se il pool chiedesse
-## `Game.player_floor()` a ogni passo, un proiettile gia' sparato cambierebbe
-## bersaglio quando il giocatore sale un piano mentre il colpo e' in volo — e
-## quello e' il difetto che m12 chiude, ripetuto dentro il fix.
-var piano := 0
 ## m15: da quale dei due **controfattuali** e' partito questo colpo (`true` =
 ## l'arma ha anticipato il bersaglio). E' un flag e nient'altro, e senza di questo
 ## il confronto fra i due bracci non avrebbe un numeratore per ciascuno: vedi i

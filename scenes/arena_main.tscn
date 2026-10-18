@@ -65,7 +65,6 @@
 [ext_resource type="Script" path="res://src/render/arena_obstacles.gd" id="8_obstacles"]
 [ext_resource type="Script" path="res://src/render/mortar_renderer.gd" id="9_mortar"]
 [ext_resource type="Script" path="res://src/render/mortar_shot_renderer.gd" id="10_shot"]
-[ext_resource type="Script" path="res://src/render/arena_ramp.gd" id="11_ramps"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_arena"]
 sky_top_color = Color(0.08, 0.09, 0.16, 1)
@@ -136,27 +135,6 @@ directional_shadow_max_distance = 98.2
 
 [node name="Ground" type="Node3D" parent="."]
 script = ExtResource("2_ground")
-
-; ## LE RAMPE, e PERCHE' STANNO **DOPO** `Ground`
-;
-; `src/render/arena_ramp.gd` (-arena) possiede la geometria che fa salire dal
-; piano `i` al piano `i+1`, e ne produce tre per quattro piani. Sono tre istanze
-; di una `MultiMesh` piu' tre scatole di collisione sotto **un** `StaticBody3D`:
-; cinque nodi, che non crescono col numero di piani.
-;
-; L'ordine e' **perche' il pavimento deve sapere dove sono le rampe**: e'
-; `Ground` che ritaglia nel proprio pavimento il rettangolo di ogni rampa che
-; arriva su un piano, altrimenti la rampa finisce contro il soffitto. Quel
-; ritaglio e' `arena_ramp.gd::in_corridor()`, che e' **statica e pura** per
-; esattamente questa ragione: `Ground` e' un fratello che sta **prima** qui, e il
-; suo `_ready()` gira prima, quindi non puo' chiedere nulla a questo nodo che non
-; si sia ancora svegliato. Le funzioni statiche rispondono a partire dai numeri del
-; contratto, che `src/render/arena.gd` ha gia' registrato in `_enter_tree()`.
-;
-; Quindi l'ordine **non** e' una dipendenza: nessuno dei due nodi legge l'altro.
-; E' leggibilita' della scena: prima il pavimento, poi i buchi, poi la rampa.
-[node name="Ramps" type="Node3D" parent="."]
-script = ExtResource("11_ramps")
 
 [node name="Obstacles" type="MultiMeshInstance3D" parent="."]
 script = ExtResource("8_obstacles")

@@ -258,8 +258,6 @@ var _warned_no_horde: bool = false
 ## si sceglie sempre il valore che **non** fa sembrare il nemico piu' grande.
 var _warned_no_body_scale: bool = false
 var _warned_no_kinds: bool = false
-## Un solo avviso per il canale del piano mancante. Vedi `_piano_del_giocatore()`.
-var _warned_no_player_floor: bool = false
 
 func _ready() -> void:
 	_build_items()
@@ -311,29 +309,7 @@ func _warn_no_body_scale() -> void:
 	_warned_no_body_scale = true
 	push_warning("projectile_pool: il contratto non espone `enemy_body_scale`, quindi l'involucro di contatto ripiega su %.1f (corpo nudo, mai piu' grande del disegnato). tocca a terminal-gun-arena registrare il fattore." % BODY_SCALE_FALLBACK)
 
-## Il piano del colpo appena lanciato, letto dal **contratto** e non da `y`.
-##
-## La domanda la fa `Game.player_floor()`, cioe' il canale che dichiara il piano
-## **del giocatore**: durante una rampa quel canale e' l'unico che risponde bene,
-## perche' `floor_of(y)` su un'altezza di mezzo piano darebbe il piano sbagliato
-## con sicurezza (contratto, sopra `player_floor`).
-##
-## ## Il `-1` e' il neutro del canale, e qui non viene accettato
-##
-## `player_floor()` risponde `-1` quando non e' registrata, e `-1` **non e' un
-## piano**. Un proiettile con `piano = -1` avrebbe la banda `[-h, 0)` e non
-## colpirebbe niente, in silenzio: quindi qui il `-1` non viene propagato. Se il
-## canale non c'e' si avvisa **una volta sola** e si ricade su
-## `Game.floor_of(pos.y)`, che in quel mondo e' la risposta esatta (contratto:
-## «non c'e' una torre» e' il piano 0) e non un'invenzione.
-func _piano_del_giocatore(pos: Vector3) -> int:
-	var pf: int = Game.player_floor()
-	if pf >= 0:
-		return pf
-	if not _warned_no_player_floor:
-		_warned_no_player_floor = true
-		push_warning("projectile_pool: Game.player_floor() non e' registrata, quindi il piano del colpo ripiega su floor_of(y), che su una torre da' il piano sbagliato durante la rampa. tocca a terminal-gun-gameplay registrarla in src/player/player.gd::_enter_tree().")
-	return Game.floor_of(pos.y)
+
 
 ## Il raggio di specie `kind`, dalla tabella di `src/sim/enemy.gd`. Il clamp e'
 ## qui, in una riga, ed e' la stessa regola di `Enemy.clamp_kind`, cioe' limitare
@@ -437,11 +413,6 @@ func acquire(pos: Vector3, dir: Vector3, speed: float):
 	var p = _items[idx]
 	p.launch(pos, dir.normalized(), speed, weapon.damage, weapon.knockback,
 		weapon.projectile_life, weapon.pierce)
-	# m12: il piano del colpo, scritto **una volta sola** e letto da `_collide()` a
-	# ogni passo. Vedi `projectile.gd::piano` perche' qui e non li': il piano e'
-	# una proprieta' del colpo, e ricalcolarlo dal giocatore a ogni passo
-	# farebbe cambiare bersaglio a un proiettile gia' sparato.
-	p.piano = _piano_del_giocatore(pos)
 	# m15: da quale dei due controfattuali e' partito questo colpo. E' un flag e
 	# non nient'altro, e senza di questo il confronto fra i due bracci non
 	# avrebbe un numeratore per ciascuno (vedi i due campi in testa al file).
@@ -623,27 +594,9 @@ func _collide(p, index: int) -> void:
 		return
 	var scala := _body_scale()
 	var kinds := _kinds()
-	# ## m12: la banda di quota del proiettile, calcolata **una volta** qui
-	#
-	# `Game.floor_height` e' letto dal contratto e non copiato: se il vertice o
-	# `-arda` cambiano l'altezza di un piano, questa riga cambia con loro. I due
-	# bordi sono `[piano * h, (piano + 1) * h)`, cioe' **lo stesso intervallo** che
-	# `Game.floor_of()` dichiara, bordo inferiore incluso e bordo superiore
-	# escluso: a `y = 20,0` con `floor_height = 20,0` si e' sul piano 1, e anche qui.
-	var h := float(Game.floor_height)
-	var banda_attiva := h > 0.0
-	var basso := float(p.piano) * h
-	var alto := basso + h
 	var best := -1
 	var best_t := 2.0
 	for e in n:
-		# La banda **prima** di `has_hit()`: e' il confronto piu' economico del
-		# ciclo e scarta di piu', quindi va per primo. L'ordine dei due `continue`
-		# non cambia nulla: skippano entrambi.
-		if banda_attiva:
-			var y := tr[e].y
-			if y < basso or y >= alto:
-				continue
 		if p.has_hit(e):
 			continue
 		var reach: float = p.radius + scala * _radius_at(kinds, e)

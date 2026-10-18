@@ -146,8 +146,7 @@ func _clamped(focus: Vector3) -> Vector3:
 	# Il clamp verticale che **non** c'e': sul piano XZ si puo' finire fuori dal
 	# muro, in verticale no perche' la torre e' chiusa sotto e sopra. Quindi non si
 	# inventa un margine verticale che non ha nessun muro davanti.
-	var suolo := focus.y if floor_height() > 0.0 else ARENA_FLOOR
-	var out := Vector3(focus.x, suolo, focus.z)
+	var out := Vector3(focus.x, 0.0, focus.z)
 	var flat := Vector2(out.x, out.z)
 	var limit := maxf(0.0, arena_radius() - EDGE_MARGIN)
 	if flat.length() > limit:
@@ -155,16 +154,6 @@ func _clamped(focus: Vector3) -> Vector3:
 		out.z = flat.normalized().y * limit
 	return out
 
-## L'altezza di un piano, **dal contratto**. `-1.0` se il campo non c'e': e' un
-## difetto del vertice e non un mondo piatto, quindi non si finge.
-func floor_height() -> float:
-	var game := _contract()
-	if game == null:
-		return -1.0
-	var v = game.get("floor_height")
-	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
-		return float(v)
-	return -1.0
 
 ## Vedi la nota in `horde_renderer.gd`: l'autoload lo prendo dal campo `/root`,
 ## perche' questi script possono essere caricati con `load()` anche dai test in

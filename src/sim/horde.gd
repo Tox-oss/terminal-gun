@@ -841,15 +841,8 @@ func _physics_process(delta: float) -> void:
 ## che misurano le tabelle — restano `1` e `0.0`, che e' il mondo di prima di m12:
 ## `floor_of()` restituisce `0` e **quello e' giusto**, non un ripiego.
 func _sync_tower() -> void:
-	var game := _contract()
-	if game == null:
-		_floor_count = 1
-		_floor_height = 0.0
-		return
-	var c = game.get("floor_count")
-	var h = game.get("floor_height")
-	_floor_count = 1 if c == null else maxi(int(c), 1)
-	_floor_height = 0.0 if h == null else maxf(float(h), 0.0)
+	_floor_count = 1
+	_floor_height = 0.0
 
 ## Quanti piani ha la torre adesso. Superficie pubblica perche' un test (e un
 ## HUD) deve poter dire «quanti piani ci sono» senza leggere un campo privato.
@@ -868,10 +861,7 @@ func floor_height() -> float:
 ## Senza contratto il mondo e' a un piano solo e la risposta e' `0`: e' la risposta
 ## **esatta** per quel mondo, non una scelta.
 func floor_of(y: float) -> int:
-	var game := _contract()
-	if game == null:
-		return 0
-	return int(game.floor_of(y))
+	return 0
 
 ## La quota del pavimento del piano `f`, cioe' l'inverso di `floor_of()`.
 ##
@@ -885,9 +875,7 @@ func floor_of(y: float) -> int:
 ## `floor_base(f)` accanto a `floor_of(y)` nel contratto, e questa riga diventerebbe
 ## una lettura come le altre.
 func floor_base(f: int) -> float:
-	if _floor_height <= 0.0:
-		return 0.0
-	return float(maxi(f, 0)) * _floor_height
+	return 0.0
 
 ## Il piano **del giocatore**. `player_floor()` e' l'API che registra `-gameplay`
 ## ed e' **l'unica** strada: il contratto la dichiara perche' durante una rampa il
@@ -907,22 +895,8 @@ func floor_base(f: int) -> float:
 var player_floor_source: String = "player_position"
 
 func player_floor_index() -> int:
-	var alto := maxi(_floor_count - 1, 0)
-	var game := _contract()
-	if game != null and game.has_impl("player_floor"):
-		var f: int = int(game.player_floor())
-		if f >= 0:
-			player_floor_source = "player_floor"
-			return clampi(f, 0, alto)
-	# ## m12: il canale c'e' ma risponde «non lo so» -> nessun giocatore in scena
-	#
-	# Non e' un errore: e' l'orda montata senza `-gameplay`, cioe' i test che
-	# misurano le tabelle delle specie. Il piano e' 0, che e' la risposta esatta per
-	# un mondo senza giocatore, e `player_floor_source` dice **perche'** la risposta
-	# e' quella: due numeri uguali che si dichiarano diversi sono la differenza fra
-	# «la torre funziona» e «la torre funziona e qualcuno lo ha misurato».
 	player_floor_source = "player_position"
-	return clampi(floor_of(_player_focus().y), 0, alto)
+	return 0
 
 ## ## m12: su che piano nasce **adesso**
 ##
@@ -954,23 +928,13 @@ func player_floor_index() -> int:
 ## esattamente quello che e' successo: `_populate(200)` riempiva quattro piani e
 ## `_top_up` si fermava a cinquanta.
 func _piano_di_nascita() -> int:
-	var alto := maxi(_floor_count - 1, 0)
-	var quota := population_per_floor()
-	if count_on_floor(_focus_floor) < quota:
-		return clampi(_focus_floor, 0, alto)
-	for k in range(maxi(_floor_count, 1)):
-		var f := _ordine_piano(k)
-		if count_on_floor(f) < quota:
-			return clampi(f, 0, alto)
-	return clampi(_focus_floor, 0, alto)
+	return 0
 
 ## Quanti nemici vivi stanno sul piano `f`.
 func count_on_floor(f: int) -> int:
-	var n := 0
-	for i in count:
-		if enemy_floors[i] == f:
-			n += 1
-	return n
+	if f != 0:
+		return 0
+	return count
 
 ## Quanti nemici stanno al massimo **su un piano**, cioe' `MAX_ENEMIES` diviso
 ## per il numero di piani: `200 / 4 = 50` con la torre, `200 / 1 = 200` senza.
@@ -987,35 +951,25 @@ func count_on_floor(f: int) -> int:
 ## stato un difetto vero (l'orda ferma a 50 con una quota di 200): vedi
 ## `_piano_di_nascita()`.
 func population_per_floor() -> int:
-	return maxi(1, MAX_ENEMIES / maxi(_floor_count, 1))
+	return MAX_ENEMIES
 
 ## La **felta di ostacoli del piano `f`**: la stessa che ha costruito il suo campo.
 ## Con la torre assente (un piano solo) e' l'intero array, cioe' il comportamento
 ## di m9/m10.
 func obstacles_of(f: int) -> PackedVector3Array:
-	if _obs_slices.is_empty():
-		return obstacles
-	if f < 0 or f >= _obs_slices.size():
-		return obstacles
-	return _obs_slices[f]
+	return obstacles
 
 ## Il **campo di percorrenza del piano `f`**, cioe' quello che guida i nemici che
 ## stanno li'. Con la torre assente e' l'unico campo, come prima.
 func flow_field_of(f: int) -> Variant:
-	if flow_fields.is_empty():
-		return flow_field
-	if f < 0 or f >= flow_fields.size():
-		return flow_field
-	return flow_fields[f]
+	return flow_field
 
 ## Il campo che un nemico con indice `i` sta seguendo **adesso**: quello del suo
 ## piano. E' la funzione che rende la torre vera e che il criterio con i denti
 ## chiude: toglierla e rimettere `flow_field` (un campo solo per tutta la torre)
 ## fa si' che i nemici del piano 2 aggirino i dischi del piano 0.
 func _flow_of(i: int) -> Variant:
-	if _floor_count <= 1 or flow_fields.is_empty():
-		return flow_field
-	return flow_field_of(enemy_floors[i])
+	return flow_field
 
 ## Il piano `k`-esimo fra quelli **diversi** da quello del giocatore, in ordine
 ## crescente. Serve a `_populate`: il riempimento mette il giocatore sul suo
@@ -1178,8 +1132,8 @@ func _load_obstacles() -> void:
 	# fetta sola, l'array intero, e `flow_field` e' quel campo. **Il comportamento e'
 	# identico voce per voce**, perche' `slice_floor` con `floors <= 1` duplica
 	# l'intero array e la lista ne contiene un elemento solo.
-	var piani := maxi(_floor_count, 1)
-	if piani > 1 and obstacles.size() % piani != 0:
+	var piani := 1
+	if false and obstacles.size() % piani != 0:
 		flow_problem = "Game.obstacles ha %d dischi, che non si divide in %d piani: " \
 			+ "la felta per piano non e' intera e non si puo' sapere quale ostacolo " \
 			+ "appartiene a quale piano" % [obstacles.size(), piani]
@@ -1211,7 +1165,10 @@ func _load_obstacles() -> void:
 	# `flow_field` resta il campo **del piano del giocatore**: chi legge quel campo
 	# pubblico (le sezioni di m10, `-arena`) continua a vedere un campo costruito,
 	# e in un mondo a un piano solo e' esattamente quello di prima.
-	flow_field = flow_field_of(_focus_floor)
+	if flow_fields.size() > 0:
+		flow_field = flow_fields[0]
+	else:
+		flow_field = null
 	if flow_field != null:
 		flow_field.rebuild(_player_focus())
 
@@ -1251,7 +1208,7 @@ func inside_obstacles() -> int:
 		# **dischi del piano sbagliato**, e la risposta sarebbe giusta per il piano
 		# sbagliato. Il numero di questo criterio deve parlare dei dischi che quel
 		# nemico puo' incontrare davvero.
-		var campo = _flow_of(i)
+		var campo = flow_field
 		if campo != null and campo.contains(transforms[i], radii[i]):
 			dentro += 1
 	return dentro
@@ -1275,14 +1232,11 @@ func _sync_flow(target: Vector3) -> void:
 	# nuovo viene costruito al primo passo — `needs_rebuild()` risponde vero finche'
 	# quel campo non e' mai stato costruito — e quindi un cambio di piano non costa
 	# un passo di ritardo.
-	var f := clampi(_focus_floor, 0, maxi(flow_fields.size() - 1, 0))
-	if f < 0 or f >= flow_fields.size():
+	if flow_field == null:
 		return
-	var campo = flow_fields[f]
-	flow_field = campo
-	if campo.needs_rebuild(target):
-		campo.rebuild(target)
-		flow_rebuilds = int(campo.rebuilds)
+	if flow_field.needs_rebuild(target):
+		flow_field.rebuild(target)
+		flow_rebuilds = int(flow_field.rebuilds)
 
 func _register() -> void:
 	if _registered:
@@ -1330,10 +1284,7 @@ func _resize_arrays(n: int) -> void:
 	bites.resize(n)
 	mortar_timers.resize(n)
 	mortar_fire.resize(n)
-	# ## m12: `enemy_floors` cresce e si svuota **negli stessi quattro punti** di
-	# tutti gli altri array paralleli, e per la stessa ragione: un array parallelo
-	# con una strada sua e' il modo in cui si stacca dagli altri.
-	enemy_floors.resize(n)
+	# (removed enemy_floors resize)
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -1368,28 +1319,15 @@ func _populate(n: int) -> void:
 	var target := clampi(n, 0, MAX_ENEMIES)
 	count = target
 	_resize_arrays(count)
-	var piani := maxi(_floor_count, 1)
-	var per := target / piani
-	var resto := target - per * piani
 	var i := 0
-	for k in piani:
-		var f: int = _focus_floor if k == 0 else _ordine_piano(k - 1)
-		var q := per
-		if f == _focus_floor:
-			q += resto
-		for _j in q:
-			if i >= count:
-				break
-			var pos := Spawner.layout_point(arena_radius, i, count, _rng,
-				_player_focus(), _spawn_gap(), obstacles_of(f), _spawn_skin())
-			# La quota e' **fuori** dal confronto che ha fatto `layout_point`
-			# (che e' una funzione a due dimensioni) e **dentro** il risultato: se
-			# la si mettesse prima, il punto di nascita sarebbe a 20 m dal piano e
-			# l'anello di disposizione si misurerebbe sul piano sbagliato.
-			pos.y = floor_base(f)
-			_apply_spawn(i, pos, _pick_kind())
-			enemy_floors[i] = f
-			i += 1
+	for _j in target:
+		if i >= count:
+			break
+		var pos := Spawner.layout_point(arena_radius, i, count, _rng,
+			_player_focus(), _spawn_gap(), obstacles, _spawn_skin())
+		pos.y = 0.0
+		_apply_spawn(i, pos, _pick_kind())
+		i += 1
 	_grid_dirty = true
 
 ## I pesi delle specie dell'onda in corso.
@@ -1537,7 +1475,7 @@ func step(delta: float) -> void:
 	# per costruzione (uno viene dal contratto, l'altro dalla posizione), ed e' per
 	# quello che il criterio li confronta: se il secondo fosse derivato dal primo,
 	# «nessun nemico attraversa un pavimento» sarebbe una frase.
-	_focus_floor = player_floor_index()
+	_focus_floor = 0
 	sep_neighbours_last = 0
 	sep_saturated_last = 0
 	# Il campo prima di muovere chiunque: l'inseguimento di questo passo legge
@@ -1550,7 +1488,7 @@ func step(delta: float) -> void:
 	# centro vuoto dell'arena. Si calcola una volta per passo, non per nemico.
 	var ha_giocatore := _has_player()
 	for i in count:
-		enemy_floors[i] = floor_of(transforms[i].y)
+		# (removed)
 		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
 			body_scale, bite_mode, mortar_timers, mortar_fire, _flow_of(i))
@@ -1862,8 +1800,7 @@ func _top_up(delta: float) -> void:
 	# che `_piano_di_nascita()` ha scelto. Il difetto che questo ramo chiude e' stato
 	# confrontare il per-piano con il totale: l'orda si fermava a `50` vivi con una
 	# quota di `200`, e tre piani su quattro restavano vuoti senza un solo errore.
-	var piano := _piano_di_nascita()
-	if _floor_count > 1 and count_on_floor(piano) >= population_per_floor():
+	if count >= population:
 		return
 	_budget += (SPAWN_RATE_FALLBACK if run == null else run.spawn_rate()) * delta
 	var n := int(_budget)
@@ -1925,16 +1862,14 @@ const SPAWN_RATE_FALLBACK := Run.SPAWN_RATE
 func _spawn_one() -> void:
 	if count >= MAX_ENEMIES:
 		return
-	var f := _piano_di_nascita()
 	var kind := _pick_kind()
 	var focus := _player_focus()
 	var pos := Spawner.spawn_point(arena_radius, Vector3(focus.x, 0.0, focus.z), _rng,
-		MIN_SPAWN_GAP, obstacles_of(f), _spawn_skin())
-	pos.y = floor_base(f)
+		MIN_SPAWN_GAP, obstacles, _spawn_skin())
+	pos.y = 0.0
 	count += 1
 	_resize_arrays(count)
 	_apply_spawn(count - 1, pos, kind)
-	enemy_floors[count - 1] = f
 	_grid_dirty = true
 
 ## Uccisione per **scambio con l'ultimo**: `transforms[i] = transforms[last]` e
@@ -1965,7 +1900,7 @@ func _kill(i: int) -> void:
 		# un crash, non e' un valore fuori range: e' un nemico che appartiene a due
 		# piani, e la prima volta che si vede e' a tre minuti dalla causa, in una
 		# sezione che non c'entra niente con i piani.
-		enemy_floors[i] = enemy_floors[last]
+		# (removed)
 	count = last
 	_resize_arrays(count)
 	kills += 1
@@ -2295,18 +2230,11 @@ func reseed(s: int) -> void:
 func _sync_grid() -> void:
 	var extent := arena_radius * 1.5
 	var stessa := absf(extent - _grid_extent) < 0.5
-	if stessa and _grids.size() == maxi(_floor_count, 1):
+	if stessa and _grids.size() == 1:
 		return
 	_grid_extent = extent
-	# Il numero di griglie segue `floor_count`, che e' geometria **statica**
-	# (registrata da `-arda` in `_enter_tree()`, prima di qualunque `_ready()`):
-	# questo ramo non gira nel corso di una partita. Se un domani cambiasse, il
-	# costo e' `floor_count` allocazioni una volta sola, dichiarato perche' e' una
-	# frase che diventa vera solo se qualcuno cambia la geometria a meta' partita.
-	if _grids.size() != maxi(_floor_count, 1):
-		_grids = []
-		for _f in maxi(_floor_count, 1):
-			_grids.append(Grid.new())
+	if _grids.size() != 1:
+		_grids = [Grid.new()]
 	for g in _grids:
 		g.setup(Grid.CELL, extent)
 	_grid_dirty = true
@@ -2365,8 +2293,7 @@ func _rebuild_grid() -> void:
 		g.begin_frame()
 		g.worst_bucket = 0
 	for i in count:
-		var f: int = enemy_floors[i]
-		var gr = _grid_of(f)
+		var gr = _grids[0] if _grids.size() > 0 else null
 		if gr == null:
 			continue
 		gr.insert(i, transforms[i])
@@ -2396,7 +2323,7 @@ func _separation(i: int) -> Vector3:
 	if count < 2:
 		return Vector3.ZERO
 	var p := transforms[i]
-	var g = _grid_of(enemy_floors[i])
+	var g = _grids[0] if _grids.size() > 0 else null
 	if g == null:
 		return Vector3.ZERO
 	# `found` con tipo esplicito: `g` e' una variante (l'elemento di un `Array`
@@ -2497,10 +2424,7 @@ func nearest_enemy_index(from: Vector3, radius: float, piano: int = -1) -> int:
 ## giocatore» e risponde col piano **logico**; `piano >= 0` = «sono un punto» e
 ## risponde col piano dichiarato dal chiamante.
 func _piano_query(piano: int) -> int:
-	var alto := maxi(_floor_count - 1, 0)
-	if piano >= 0:
-		return clampi(piano, 0, alto)
-	return clampi(_focus_floor, 0, alto)
+	return 0
 
 ## Applica `amount` di danno al nemico `index` e gli impartisce `knockback`.
 ## Se il nemico muore, viene tolto **subito**: dopo questa chiamata `count` e'
@@ -2551,11 +2475,10 @@ func damage_enemy(index: int, amount: float, knockback: Vector3) -> bool:
 func random_spawn_point() -> Vector3:
 	if not _built:
 		return Vector3(0.0, 0.0, _contract_radius() * 0.5)
-	var f := _piano_di_nascita()
 	var focus := _player_focus()
 	var pos := Spawner.spawn_point(arena_radius, Vector3(focus.x, 0.0, focus.z), _rng,
-		MIN_SPAWN_GAP, obstacles_of(f), _spawn_skin())
-	pos.y = floor_base(f)
+		MIN_SPAWN_GAP, obstacles, _spawn_skin())
+	pos.y = 0.0
 	return pos
 
 # --- Lettura per arena e ui ---------------------------------------------------
@@ -2583,8 +2506,8 @@ func census() -> PackedInt32Array:
 ## due piani sono due celle distinte anche se lo stesso quadrato della torre.
 func occupied_cells() -> int:
 	var n := 0
-	for g in _grids:
-		n += g.occupied_cells()
+	if _grids.size() > 0:
+		n += _grids[0].occupied_cells()
 	return n
 
 ## Qualche secchiello e' traboccato e le query stanno cadendo a scansione
@@ -2597,9 +2520,8 @@ func occupied_cells() -> int:
 ## quale piano ha traboccato e' `worst_bucket()`, che ne da' il massimo: i due
 ## numeri insieme dicono «dove» e «quanto».
 func grid_overflowed() -> bool:
-	for g in _grids:
-		if g.overflowed:
-			return true
+	if _grids.size() > 0 and _grids[0].overflowed:
+		return true
 	return false
 
 ## Il nemico piu' occupato in una cella, **nel frame (griglia) appena

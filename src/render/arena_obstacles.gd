@@ -141,17 +141,8 @@ func build(list: PackedVector3Array) -> void:
 	# sbagliato qui taglia gli ostacoli senza dire niente (la stessa lezione
 	# scritta accanto a `_fit_aabbs()` in `arena_ground.gd`).
 	custom_aabb = _aabb(list)
-	var floors := maxi(floor_count(), 1)
-	var per := OBST.per_floor(n, floors)
-	var height := maxf(floor_height(), 0.0)
 	for i in n:
-		# ## m12: LA QUOTA VIENE DALL'INDICE, non dall'elemento
-		#
-		# `per == 0` (insieme vuoto) e `floors <= 1` (mondo piatto) danno tutti e due
-		# `piano 0`: il comportamento di prima di m12, quindi nessun numero di questa
-		# sezione cambia senza la torre.
-		var piano := 0 if per <= 0 else i / per
-		var t := obstacle_transform(list[i], float(piano) * height)
+		var t := obstacle_transform(list[i])
 		mm.set_instance_transform(i, t)
 		_written.append(t)
 	mm.visible_instance_count = n
@@ -192,21 +183,15 @@ func _material() -> StandardMaterial3D:
 ## l'estensione verticale arriva fino a `floor_count * floor_height` — la stessa
 ## regola di `_fit_aabbs()` in `arena_ground.gd`.
 func _aabb(list: PackedVector3Array) -> AABB:
-	var su := _tower_height()
 	if list.is_empty():
 		return AABB(Vector3(-1.0, 0.0, -1.0), Vector3(2.0, OBSTACLE_HEIGHT, 2.0))
 	var lo := Vector3(INF, INF, 0.0)
-	var hi := Vector3(-INF, -INF, su)
-	var floors := maxi(floor_count(), 1)
-	var per := OBST.per_floor(list.size(), floors)
-	var height := maxf(floor_height(), 0.0)
+	var hi := Vector3(-INF, -INF, 0.0)
 	for i in list.size():
 		var e := list[i]
 		var r: float = maxf(e.y, 0.0)
-		var piano := 0 if per <= 0 else i / per
-		var y := float(piano) * height
-		lo = Vector3(minf(lo.x, e.x - r), minf(lo.y, y - OBSTACLE_SINK), minf(lo.z, e.z - r))
-		hi = Vector3(maxf(hi.x, e.x + r), maxf(hi.y, y + OBSTACLE_HEIGHT), maxf(hi.z, e.z + r))
+		lo = Vector3(minf(lo.x, e.x - r), minf(lo.y, -OBSTACLE_SINK), minf(lo.z, e.z - r))
+		hi = Vector3(maxf(hi.x, e.x + r), maxf(hi.y, OBSTACLE_HEIGHT), maxf(hi.z, e.z + r))
 	return AABB(lo - Vector3(1.0, 0.0, 1.0), hi - lo + Vector3(2.0, 0.0, 2.0))
 
 ## ## LA TRASFORMAZIONE DI UN OSTACOLO: pubblica e pura
@@ -258,61 +243,6 @@ func drawn_radius(i: int) -> float:
 func drawn_count() -> int:
 	return _written.size()
 
-## Quanti piani ha la torre, **dal contratto**. Il ripiego e' **`1`**, cioe' il
-## **default dichiarato del contratto**, e non `-1`.
-##
-## ## PERCHE' `-1` ERA IL NEUTRO SBAGLIATO, E COME SI VEDE
-##
-## Questa funzione restituiva `-1` quando il contratto non era raggiungibile, e il
-## conto che ne segue e' silenzioso: `maxi(-1, 1) = 1`, quindi `build()` leggeva
-## «un piano solo» da un valore che **non e' un piano solo**, e `per_floor(n, -1)`
-## avrebbe diviso per `maxi(-1, 1)`. Un disco finito su un nodo **fuori dall'albero**
-## ha prodotto cosi' `written_transform(0) == Transform3D.IDENTITY`: non un crash, non
-## un errore, una trasformata identica in un riquadro che ne conteneva gia' una vera.
-##
-## `-1` non e' «non lo so» per un numero che ha un default: e' un valore che **non
-## esiste in nessun mondo**, e un chiamante che lo clampa lo trasforma in un mondo
-## che non e' quello che pensava. In un mondo senza contratto la risposta vera e' il
-## mondo piatto di prima di m12: un piano, quota zero.
-##
-## Il punto in cui questo si vede non e' un crash ma un **test**: `tests/test_arena.gd`
-## costruisce un `MultiMeshInstance3D` con `set_script()` e non lo mette in albero,
-## quindi per definizione non ha contratto, e il ripiego e' l'unica risposta che
-## vedra'. Se il ripiego restituisse `-1`, il criterio passerebbe o fallirebbe per un
-## motivo che non ha niente a che fare con il disegno del disco.
-func floor_count() -> int:
-	var game := _contract()
-	if game == null:
-		return 1
-	var v = game.get("floor_count")
-	if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT:
-		return maxi(int(v), 1)
-	return 1
-
-## L'altezza di un piano, **dal contratto**. Il ripiego e' **`0,0`**, il default
-## dichiarato, per la stessa ragione di `floor_count()` sopra: `-1,0` qui diventava
-## `maxf(-1,0, 0,0)` dentro `_tower_height()`, cioe' gia' `0,0`, ma il chiamante che
-## legge il grezzo vedeva un'altezza negativa e non poteva distinguerla da un difetto.
-func floor_height() -> float:
-	var game := _contract()
-	if game == null:
-		return 0.0
-	var v = game.get("floor_height")
-	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
-		return float(v)
-	return 0.0
-
-## L'altezza della torre, cioe' `floor_count * floor_height`, con i due valori
-## negativi **clampati a zero**: quando il contratto non dichiara i campi non
-## esiste nessuna torre e la quota giusta dei dischi e' `0,0`, cioe' il mondo di
-## prima di m12. Non e' un silenzio: e' il caso in cui il vertice ha tolto i campi
-## e `tests/test_arena.gd` va rosso sul valore registrato.
-func _tower_height() -> float:
-	var floors := maxi(floor_count(), 1)
-	var height := floor_height()
-	if height <= 0.0:
-		return 0.0
-	return float(floors) * height
 
 ## I dischi che questo nodo deve disegnare: dal contratto, e **non** dalla scena.
 ##

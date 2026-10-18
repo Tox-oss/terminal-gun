@@ -317,20 +317,6 @@ var _dead_signalled := false
 ## raggio. Vedi `reload_obstacles()`: sono due difetti diversi e non si confondono.
 var _warned_no_obstacles := false
 var _warned_obstacle_radius := false
-## Un solo avviso per la divisione degli ostacoli sui piani. Vedi
-## `ostacoli_per_piano()`: e' un difetto **del dato**, non di questo file.
-var _warned_piani := false
-
-# --- m12: a che piano sta il giocatore. Tre campi, e sono tre numeri di stato ---
-#
-# `_piano` e' il piano **dichiarato**: l'ultimo piano su cui i piedi del
-# giocatore erano **fermi**. `_y_piedi` e' la quota campionata al passo
-# precedente, e `_piano_valido` dice se quel campione e' stato preso: senza di esso
-# il primo `player_floor()` non avrebbe niente da confrontare e dovrebbe tirare a
-# indovinare.
-var _piano := -1
-var _y_piedi := 0.0
-var _piano_valido := false
 
 ## ## `_piano = -1` non e' un fallback, e la ragione sta nel contratto
 ##
@@ -341,25 +327,7 @@ var _piano_valido := false
 ## un numero scelto: e' `floor_of(y)` sulla quota in cui il giocatore si trova.
 ## `_piano_valido` e' la riga che tiene separate le due cose.
 
-func _enter_tree() -> void:
-	# ## m12: il piano del giocatore, in `_enter_tree()`, forma lunga
-	#
-	# `_enter_tree()` e non `_ready()` perche' e' la regola di §5.1: chi ha **figli
-	# che leggono il dato nel proprio avvio** registra prima. `-orda` chiama
-	# `Game.player_floor()` dal proprio `_ready()`, e nella scena vera l'orda sta
-	# **prima** del giocatore: registrando qui il canale e' gia' vivo quando
-	# l'orda si sveglia.
-	#
-	# **Forma lunga**, come `damage_player` a `_ready()` piu' sotto, e non
-	# `register_impl("player_floor", self)`: la forma corta risolve a
-	# `self.player_floor()`, e questo file dichiara il metodo come `_player_floor`
-	# (come `_player_position`), quindi i due nomi non combaciano e la forma corta
-	# registrerebbe un metodo che non esiste.
-	#
-	# **Idempotente**: `register_impl` sovrascrive la voce con la stessa `Callable`,
-	# quindi rientrare nell'albero non lascia due registrazioni ne' una puntata a
-	# un nodo liberato (`contracts.gd::_live`).
-	Game.register_impl("player_floor", self._player_floor)
+
 
 func _ready() -> void:
 	# Piano §5.1: i dati con l'assegnazione diretta, i metodi con
@@ -483,13 +451,6 @@ func reset_run() -> void:
 	invuln = 0.0
 	dash_timer = 0.0
 	dash_cd = 0.0
-	# m12: il piano torna a **non campionato**. Il restart porta il giocatore al
-	# centro, e cioe' a `y = 0`: lasciare il piano dichiarato di prima sarebbe
-	# un giocatore che riparte al piano 3 mentre sta a terra sul piano 0. Il
-	# campione successivo lo riallinea, e lo riallinea **leggendo l'altezza**, non
-	# copiando un numero.
-	_y_piedi = 0.0
-	_piano_valido = false
 	# Gli ostacoli **non** si rileggono: sono statici e il giocatore e' sempre
 	# lo stesso. Rileggerli qui cambierebbe la geometria di mezzo a una partita
 	# se qualcuno registrasse l'arena un istante dopo il restart.
@@ -603,12 +564,6 @@ func step(delta: float, input_dir: Vector3 = Vector3.ZERO, dash: bool = false) -
 		dash_timer = maxf(dash_timer - delta, 0.0)
 	if dash and dash_cd <= 0.0 and dash_timer <= 0.0 and input_dir.length_squared() > 0.0001:
 		_start_dash(input_dir)
-	# m12: il piano e' campionato **prima** di muoversi, cosi' tutto il passo
-	# (ostacoli compresi) legge un piano solo. Il ritardo di un passo fra
-	# l'atterraggio e il cambio di piano e' dichiarato e non e' un difetto: il
-	# passo in cui i piedi toccano il piano successivo e' ancora il passo della
-	# rampa, ed e' il passo **dopo** che il giocatore e' fermo e il piano cambia.
-	_campiona_piano()
 	var wish := world_direction(input_dir)
 	_move(delta, wish)
 	_chiudi_suoni_scaduti(delta)
@@ -827,6 +782,17 @@ func health_ratio() -> float:
 
 # --- Interno ------------------------------------------------------------------
 
+## Compatibilita' con vecchi chiamanti: senza torre il giocatore e' sempre al piano 0.
+func _player_floor() -> int:
+	return 0
+
+## Senza torre tutti gli ostacoli appartengono al giocatore.
+func ostacoli_per_piano() -> int:
+	return obstacles.size()
+
+func _blocco_piano() -> Vector2i:
+	return Vector2i(0, obstacles.size())
+
 func _player_position() -> Vector3:
 	return global_position
 
@@ -848,9 +814,7 @@ func _move(delta: float, wish: Vector3) -> void:
 	position += velocity * delta
 	_clamp_to_arena()
 	_clamp_to_obstacles()
-	# m12: la quota arriva **dalla superficie**, non da una velocita'. Vedi
-	# `_appoggia_sulla_superficie()`.
-	_appoggia_sulla_superficie()
+	position.y = 0.0
 
 ## ## m12: la quota del giocatore **si legge**, non si calcola
 ##
@@ -887,61 +851,7 @@ func _move(delta: float, wish: Vector3) -> void:
 ## Il costo e' che il blocco degli ostacoli di questo passo ha usato il piano del
 ## passo precedente: e' il ritardo di un passo gia' dichiarato sopra
 ## `_campiona_piano()`.
-func _appoggia_sulla_superficie() -> void:
-	var piano := _player_floor()
-	var q: float = Game.surface_height_at(Vector2(position.x, position.z), piano)
-	# ## La rampa **o** il pavimento, e perche' non e' una terza forma di superficie
-	#
-	# `surface_height_at(xz, f)` risponde solo alla domanda «la rampa che parte dal
-	# piano `f`», quindi sul **piano 3** risponde `-1,0`: non esiste una rampa che
-	# parte dall'ultimo piano. Ma il giocatore che arriva in cima al piano 3 ha
-	# bisogno di qualcuno che lo **tenga** a `3 * floor_height`, e senza questo ramo
-	# nessuno lo tiene: la quota gli resta quella della rampa e poi quella del
-	# pavimento da cui e' partito. Misurato da `-arena`: `60,0000 m` che dopo `11`
-	# passi di assestamento diventava `40,0000 m`, cioe' due piani di caduta.
-	#
-	# ## Il pavimento e' `floor_of(y) * floor_height`, e **non** `latch * floor_height`
-	#
-	# La formula e' `piano * floor_height` e `floor_height` **e' gia' sul contratto**
-	# (`floor_height` lo registra `-arda`), quindi non serve nessuna forma nuova: e'
-	# una **divisione**, non una terza forma di superficie. Ma il `piano` di quella
-	# divisione deve venire **da fuori**, e l'unico numero che c'e' fuori e' `y` — vedi
-	# la nota lunga sotto questo ramo, sul valore che non puo' derivare se stesso.
-	# (`floor_height` lo registra `-arda`). Dichiarare «la quota del piano su cui il
-	# giocatore e' fermo» nel contratto sarebbe una seconda funzione che dice
-	# `piano * floor_height`: cioe' una funzione che fa il conto da sola con due
-	# numeri che sono gia' pubblici. **Non e' una forma di superficie, e' una
-	# divisione**, e per questo si fa qui dentro e non li' fuori.
-	#
-	# Il ramo e' quello giusto in entrambi i casi, e i due non si sommano:
-	#   - **sulla rampa di `f`**: `q >= 0,0` e `q` sta fra `f * floor_height` e
-	#     `(f + 1) * floor_height`, quindi il ramo della rampa vince e la quota la
-	#     scrive la rampa;
-	#   - **sul pavimento di `f`**: `q = -1,0` e la quota e' `f * floor_height`,
-	#     **compresa la spianata d'arresto**, che e' il pavimento del piano di arrivo.
-	if q >= 0.0:
-		position.y = q
-		return
-	# ## Perche' `floor_of(position.y)` e **non** il latch
-	#
-	# La prima stesura scriveva `float(_piano) * floor_height`, cioe' il **latch**.
-	# Ma il latch si aggiorna leggendo `position.y`: quindi la riga scriveva la quota
-	# **dal latch** e il latch leggeva la quota **da se stessa**. Un valore che deriva
-	# se stesso puo' solo salire: a `y = 0` con latch `2`, il canale risponde `-1` e la
-	# riga scriveva `2 x 20 = 40 m`; il passo dopo trovava `dy = 0` a `40 m` e il latch
-	# restava `2`. **Da li `42,2660 m`.** E `player_floor()` non aveva **strada di
-	# ritorno**: dopo un restart, o dopo qualsiasi cosa che mettesse il giocatore piu'
-	# in basso, l'arma guardava un piano dove non c'e' nessun nemico e `nearest_enemy`
-	# rispondeva `-1` — non un difetto di test, un giocatore che non vede niente.
-	#
-	# `floor_of(position.y)` e' una funzione di `position.y`: la riga e' **auto-consistente**,
-	# non si conferma, e `floor_of` **e' gia' sul contratto** (`contracts.gd:783`), quindi
-	# non serve nessuna forma nuova. La regola che governa il rimedio e' piu' grande del
-	# rimedio: **un valore non puo' derivare se stesso**; ogni volta che due numeri si
-	# dipendono a vicenda, uno dei due deve venire da fuori.
-	var h := float(Game.floor_height)
-	if h > 0.0:
-		position.y = float(_piano_di(position.y)) * h
+
 
 ## Il muro. Non si annulla la velocita' uscente: si toglie la componente che
 ## esce e si lascia scivolare quella parallela, altrimenti il giocatore si
@@ -1002,11 +912,10 @@ func _clamp_to_arena() -> void:
 func _clamp_to_obstacles() -> void:
 	if obstacles.is_empty():
 		return
-	var blocco := _blocco_piano()
 	var passate := 0
 	while passate < OBSTACLE_PASSES:
 		var mosso := false
-		for i in range(blocco.x, blocco.y):
+		for i in range(0, obstacles.size()):
 			var o := obstacles[i]
 			var raggio := o.y
 			if raggio <= 0.0:
@@ -1031,46 +940,7 @@ func _clamp_to_obstacles() -> void:
 			return
 		passate += 1
 
-## Quanti ostacoli ha **un piano**, cioe' `obstacles.size() / floor_count`.
-##
-## E' una **divisione fra due numeri che arrivano da fuori**: il totale e' l'array
-## che `-arena` ha registrato e `floor_count` e' il contratto. Nessuno dei due e'
-## scritto qui, quindi nessuno dei due puo' invecchiare in questo file.
-##
-## ## Quando la divisione **non** torna
-##
-## Se `floor_count` non divide il totale, l'array **non e'** la concatenazione dei
-## piani che il piano m12 descrive, e inventare il blocco sarebbe indovinare dove
-## finisce il piano 1. Quindi qui non si indovina: si torna al comportamento di
-## prima (l'array intero e' ostacoli del giocatore) e si avvisa **una volta sola**,
-## con il numero che non torna e il nome di chi lo registra. Un test che asserisce
-## «quanti ostacoli ha il piano» deve diventare **rosso** su un array cosi', non
-## verde perche' la divisione e' stata arrotondata.
-func ostacoli_per_piano() -> int:
-	var piani := maxi(int(Game.floor_count), 1)
-	if obstacles.size() % piani != 0:
-		if not _warned_piani:
-			_warned_piani = true
-			push_warning("player: Game.floor_count = %d non divide i %d ostacoli registrati, quindi non si puo' dire quale ostacolo sta su quale piano. "
-				% [piani, obstacles.size()]
-				+ "Su una torre l'array e' la CONCATENAZIONE delle chiamate di layout(), una per piano (src/render/arena.gd, -arda). Finche' non torna si usano tutti.")
-		return obstacles.size()
-	return obstacles.size() / piani
 
-## Il blocco di ostacoli del piano su cui il giocatore e' adesso, come
-## `Vector2i(da, a)` in indici **inclusi a sinistra, esclusi a destra**. Nessuna
-## lista viene costruita: il ciclo di `_clamp_to_obstacles()` scorre gli indici, e
-## un `PackedVector3Array` costruito a ogni frame sarebbe una allocazione per
-## passo.
-func _blocco_piano() -> Vector2i:
-	var per := ostacoli_per_piano()
-	if per <= 0 or per >= obstacles.size():
-		# Torre non montata (`floor_count = 1`) o insieme vuoto: il blocco e' tutto
-		# l'array, che e' esattamente il comportamento di prima di m12.
-		return Vector2i(0, obstacles.size())
-	var ultimo := obstacles.size() / per - 1
-	var k := clampi(_player_floor(), 0, maxi(ultimo, 0))
-	return Vector2i(k * per, (k + 1) * per)
 
 ## Quanti ostacoli il giocatore sta usando adesso, cioe' **quelli del suo piano**.
 ## E' la domanda che il test m10 fa sul contratto: un giocatore che ha letto zero
@@ -1086,8 +956,7 @@ func _blocco_piano() -> Vector2i:
 ## senza torre — questo valore e' **il totale**, quindi nessuna asserizione di m10
 ## cambia numero.
 func obstacle_count() -> int:
-	var blocco := _blocco_piano()
-	return blocco.y - blocco.x
+	return obstacles.size()
 
 ## ## m12: il piano su cui sta il giocatore
 ##
@@ -1136,12 +1005,6 @@ func obstacle_count() -> int:
 ## un fallback a `0`, e' `floor_of(y)` letto sull'altezza in cui il giocatore si
 ## trova, che nel mondo senza torre e' `0` **perche' e' la risposta vera**
 ## (contratto: «non c'e' una torre» e' il piano 0) e non perche' non so rispondere.
-func _player_floor() -> int:
-	if not _piano_valido:
-		_piano = _piano_dalla_superficie()
-		_piano_valido = true
-	return _piano
-
 ## Il piano **si chiede alla superficie**, e non si deduce da `y`.
 ##
 ## ## Perche' `dy` e' sparito
@@ -1183,41 +1046,7 @@ func _player_floor() -> int:
 ## e nessuna sarebbe sbagliata. Ed e' esatto **sul bordo**, che e' il posto dove una
 ## regola basata su `dy` sbagliava di sicuro: a `y = 20,0` sul ciglio della rampa,
 ## `floor_of` dice 1 e la rampa dice 0.
-func _piano_dalla_superficie() -> int:
-	var xz := Vector2(position.x, position.z)
-	var piani := maxi(int(Game.floor_count), 1)
-	var h := float(Game.floor_height)
-	for f in piani:
-		var q: float = Game.surface_height_at(xz, f)
-		# La rampa conta come «dentro» **finche' non e' arrivata in capo**. Sul
-		# pavimento e sulla spianata d'arresto la quota e' gia' quella del piano
-		# successivo, e l'unico posto in cui cio' accade **senza che nessun'altra
-		# rampa lo scriva** e' la spianata in capo alla rampa `f`: li' la rampa di
-		# `f` risponde con `q = (f + 1) * floor_height`, e se la regola contasse
-		# quella risposta come «dentro la rampa di f» il latch direbbe `f` mentre il
-		# piede e' gia' fermo sul piano nuovo. Quindi la rampa contiene il
-		# giocatore **sotto** il bordo, e al bordo lo consegna al piano di arrivo.
-		if q >= 0.0 and q < float(f + 1) * h:
-			return f
-	return _piano_di(position.y)
 
-## Campiona il piano, una volta per `step()`, **prima** di `_move()`.
-func _campiona_piano() -> void:
-	# `_y_piedi` non serve piu' alla regola (vedi `_piano_dalla_superficie`) e resta
-	# solo come ultima quota campionata: un numero che non comanda niente e che un
-	# giorno serve per diagnosticare.
-	_y_piedi = position.y
-	_piano = _piano_dalla_superficie()
-	_piano_valido = true
-
-## La sola divisione per `floor_height` del progetto, e non e' mia:
-## `Game.floor_of(y)` e' aritmetica **del contratto** (`src/core/contracts.gd`), e
-## `floor_count` / `floor_height` li registra `-arda`. Qui dentro non c'e' nessuna
-## copia dei due: se ci fosse, tre foglie avrebbero tre divisioni che concordano
-## finche' non c'e' una torre, che e' la ragione per cui `floor_of` sta nel
-## contratto.
-func _piano_di(y: float) -> int:
-	return int(Game.floor_of(y))
 
 ## Rilegge gli ostacoli dal contratto e restituisce quanti ne ha trovati. Gli
 ## ostacoli sono **statici** (semantica punto 1): si leggono una volta sola e da

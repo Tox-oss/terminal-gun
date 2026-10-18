@@ -367,7 +367,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 30
+const NODI_SCENA_VERA := 24
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #
@@ -1023,34 +1023,10 @@ func _process(_delta: float) -> bool:
 		# `_restart_run`, che installa l'orda vera e non restituisce il contratto.
 		_m14a_involucro(h)
 		_censo_di_root("dopo _m14a_involucro")
-		# m12, meta' 1 e 2: il piano del giocatore e gli ostacoli per piano.
-		# Vanno qui, **prima** di `_restart_run`, perche' sono le due sezioni che
-		# toccano solo -gameplay: montano la torre **sul contratto** e riportano
-		# tutto com'era, quindi non hanno bisogno dell'orda vera e non la disturbano.
-		_m12_player_floor(h)
-		_m12_ostacoli_per_piano(h)
-		_m12_impatto_su_piano(h)
 		# Criterio n. 4 di m2, meta' di -gameplay. Instala l'orda **vera** di
 		# -orda, che prende il contratto: da qui in avanti questa sezione parla
 		# con l'orda vera e non piu' con il doppio finto delle altre.
 		_restart_run(h)
-		# m12, meta' 3 e 4: la salita e il punto di nascita. Vanno **dopo** il
-		# restart per una ragione sola: `random_spawn_point()` lo registra
-		# `src/sim/horde.gd` (di -orda), e l'orda vera e' quella che il restart
-		# mette sul contratto.
-		_m12_salita(h)
-		_censo_di_root("dopo _m12_salita")
-		_m12_spawn(h)
-		_censo_di_root("dopo _m12_spawn")
-		# m12, meta' 6: il piano che il miratore cerca e quello che il proiettile
-		# colpisce. Va **per ultima** perche' monta `scenes/arena_main.tscn` e non
-		# restituisce il contratto a nessuno.
-		_m12_piano_del_miratore(h)
-		_censo_di_root("dopo _m12_piano_del_miratore")
-		# m12, meta' 7: la **numerazione** delle rampe, che e' il contratto e non la
-		# geometria. Va subito dopo perche' monta la scena vera anche lui.
-		_m12_numerazione_delle_rampe(h)
-		_censo_di_root("dopo le sezioni m12")
 		# m13-w3: le due segnalazioni dell'utente. Va **qui**, dopo il restart e
 		# prima di m5, perche' `_restart_run` e' la sezione che installa l'orda
 		# **vera** (`game.horde`) e il giocatore su cui la finestra della morte

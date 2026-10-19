@@ -70,11 +70,13 @@ const MESH_SCENES := [
 	"res://assets/models/enemy_small.glb",
 	"res://assets/models/enemy_big.glb",
 	"res://assets/models/enemy_boss.glb",
+	"res://assets/models/enemy_trojan.glb",
+	"res://assets/models/enemy_wurm_segment.glb",
 ]
 
 ## kind -> slot. L'ordine e' quello di `KIND_NAMES` in `src/sim/enemy.gd`, e il test
 ## lo verifica. Vedi la dichiarazione sopra.
-const KIND_SLOT := [0, 0, 1, 2, 1]
+const KIND_SLOT := [0, 0, 1, 2, 1, 3, 4]
 
 ## Il path del modello del **slot** `slot`, cioe' l'indice in `MESH_SCENES`.
 ##

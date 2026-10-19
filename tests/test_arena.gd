@@ -46,6 +46,23 @@ func _run_checks() -> void:
 		h.check(str(hud.call("enemy_text")) != "", "HUD enemies vuoto")
 		h.check(str(hud.call("clock_text")) != "", "HUD timer vuoto")
 		h.check(str(hud.call("xp_text")) != "", "HUD xp vuoto")
+	# rendering: ogni specie ha un renderer dedicato (Trojan e Wurm inclusi)
+	const R = preload("res://src/render/horde_renderer.gd")
+	h.check(R.KIND_SLOT.size() == 7, "KIND_SLOT non copre le 7 specie")
+	var handled: Array = []
+	for _k in range(7):
+		handled.append(false)
+	var _stack: Array[Node] = [_arena]
+	while _stack.size() > 0:
+		var _n: Node = _stack.pop_back()
+		if _n is MultiMeshInstance3D and _n.has_method("handles_kind"):
+			for _k in range(7):
+				if bool(_n.call("handles_kind", _k)):
+					handled[_k] = true
+		for _c in _n.get_children():
+			_stack.append(_c)
+	for _k in range(7):
+		h.check(bool(handled[_k]), "specie %d non renderizzata" % _k)
 	# piano unico: nessuna rampa, nessun nodo torre
 	h.check(_arena.get_node_or_null("Ramp") == null, "nodo Ramp presente")
 	h.check(_arena.get_node_or_null("ArenaRamp") == null, "nodo ArenaRamp presente")

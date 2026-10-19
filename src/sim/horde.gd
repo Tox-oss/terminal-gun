@@ -466,6 +466,15 @@ var mortar_timers: PackedFloat32Array = PackedFloat32Array()
 ## Richiesta di colpo del passo, 1 = spara adesso. Come `bites[i]`: la decisione
 ## e' in `src/sim/enemy.gd`, qui si applica.
 var mortar_fire: PackedInt32Array = PackedInt32Array()
+## ## Nuove specie: Trojan e Wurm
+## Posizione del passo precedente di ogni nemico (per la cascata del Wurm).
+var prev_positions: PackedVector3Array = PackedVector3Array()
+## Cooldown del salto a L del Trojan.
+var trojan_timer: PackedFloat32Array = PackedFloat32Array()
+## Punto bersaglio del salto a L del Trojan.
+var trojan_target: PackedVector3Array = PackedVector3Array()
+## Indice del genitore nella catena del Wurm (-1 se nessuno).
+var wurm_parent: PackedInt32Array = PackedInt32Array()
 ## Da dove viene il numero del telegrrafo che sta sul contratto: `contratto` se
 ## e' stato registrato, `fallback` altrimenti. Come `body_scale_source`: distingue
 ## «canale scritto» da «canale che nessuno ha scritto», che sembrano uguali.
@@ -1306,8 +1315,16 @@ func _resize_arrays(n: int) -> void:
 	mortar_timers.resize(n)
 	mortar_fire.resize(n)
 	enemy_floors.resize(n)
+	prev_positions.resize(n)
+	trojan_timer.resize(n)
+	trojan_target.resize(n)
+	wurm_parent.resize(n)
 	for i in n:
 		enemy_floors[i] = 0
+		prev_positions[i] = Vector3.ZERO
+		trojan_timer[i] = 0.0
+		trojan_target[i] = Vector3.ZERO
+		wurm_parent[i] = -1
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -1440,6 +1457,18 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	# Carico: un nemico appena nato spara subito se e' gia' in portata di tiro.
 	mortar_timers[i] = 0.0
 	mortar_fire[i] = 0
+	prev_positions[i] = pos
+	trojan_timer[i] = 0.0
+	trojan_target[i] = pos
+	# Genitore della catena: l'ultimo Wurm gia' presente.
+	if kind == E.WURM:
+		var parent := -1
+		for j in i:
+			if j < count and kinds[j] == E.WURM:
+				parent = j
+		wurm_parent[i] = parent
+	else:
+		wurm_parent[i] = -1
 	colors[i] = E.color_of(kind)
 	# Il raggio del corpo, dalla tabella delle specie: un posto solo (criterio
 	# n. 4 di m8). `radii` non e' derivato da `transforms` ne' dalla tinta: e'
@@ -1511,9 +1540,33 @@ func step(delta: float) -> void:
 	# giocatore non c'e' nessuno da ferire, e nessun nemico deve "mordere" il
 	# centro vuoto dell'arena. Si calcola una volta per passo, non per nemico.
 	var ha_giocatore := _has_player()
+	# Salva le posizioni del passo precedente (cascata del Wurm).
 	for i in count:
-		# (removed)
-		E.step(i, delta, focus, _separation(i), transforms, velocities, timers,
+		prev_positions[i] = transforms[i]
+	for i in count:
+		var target_i := focus
+		if kinds[i] == E.TROJAN:
+			# Movimento a scatti a L: sceglie un punto con offset a L rispetto al
+			# giocatore e ci scatta rapidamente. Si usa il bersaglio calcolato, ma
+			# se il campo di percorrenza e' attivo si insegue il giocatore per non
+			# restare incastrati (criterio m10 n. 4).
+			if trojan_timer[i] <= 0.0:
+				var sgn := 1.0 if (i % 2 == 0) else -1.0
+				var perp := 1.0 if (i % 3 == 0) else -1.0
+				trojan_target[i] = focus + Vector3(sgn * 8.0, 0.0, perp * 8.0)
+				trojan_timer[i] = 0.8
+			if _flow_of(i) == null:
+				target_i = trojan_target[i]
+			else:
+				target_i = focus
+			trojan_timer[i] -= delta
+		elif kinds[i] == E.WURM:
+			var p := wurm_parent[i]
+			if p >= 0 and p < count and p != i:
+				target_i = prev_positions[p]
+			else:
+				target_i = focus
+		E.step(i, delta, target_i, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
 			body_scale, bite_mode, mortar_timers, mortar_fire, _flow_of(i))
 	# ## m13: i colpi in volo scendono **nello stesso passo** in cui nascono
@@ -1958,6 +2011,12 @@ func _kill(i: int) -> void:
 		mortar_timers[i] = mortar_timers[last]
 		mortar_fire[i] = mortar_fire[last]
 		enemy_floors[i] = enemy_floors[last]
+		prev_positions[i] = prev_positions[last]
+		trojan_timer[i] = trojan_timer[last]
+		trojan_target[i] = trojan_target[last]
+		wurm_parent[i] = wurm_parent[last]
+		if wurm_parent[i] == last:
+			wurm_parent[i] = i
 	count = last
 	_resize_arrays(count)
 	kills += 1

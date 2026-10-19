@@ -340,6 +340,11 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## ## 21 -> 24: l'incremento e' ancora di `-arena` (m15, 2026-10-15) e si dichiara qui.
 ## Sono **tre nodi**, e sono tutti e tre della stessa forma: `EnemiesBig` ed `EnemyBoss` — i modelli distinti per specie (`enemy_big.glb` ed `enemy_boss.glb`) che gia' esistevano nell'eseguibile e non erano caricati — e `MortarShot`, il colpo del mortar che cade. `node_count` va da 46 a 49; la HUD resta a 25, quindi i nodi non-HUD vanno da 21 a 24 e il tetto di 24 sotto e' quello giusto. Sono tre `MultiMeshInstance3D` e non tre nodi per colpo: e' lo stesso criterio con cui `MortarDome` e i 27 ostacoli sono entrati, e per questo l'incremento si dichiara invece di aggirare la ripartizione.
 ##
+## ## 24 -> 26: l'incremento e' ancora di `-arena` e si dichiara qui.
+## Sono **due nodi**, due `MultiMeshInstance3D` aggiunti da `-arena` per le nuove
+## specie **Trojan** e **Wurm**: stesso criterio degli incrementi precedenti (un
+## nodo per specie, non un nodo per colpo), quindi il tetto passa da 24 a 26.
+##
 ## ## 24 -> 30: l'incremento e' della **torre**, e la voce era definita male (m12)
 ##
 ## Fino a ieri questa costante diceva «la scena **meno HUD**», e li' c'era dentro
@@ -367,7 +372,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 24
+const NODI_SCENA_VERA := 26
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #

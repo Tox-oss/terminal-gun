@@ -140,7 +140,7 @@ static var MORTAR_WEIGHT := 3.0
 ## da sola se un test muove la fonte). Per questo i denti del peso del mortar si
 ## mettono **fuori** da questa tabella e il criterio che la guarda la legge al peso
 ## di produzione.
-static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0, MORTAR_WEIGHT])
+static var KIND_WEIGHTS := PackedFloat32Array([50.0, 30.0, 17.0, 3.0, MORTAR_WEIGHT, 2.0, 2.0])
 
 ## ## Il boss esce dall'onda 1
 ##
@@ -461,6 +461,8 @@ static func wave_weights(wave: int) -> PackedFloat32Array:
 	# cupola c'e' e il numero e' 6,0, quindi **le onde >= 2 cambiano nella quinta
 	# voce** e il criterio di `tests/test_orda.gd` lo guarda voce per voce.
 	out[E.MORTAR] = MORTAR_WEIGHT
+	out[E.TROJAN] = 2.0
+	out[E.WURM] = 2.0
 	return out
 
 ## Quanti nemici per specie in un'onda. La coda e' lunga `total` e ogni specie

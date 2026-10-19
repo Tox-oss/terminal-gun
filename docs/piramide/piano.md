@@ -1265,7 +1265,19 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa (2026-10-19):** «rimuovi torre, scorrimento in W» — GATE 8/8, PERM 15/15, committata.
 
-**Onda pendente (nuova):** **Step 1 del design doc — trasformare il level-up da stat passive a nodi/comandi (stile Noita).** Sostituire le opzioni stat (Vita/Corsa/Spinta) con nodi di codice: Comandi (echo, grep, ping, curl, rm), Modificatori (-r, -f, sudo), Operatori (|, &&). Aggiungere un'interfaccia "Pipeline" in basso con slot RAM. Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale). -orda non toccato (il bestiario viene dopo, step 2).
+**Onda chiusa:** **Step 1 del design doc — level-up → nodi/comandi (Noita)** — GATE 8/8, committata.
+
+**Onda pendente (nuova):** **Step 2 del design doc — specie speciali: Trojan e Wurm.** Trojan: cavallo degli scacchi, movimento a scatti a L (timer che sceglie un punto con offset a L rispetto al player e scatta rapidamente). Wurm: catena segmentata, nodo padre segue il player, figli seguono a cascata (position = parent.previous_position). Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale). -assets potrebbe servire per modelli (Wurm segmentato).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §2 e §4).
+
+Scope:
+- `-orda`: nuove specie in src/sim/ (enemy.gd, horde.gd, run.gd), spawn, tests/test_orda.gd, tests/test_gameloop.gd.
+- `-arena`: rendering modelli, src/render/, scenes/arena_main.tscn, tests/test_arena.gd.
+- `-gameplay`: collisione/danno, src/player/, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: HUD se necessario, src/ui/, scenes/hud.tscn, tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare ogni foglia. Prima foglia: **orda**. Sostituire le opzioni stat (Vita/Corsa/Spinta) con nodi di codice: Comandi (echo, grep, ping, curl, rm), Modificatori (-r, -f, sudo), Operatori (|, &&). Aggiungere un'interfaccia "Pipeline" in basso con slot RAM. Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale). -orda non toccato (il bestiario viene dopo, step 2).
 
 Meccanica dichiarata dall'utente (design_concettuale.md §3 e §4): nodi di codice raccolti durante la run, assegnati in slot RAM nell'ordine desiderato; superare il limite di slot o creare combinazioni instabili provoca Buffer Overflow (autodanno + surriscaldamento temporaneo dell'arma).
 

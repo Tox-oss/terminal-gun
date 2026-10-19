@@ -270,6 +270,56 @@ theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 18
 text = "WEAPON -"
 
+; --- Pipeline RAM: slot di nodi di codice ---------------------------------------
+;
+; Pannello in basso con gli slot RAM dove assegnare i nodi trovati nell'ordine
+; desiderato. Nasce qui dal primo frame, sempre visibile.
+
+[node name="Pipeline" type="Control" parent="Root"]
+offset_left = 24.0
+offset_top = 688.0
+offset_right = 1256.0
+offset_bottom = 716.0
+mouse_filter = 2
+
+[node name="PipelineTitle" type="Label" parent="Root/Pipeline"]
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 120.0
+offset_bottom = 28.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "PIPELINE"
+
+[node name="Slot0" type="Button" parent="Root/Pipeline"]
+offset_left = 120.0
+offset_top = 0.0
+offset_right = 400.0
+offset_bottom = 28.0
+text = ""
+
+[node name="Slot1" type="Button" parent="Root/Pipeline"]
+offset_left = 410.0
+offset_top = 0.0
+offset_right = 690.0
+offset_bottom = 28.0
+text = ""
+
+[node name="Slot2" type="Button" parent="Root/Pipeline"]
+offset_left = 700.0
+offset_top = 0.0
+offset_right = 980.0
+offset_bottom = 28.0
+text = ""
+
+[node name="Slot3" type="Button" parent="Root/Pipeline"]
+offset_left = 990.0
+offset_top = 0.0
+offset_right = 1232.0
+offset_bottom = 28.0
+text = ""
+
 ; --- m6: il pannello delle scelte ---------------------------------------------
 ;
 ; Nasce qui, dal primo frame, `visible = false`. `src/ui/hud.gd::_ready` legge i

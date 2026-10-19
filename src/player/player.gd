@@ -491,6 +491,8 @@ func reset_run() -> void:
 		progression.reset()
 	if weapon != null:
 		weapon.reset()
+	clear_pipeline()
+	buffer_overflowed = false
 	# I due suoni vengono chiusi **alla fine**, e il posto e' dichiarato: uno slot
 	# occupato da un suono della partita che e' appena finita resta occupato se
 	# nessuno lo rimette a zero, e il restart allora riparte con uno slot che non

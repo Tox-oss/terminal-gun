@@ -154,6 +154,8 @@ func reset() -> void:
 	kills = 0
 	offers.clear()
 	_rng.seed = rng_seed
+	if player != null and player.has_method("clear_pipeline"):
+		player.clear_pipeline()
 
 ## XP necessari per passare da `at_level` a `at_level + 1`.
 func xp_to_next(at_level: int = -1) -> float:
@@ -345,6 +347,12 @@ func apply(id: String) -> bool:
 	var needs_weapon := id in ["echo", "grep", "ping", "curl", "rm", "-r", "-f", "sudo", "|", "&&", "damage", "fire_rate", "projectile_speed", "knockback", "pierce", "range"]
 	if needs_weapon and w == null:
 		return false
+	# Integrazione con la pipeline RAM: un nodo scelto occupa uno slot. Se la
+	# RAM e' piena o la combinazione e' instabile, scatta il Buffer Overflow,
+	# ma il potenziamento viene applicato lo stesso: la regolazione del gioco
+	# non si ferma per un overflow di memoria.
+	if player != null and player.has_method("pipeline_add"):
+		player.pipeline_add(id)
 	# Zero non e' un potenziamento: e' anche il modo in cui una voce di tabella
 	# senza numero arriva qui, e in entrambi i casi `apply()` non fa niente.
 	var n := _numero_di(def)

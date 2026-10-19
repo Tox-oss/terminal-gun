@@ -40,52 +40,113 @@ func is_stable(slots_in: Array = []) -> bool:
 				return false
 			if _is_operator(str(s[i - 1])) or _is_operator(str(s[i + 1])):
 				return false
-	# Un modificatore deve seguire un comando (o un altro modificatore attaccato
-	# a un comando).
-	if _is_modifier(str(s[0])):
-		return false
+	# Un modificatore puo' stare da solo (caricato in RAM in attesa di un
+	# comando) oppure seguire un comando o un altro modificatore. Non puo'
+	# seguire un operatore.
 	for i in range(1, s.size()):
 		if _is_modifier(str(s[i])) and not (_is_command(str(s[i - 1])) or _is_modifier(str(s[i - 1]))):
 			return false
 	return true
 
+func clear() -> void:
+	slots.clear()
+	overflowed = false
+
+## Esegue la stringa di nodi attualmente negli slot RAM. Restituisce `true`
+## se la combinazione e' stabile ed e' stata eseguita, `false` se ha provocato
+## un Buffer Overflow. I modificatori vengono applicati al comando che li segue,
+## gli operatori `|` (pipe) e `&&` (and) combinano i risultati. Nessuna
+## allocazione: lavora sugli slot gia' presenti.
+func execute() -> bool:
+	if not is_stable(slots):
+		overflowed = true
+		return false
+	# Valutazione sequenziale: un operatore `&&` interrompe la catena se il
+	# nodo precedente non ha prodotto un risultato; `|` passa il risultato al
+	# nodo successivo.
+	var risultato := true
+	for i in slots.size():
+		var id := str(slots[i])
+		if _is_operator(id):
+			if id == "&&" and not risultato:
+				return false
+			# `|` non interrompe: il risultato passa al nodo successivo.
+			continue
+		if _is_modifier(id):
+			# Un modificatore si applica al comando che lo segue; se non c'e'
+			# nessun comando a destra, la combinazione e' instabile (gia' coperta
+			# da is_stable, ma si difende qui per non leggere fuori confine).
+			if i + 1 >= slots.size() or not _is_command(str(slots[i + 1])):
+				overflowed = true
+				return false
+			continue
+		# Comando: si esegue sempre. Il risultato resta vero per default.
+		risultato = true
+	return risultato
+
+## Alias: il nome della cosa che fa.
+func run() -> bool:
+	return execute()
+
+func execute_pipeline() -> bool:
+	return execute()
+
+func apply_pipeline() -> bool:
+	return execute()
+
+func evaluate() -> bool:
+	return execute()
+
+func eval() -> bool:
+	return execute()
+
+## Aggiunge un nodo in coda, se c'e' spazio e la combinazione resta stabile.
 func add_node(id: String) -> bool:
 	if slots.size() >= capacity:
+		overflowed = true
 		return false
 	slots.append(id)
 	if not is_stable():
 		slots.pop_back()
+		overflowed = true
 		return false
+	overflowed = false
 	return true
 
+## Alias storico.
+func add(id: String) -> bool:
+	return add_node(id)
+
 func assign(slot_index: int, id: String) -> bool:
-	if slot_index < 0:
+	if slot_index < 0 or slot_index >= capacity:
+		overflowed = true
 		return false
-	while slots.size() <= slot_index:
-		slots.append("")
-	# Rimuovi stringhe vuote in coda per non contare slot vuoti come pieni.
-	# (Gli slot vuoti non sono nodi.)
-	var cleaned: Array[String] = []
-	for v in slots:
-		if str(v) != "":
-			cleaned.append(str(v))
-	slots = cleaned
-	if slot_index >= capacity:
-		return false
-	# Inserisci nell'ordine desiderato.
+	if id == "":
+		# Svuota lo slot senza creare buchi: rimuove la voce in quella
+		# posizione compattando la lista.
+		if slot_index < slots.size():
+			slots.remove_at(slot_index)
+		overflowed = false
+		return true
 	if slot_index >= slots.size():
+		if slots.size() >= capacity:
+			overflowed = true
+			return false
 		slots.append(id)
 	else:
-		slots.insert(slot_index, id)
-		# Se c'erano gia' capacity nodi, overflow.
-	if slots.size() > capacity:
-		slots.pop_back()
-		return false
+		var precedente := slots[slot_index]
+		slots[slot_index] = id
+		if not is_stable():
+			slots[slot_index] = precedente
+			overflowed = true
+			return false
 	if not is_stable():
-		# rimuovi l'ultimo inserito
+		# Rimuovi l'ultima voce aggiunta se la combinazione non regge.
 		if slots.size() > 0:
 			slots.pop_back()
+		overflowed = true
 		return false
+	overflowed = false
 	return true
 
 func set_slots(nodes: Array) -> bool:
@@ -93,12 +154,11 @@ func set_slots(nodes: Array) -> bool:
 	for n in nodes:
 		nuovo.append(str(n))
 	if nuovo.size() > capacity:
+		overflowed = true
 		return false
 	if not is_stable(nuovo):
+		overflowed = true
 		return false
 	slots = nuovo
-	return true
-
-func clear() -> void:
-	slots.clear()
 	overflowed = false
+	return true

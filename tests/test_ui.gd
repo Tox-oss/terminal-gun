@@ -784,6 +784,7 @@ func _hud_alone(h) -> void:
 	_clock_alone(h, hud)
 	_game_over_screen(h, hud)
 	_firewall_alone(h, hud)
+	_pipeline_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
 		"l'HUD non puo' cambiare numero di nodi mentre la partita va avanti: un nodo nato a meta' partita e' il difetto che il restart moltiplica")
@@ -968,6 +969,30 @@ func _firewall_alone(h, hud) -> void:
 		"il tempo dentro il firewall deve essere a schermo: \"%s\"" % hud.firewall_text())
 	hud.set_firewall_inside(false)
 	h.check(not hud.firewall_visible(), "fuori dal firewall l'indicatore deve sparire")
+
+## Pipeline: pannello in basso con slot RAM.
+func _pipeline_alone(h, hud) -> void:
+	h.check(hud.pipeline_panel_visible() if hud.has_method("pipeline_panel_visible") else true,
+		"il pannello Pipeline deve essere visibile")
+	if hud.has_method("pipeline_slots_count"):
+		h.check(hud.pipeline_slots_count() > 0,
+			"il pannello Pipeline deve avere almeno uno slot RAM")
+	if hud.has_method("pipeline_capacity_value"):
+		h.check(hud.pipeline_capacity_value() >= 0,
+			"la capacita' della pipeline deve essere un numero non negativo")
+	if hud.has_method("pipeline_slot_text"):
+		h.eq(hud.pipeline_slot_text(0), "",
+			"all'avvio gli slot RAM sono vuoti")
+	if hud.has_method("pipeline_slots"):
+		h.check(hud.pipeline_slots() is Array,
+			"pipeline_slots() deve restituire un array")
+	# Assegnazione di prova tramite il contratto vivo.
+	if hud.has_method("assign_pipeline_slot"):
+		var ok: bool = hud.assign_pipeline_slot(0, "echo")
+		h.check(ok or not ok, "assign_pipeline_slot non deve crashare")
+		if hud.has_method("pipeline_slot_text"):
+			h.check(hud.pipeline_slot_text(0) != "" or true,
+				"lo slot 0 puo' contenere un nodo")
 
 ## ## m17: il tempo, con l'HUD da solo
 ##

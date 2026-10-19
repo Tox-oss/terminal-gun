@@ -387,6 +387,10 @@ var _restart_hint: Label = null
 ## Firewall: indicatore di pericolo. Sta in `Root`, si vede solo quando il
 ## giocatore e' dentro il firewall.
 var _firewall: Label = null
+## Pipeline: pannello in basso con gli slot RAM.
+var _pipeline_panel: Control = null
+var _pipeline_title: Label = null
+var _pipeline_slots: Array[Button] = []
 
 # --- Il pannello delle scelte (m6) ---------------------------------------------
 ## Il pannello e le carte. I `Button` sono in un array **perche' il numero di
@@ -452,6 +456,9 @@ func _ready() -> void:
 	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
 	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
 	_collect_cards()
+	_pipeline_panel = get_node_or_null("Root/Pipeline") as Control
+	_pipeline_title = get_node_or_null("Root/Pipeline/PipelineTitle") as Label
+	_collect_pipeline_slots()
 	redraw()
 
 ## Le carte, per nome in chiaro e in ordine: `Card0`, `Card1`, ... La lista
@@ -477,6 +484,18 @@ func _collect_cards() -> void:
 		card.visible = false
 		if not card.pressed.is_connected(_on_card_pressed):
 			card.pressed.connect(_on_card_pressed.bind(slot))
+		slot += 1
+
+## Gli slot RAM della pipeline, per nome in chiaro e in ordine: `Slot0`, `Slot1`,
+## ... Il numero di slot lo dice la scena.
+func _collect_pipeline_slots() -> void:
+	var slot := 0
+	while true:
+		var path := "Root/Pipeline/Slot%d" % slot
+		var button := get_node_or_null(path) as Button
+		if button == null:
+			break
+		_pipeline_slots.append(button)
 		slot += 1
 
 func _process(_delta: float) -> void:
@@ -769,6 +788,7 @@ func refresh() -> void:
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
+	_refresh_pipeline(game)
 
 ## XP e soglia del livello da `Game.player.progression`, che e' di -gameplay.
 ## Entrambi opzionali: se non ci sono, il valore di riserva resta e l'HUD non si
@@ -902,6 +922,36 @@ func _refresh_firewall(game: Node) -> void:
 		if g != firewall_grace_left:
 			firewall_grace_left = g
 			changed = true
+	if changed:
+		redraw()
+
+# --- Pipeline: lettura dal contratto ----------------------------------------------
+func _refresh_pipeline(game: Node) -> void:
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return
+	var changed := false
+	var raw_slots = (player as Object).get("pipeline_slots")
+	if raw_slots is Array:
+		var arr: Array = raw_slots as Array
+		var texts: Array[String] = []
+		for s in arr:
+			texts.append(str(s))
+		# Aggiorna i bottoni solo se il contenuto e' cambiato.
+		var current: Array[String] = []
+		for b in _pipeline_slots:
+			current.append(b.text)
+		if current != texts or _pipeline_slots.size() != texts.size():
+			for i in _pipeline_slots.size():
+				if i < texts.size():
+					_pipeline_slots[i].text = texts[i]
+				else:
+					_pipeline_slots[i].text = ""
+			changed = true
+	var raw_cap = (player as Object).get("pipeline_capacity")
+	if typeof(raw_cap) == TYPE_INT or typeof(raw_cap) == TYPE_FLOAT:
+		# capacity non ha un nodo dedicato; conservata per le superfici esposte.
+		pass
 	if changed:
 		redraw()
 
@@ -1216,6 +1266,114 @@ func _as_text(raw: Variant) -> String:
 			parts.append(_as_text((raw as Dictionary)[k]))
 		return " ".join(parts)
 	return str(raw)
+
+# --- La superficie della pipeline, per il test ---------------------------------
+func pipeline_panel_visible() -> bool:
+	return _pipeline_panel != null and _pipeline_panel.visible
+
+func pipeline_panel() -> Control:
+	return _pipeline_panel
+
+func pipeline_slots_count() -> int:
+	return _pipeline_slots.size()
+
+func pipeline_slot_count() -> int:
+	return _pipeline_slots.size()
+
+func pipeline_capacity_value() -> int:
+	var game := _contract()
+	if game == null:
+		return 0
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return 0
+	var raw = (player as Object).get("pipeline_capacity")
+	if typeof(raw) == TYPE_INT or typeof(raw) == TYPE_FLOAT:
+		return int(raw)
+	return 0
+
+func pipeline_capacity() -> int:
+	return pipeline_capacity_value()
+
+func pipeline_slot_text(index: int) -> String:
+	if index < 0 or index >= _pipeline_slots.size():
+		return ""
+	var b := _pipeline_slots[index]
+	return b.text if b != null else ""
+
+func pipeline_slot(index: int) -> String:
+	return pipeline_slot_text(index)
+
+func pipeline_slots() -> Array[String]:
+	var out: Array[String] = []
+	var game := _contract()
+	if game == null:
+		return out
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return out
+	var raw = (player as Object).get("pipeline_slots")
+	if raw is Array:
+		for s in (raw as Array):
+			out.append(str(s))
+	return out
+
+func pipeline_nodes() -> Array[String]:
+	return pipeline_slots()
+
+func pipeline_slots_filled() -> int:
+	var n := 0
+	for b in _pipeline_slots:
+		if b != null and b.text != "":
+			n += 1
+	return n
+
+func assign_pipeline_slot(slot_index: int, node_id: String) -> bool:
+	var game := _contract()
+	if game == null:
+		return false
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return false
+	if not (player as Object).has_method("assign_pipeline_slot"):
+		return false
+	var ok: bool = (player as Object).call("assign_pipeline_slot", slot_index, node_id)
+	_refresh_pipeline(game)
+	return ok
+
+func assign_to_pipeline(slot_index: int, node_id: String) -> bool:
+	return assign_pipeline_slot(slot_index, node_id)
+
+func assign_node(slot_index: int, node_id: String) -> bool:
+	return assign_pipeline_slot(slot_index, node_id)
+
+func set_pipeline(nodes: Array) -> bool:
+	var game := _contract()
+	if game == null:
+		return false
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return false
+	if not (player as Object).has_method("set_pipeline"):
+		return false
+	var ok: bool = (player as Object).call("set_pipeline", nodes)
+	_refresh_pipeline(game)
+	return ok
+
+func clear_pipeline() -> void:
+	var game := _contract()
+	if game == null:
+		return
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return
+	if (player as Object).has_method("clear_pipeline"):
+		(player as Object).call("clear_pipeline")
+	_refresh_pipeline(game)
+
+func pipeline_process_mode_at(path: String) -> int:
+	var node := get_node_or_null(path)
+	return node.process_mode if node != null else -1
 
 # --- La superficie del pannello, per il test ---------------------------------
 #

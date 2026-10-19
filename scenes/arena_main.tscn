@@ -84,6 +84,13 @@ ambient_light_color = Color(0.58, 0.6, 0.72, 1)
 ambient_light_energy = 0.7
 tonemap_mode = 2
 
+[sub_resource type="BoxMesh" id="FirewallMesh_arena"]
+size = Vector3(120, 1, 2)
+
+[sub_resource type="StandardMaterial3D" id="FirewallMat_arena"]
+albedo_color = Color(1, 0.2, 0.2, 0.6)
+transparency = 1
+
 [node name="ArenaMain" type="Node3D"]
 script = ExtResource("1_arena")
 

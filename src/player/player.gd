@@ -336,6 +336,7 @@ func _ready() -> void:
 	# aver registrato e non ha registrato niente.
 	Game.player = self
 	Game.register_impl("player_position", self._player_position)
+	Game.register_impl("player_floor", self._player_floor)
 
 	## ## m7: la via che il danno prende (`contracts.gd`, "damage_player")
 	##
@@ -445,6 +446,11 @@ func reset_run() -> void:
 	# coincidenza fra due costanti che qualcuno ha cambiato solo da una parte.
 	max_hp = MAX_HP
 	hp = max_hp
+	var _hr = Game.horde
+	if _hr != null and is_instance_valid(_hr):
+		var _hr_prop = _hr.get("firewall_max_hp")
+		if _hr_prop != null:
+			_hr.firewall_max_hp = max_hp
 	move_speed = MOVE_SPEED
 	accel = ACCEL
 	velocity = Vector3.ZERO
@@ -566,6 +572,15 @@ func step(delta: float, input_dir: Vector3 = Vector3.ZERO, dash: bool = false) -
 		_start_dash(input_dir)
 	var wish := world_direction(input_dir)
 	_move(delta, wish)
+	# Mappa mobile: il firewall usa la vita massima **vera** del giocatore, non
+	# un 100 fisso, perche' i potenziamenti di vitalita' la cambiano. Il canale
+	# di danno resta Game.damage_player (il contratto), e qui si tiene allineato
+	# solo il numero da cui l'orda calcola il 20%/s.
+	var _h = Game.horde
+	if _h != null and is_instance_valid(_h):
+		var _h_prop = _h.get("firewall_max_hp")
+		if _h_prop != null:
+			_h.firewall_max_hp = max_hp
 	_chiudi_suoni_scaduti(delta)
 	if weapon != null:
 		weapon.step(delta)
@@ -806,7 +821,8 @@ func _move(delta: float, wish: Vector3) -> void:
 	position += velocity * delta
 	_clamp_to_arena()
 	_clamp_to_obstacles()
-	position.y = 0.0
+	_appoggia_sulla_superficie()
+	velocity.y = 0.0
 
 ## ## m12: la quota del giocatore **si legge**, non si calcola
 ##
@@ -844,6 +860,31 @@ func _move(delta: float, wish: Vector3) -> void:
 ## passo precedente: e' il ritardo di un passo gia' dichiarato sopra
 ## `_campiona_piano()`.
 
+
+## Appoggia il giocatore sulla superficie del piano: la quota viene dalla
+## superficie, non da un sistema di movimento verticale (m12).
+func _appoggia_sulla_superficie() -> void:
+	var xz := Vector2(position.x, position.z)
+	var fc := maxi(int(Game.floor_count), 1)
+	for f in fc:
+		var q := Game.surface_height_at(xz, f)
+		if q >= 0.0:
+			position.y = q
+			return
+	var h := float(Game.floor_height)
+	if h > 0.0:
+		position.y = float(Game.floor_of(position.y)) * h
+	else:
+		position.y = 0.0
+
+## Il piano su cui sta il giocatore (m12).
+func _player_floor() -> int:
+	var xz := Vector2(position.x, position.z)
+	var fc := maxi(int(Game.floor_count), 1)
+	for f in fc:
+		if Game.surface_height_at(xz, f) >= 0.0:
+			return f
+	return Game.floor_of(position.y)
 
 ## Il muro. Non si annulla la velocita' uscente: si toglie la componente che
 ## esce e si lascia scivolare quella parallela, altrimenti il giocatore si

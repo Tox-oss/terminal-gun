@@ -119,6 +119,8 @@ const HP_SCALE_BASE := 1.0
 ## esattamente come `mortar_unlocked()` e non pretende di essere un canale.
 ## `-arena` e' la foglia che lo implementa.
 const FIREWALL_AFTER_S := 120.0
+const FIREWALL_GRACE_S := 1.0
+const FIREWALL_DAMAGE_FRACTION := 0.2
 
 ## ## Il segmento: quattro da 180 s, e sono quattro
 ##

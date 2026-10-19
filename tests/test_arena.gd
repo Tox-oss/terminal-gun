@@ -52,4 +52,7 @@ func _run_checks() -> void:
 	# scorrimento: campo scroll_offset presente
 	var so = _arena.get("scroll_offset") if _arena != null else null
 	h.check(so is Vector3, "scroll_offset mancante")
+	# firewall: stato iniziale non dentro
+	if horde != null:
+		h.check(horde.get("firewall_inside") == false, "firewall_inside deve partire false")
 	quit(h.finish("test_arena"))

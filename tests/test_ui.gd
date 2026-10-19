@@ -783,6 +783,7 @@ func _hud_alone(h) -> void:
 	_wave_counter(h, hud)
 	_clock_alone(h, hud)
 	_game_over_screen(h, hud)
+	_firewall_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
 		"l'HUD non puo' cambiare numero di nodi mentre la partita va avanti: un nodo nato a meta' partita e' il difetto che il restart moltiplica")
@@ -956,6 +957,18 @@ func _game_over_screen(h, hud) -> void:
 	h.check(not hud.game_over_visible(),
 		"tornando in vita la schermata deve sparire: se resta, l'HUD mente per tutta la partita")
 
+## Firewall: indicatore che compare dentro il firewall e scompare fuori.
+func _firewall_alone(h, hud) -> void:
+	h.check(not hud.firewall_visible(), "all'avvio l'indicatore del firewall non si vede")
+	hud.set_firewall_inside(true)
+	hud.set_firewall_time(1.5)
+	hud.set_firewall_total_damage(7.25)
+	h.check(hud.firewall_visible(), "dentro il firewall l'indicatore deve vedersi")
+	h.check(hud.firewall_text().contains("1.50"),
+		"il tempo dentro il firewall deve essere a schermo: \"%s\"" % hud.firewall_text())
+	hud.set_firewall_inside(false)
+	h.check(not hud.firewall_visible(), "fuori dal firewall l'indicatore deve sparire")
+
 ## ## m17: il tempo, con l'HUD da solo
 ##
 ## Qui si verifica **il formato**, cioe' l'unica cosa che questa parte puo'
@@ -1123,6 +1136,25 @@ func _clock_from_contract(h, game: Node, hud, round_no: int) -> void:
 	print("test_ui: m17, avvio %d: tempo %.3f -> %.0f -> %.3f s, scritta \"%s\" -> \"%s\""
 		% [round_no, partenza, POISON_S, partenza, testo_prima, _clock_text_of(POISON_S)])
 
+## Firewall: l'HUD legge il contratto dell'orda.
+func _firewall_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var horde = game.get("horde")
+	if not h.check(horde is Object and is_instance_valid(horde),
+			"avvio %d: il contratto non espone un'orda valida per il firewall" % round_no):
+		return
+	(horde as Object).set("firewall_inside", true)
+	(horde as Object).set("firewall_inside_time", 2.25)
+	(horde as Object).set("firewall_damage_total", 9.5)
+	hud.refresh()
+	h.check(hud.firewall_visible(),
+		"avvio %d: dentro il firewall l'indicatore deve vedersi" % round_no)
+	h.check(hud.firewall_text().contains("2.25"),
+		"avvio %d: il tempo dentro il firewall deve venire dall'orda: \"%s\"" % [round_no, hud.firewall_text()])
+	(horde as Object).set("firewall_inside", false)
+	hud.refresh()
+	h.check(not hud.firewall_visible(),
+		"avvio %d: fuori dal firewall l'indicatore deve sparire" % round_no)
+
 ## --- Parte 2-quater: il richiamo al restart (m13-w2) ----------------------------
 
 ## Il richiamo al restart nomina **un tasto vero**, e sparisce col restart.
@@ -1253,7 +1285,7 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	# qui il numero di partenza e' quello che si vede all'avvio, che e' lo stato
 	# in cui un orologio fermo a `00:00` si distingue da un numero scritto dentro.
 	_clock_from_contract(h, game, hud, round_no)
-	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
+	_firewall_from_contract(h, game, hud, round_no)	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
 	_health_from_contract(h, game, arena, hud, round_no)

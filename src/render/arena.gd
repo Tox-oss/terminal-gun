@@ -104,6 +104,7 @@ func _camera() -> Node3D:
 
 func _process(_delta: float) -> void:
 	_update_scroll_offset()
+	_update_firewall()
 	if _hud == null or not _hud.has_method("set_state"):
 		if not _warned_no_hud:
 			_warned_no_hud = true
@@ -116,6 +117,35 @@ func _update_scroll_offset() -> void:
 	if p != null and is_instance_valid(p):
 		# Scorrimento solo lungo W (Z): la direzione di avanzamento sullo schermo.
 		scroll_offset = Vector3(0.0, 0.0, (p as Node3D).global_position.z)
+
+func _update_firewall() -> void:
+	var game := _contract()
+	if game == null:
+		return
+	var horde = game.get("horde")
+	if not (horde is Node) or not is_instance_valid(horde):
+		return
+	var elapsed := 0.0
+	if horde.has_method("elapsed_s"):
+		var raw = horde.call("elapsed_s")
+		if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
+			elapsed = float(raw)
+	var started := elapsed >= 120.0
+	var firewall_z := 0.0
+	if started:
+		firewall_z = (elapsed - 120.0) * (80.0 / 600.0)
+	var player := _player()
+	var inside := false
+	if started and player != null and is_instance_valid(player):
+		inside = (player as Node3D).global_position.z < firewall_z
+	if horde.has_method("set_firewall_inside"):
+		horde.call("set_firewall_inside", inside)
+	else:
+		horde.set("firewall_inside", inside)
+	var fw := get_node_or_null("Firewall")
+	if fw is Node3D:
+		(fw as Node3D).visible = started
+		(fw as Node3D).global_position = Vector3(0.0, 0.5, firewall_z)
 
 func _health() -> float:
 	var player := _player()

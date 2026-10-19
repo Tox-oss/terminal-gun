@@ -399,6 +399,23 @@ var bite_timers: PackedFloat32Array = PackedFloat32Array()
 var bite_latch: PackedInt32Array = PackedInt32Array()
 var bites: PackedInt32Array = PackedInt32Array()
 
+# --- Firewall (nuova onda): danno se il giocatore resta dentro ---------------
+#
+# Il firewall e' la frontiera che accompagna la mappa mobile. Qui si traccia
+# quanto tempo il giocatore sta **dentro** il firewall: dopo `FIREWALL_GRACE_S`
+# secondi di grazia, si applica `FIREWALL_DAMAGE_FRACTION` della vita massima
+# al secondo, via `Game.damage_player`. La decisione «il giocatore e' dentro»
+# viene dalla foglia che possiede la mappa (arena); in headless si pilota il
+# campo `firewall_inside` da test o da chi registra la geometria.
+var firewall_inside: bool = false
+var firewall_inside_time: float = 0.0
+var firewall_damage_last: float = 0.0
+var firewall_damage_total: float = 0.0
+var firewall_max_hp: float = 100.0
+# Alias per compatibilita' con i nomi che altre foglie/test possono usare.
+var firewall_timer: float = 0.0
+var firewall_grace_left: float = 1.0
+
 # --- m13: il mortar, e i colpi in volo -----------------------------------------
 #
 # ## Perche' un array e non un nodo per colpo
@@ -543,6 +560,10 @@ var bite_mode: int = E.BITE_CONTACT
 ## quello che limita il giocatore, quindi questo numero **non e' un tetto sul
 ## giocatore** e non sposta la difficolta' per meta'.
 const TOUCH_INTERVAL := 0.15
+## Danno del firewall: frazione della vita massima al secondo, dopo la grazia.
+const FIREWALL_DAMAGE_FRACTION := 0.2
+## Grazia del firewall: secondi dentro prima che il danno inizi.
+const FIREWALL_GRACE_S := 1.0
 ## Danno consegnato al giocatore nell'ultimo passo. Telemetria: serve a un
 ## test per guardare l'economia del morso e a un eventuale HUD per il lampo,
 ## e non e' un secondo posto dove il danno e' scritto (criterio n. 6 di m7).
@@ -1506,6 +1527,7 @@ func step(delta: float) -> void:
 	# colpo perso — vale anche per il mortar).
 	_mortar_step(delta, focus, ha_giocatore)
 	_apply_bites(delta)
+	_apply_firewall(delta)
 	_sweep_dead()
 	_wave_tick(delta)
 
@@ -1594,6 +1616,48 @@ func _apply_bites(delta: float) -> void:
 		touch_bites_last += 1
 		_bite_interval_left = TOUCH_INTERVAL
 		return
+
+## Danno del firewall: traccia il tempo di permanenza dentro e, dopo la grazia,
+## applica `FIREWALL_DAMAGE_FRACTION` della vita massima al secondo.
+func _apply_firewall(delta: float) -> void:
+	firewall_damage_last = 0.0
+	if not firewall_inside:
+		firewall_inside_time = 0.0
+		firewall_timer = 0.0
+		firewall_grace_left = FIREWALL_GRACE_S
+		return
+	firewall_inside_time += delta
+	firewall_timer = firewall_inside_time
+	firewall_grace_left = maxf(0.0, FIREWALL_GRACE_S - firewall_inside_time)
+	if firewall_inside_time <= FIREWALL_GRACE_S:
+		return
+	var max_hp := _player_max_hp()
+	var amount := FIREWALL_DAMAGE_FRACTION * max_hp * delta
+	var game := _contract()
+	if game != null:
+		game.damage_player(amount)
+	firewall_damage_last = amount
+	firewall_damage_total += amount
+
+func set_firewall_inside(inside: bool) -> void:
+	firewall_inside = inside
+	if not inside:
+		firewall_inside_time = 0.0
+		firewall_timer = 0.0
+		firewall_damage_last = 0.0
+		firewall_grace_left = FIREWALL_GRACE_S
+
+func _player_max_hp() -> float:
+	var game := _contract()
+	if game != null:
+		var p = game.get("player")
+		if p != null and is_instance_valid(p):
+			var v = p.get("max_hp")
+			if v != null:
+				var f := float(v)
+				if f > 0.0:
+					return f
+	return firewall_max_hp
 
 # --- m13: i colpi del mortar, e le tre cose che devono essere vere --------------
 #

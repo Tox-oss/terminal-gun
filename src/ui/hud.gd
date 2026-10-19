@@ -289,7 +289,7 @@ const RESTART_HINT_FORMAT := "PRESS %s TO RESTART"
 ## leggere. **Non e' un tasto** e si vede: un `?` a schermo e' un rumore, una
 ## `R` sbagliata e' una promessa che il gioco non mantiene.
 const UNKNOWN_KEY_NAME := "?"
-## Il nome del campo che tiene i tasti del restart. E' di `-gameplay`
+const FIREWALL_TEXT_FORMAT := "FIREWALL %.2fs DMG %.1f (20%%/s)"## Il nome del campo che tiene i tasti del restart. E' di `-gameplay`
 ## (`src/player/player.gd::RESTART_KEYS`) e qui e' **una stringa**, non un tipo:
 ## il tipo del dato che si cerca lo dice `typeof()`, e la stringa rende il
 ## fallback su `get_script_constant_map()` leggibile.
@@ -340,6 +340,17 @@ var game_over: bool = false
 ## schermata compare, non riletta ogni frame: dopo la morte l'onda non conta
 ## piu' niente e un ricalco darebbe un testo diverso dal momento in cui e' morto.
 var wave_at_death: int = WAVE_FIRST
+# --- Firewall (nuova onda) ----------------------------------------------------
+## Il giocatore e' dentro il firewall adesso. Di `-orda`/`-arena`.
+var firewall_inside: bool = false
+## Quanto tempo il giocatore sta dentro il firewall, in secondi.
+var firewall_inside_time: float = 0.0
+## Danno dell'ultimo tick del firewall (0 durante la grazia).
+var firewall_damage_last: float = 0.0
+## Danno totale subito dal firewall in questa partita.
+var firewall_damage_total: float = 0.0
+## Secondi di grazia che restano prima che il danno inizi.
+var firewall_grace_left: float = 1.0
 ## ## m17: i secondi di partita, di `-orda` (`Run.elapsed_s`)
 ##
 ## Un campo **solo di lettura dal contratto**: nessun chiamante lo scrive a mano,
@@ -373,6 +384,9 @@ var _clock: Label = null
 ## la schermata: un richiamo che resta a schermo in partita e' un altro HUD
 ## che dice una cosa che non vale.
 var _restart_hint: Label = null
+## Firewall: indicatore di pericolo. Sta in `Root`, si vede solo quando il
+## giocatore e' dentro il firewall.
+var _firewall: Label = null
 
 # --- Il pannello delle scelte (m6) ---------------------------------------------
 ## Il pannello e le carte. I `Button` sono in un array **perche' il numero di
@@ -434,6 +448,7 @@ func _ready() -> void:
 	# m17 e m13-w2: il tempo di partita e il richiamo al restart.
 	_clock = get_node_or_null("Root/Clock") as Label
 	_restart_hint = get_node_or_null("Root/GameOver/RestartHint") as Label
+	_firewall = get_node_or_null("Root/Firewall") as Label
 	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
 	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
 	_collect_cards()
@@ -539,6 +554,40 @@ func set_clock(p_seconds: float) -> void:
 	clock_s = maxf(_finite_or_zero(p_seconds), 0.0)
 	redraw()
 
+## Firewall: stato dentro/fuori. Il numero viene da `-orda`/`-arena`; qui si
+## disegna solo. `true` mostra l'indicatore.
+func set_firewall_inside(p_inside: bool) -> void:
+	if p_inside == firewall_inside:
+		pass
+	firewall_inside = p_inside
+	if not p_inside:
+		firewall_inside_time = 0.0
+		firewall_damage_last = 0.0
+	redraw()
+
+## Firewall: tempo dentro.
+func set_firewall_time(p_seconds: float) -> void:
+	firewall_inside_time = maxf(_finite_or_zero(p_seconds), 0.0)
+	redraw()
+
+func set_firewall_inside_time(p_seconds: float) -> void:
+	set_firewall_time(p_seconds)
+
+## Firewall: danno dell'ultimo tick.
+func set_firewall_damage(p_damage: float) -> void:
+	firewall_damage_last = maxf(_finite_or_zero(p_damage), 0.0)
+	redraw()
+
+func set_firewall_damage_last(p_damage: float) -> void:
+	set_firewall_damage(p_damage)
+
+## Firewall: danno totale.
+func set_firewall_total_damage(p_damage: float) -> void:
+	firewall_damage_total = maxf(_finite_or_zero(p_damage), 0.0)
+	redraw()
+
+func set_firewall_damage_total(p_damage: float) -> void:
+	set_firewall_total_damage(p_damage)
 ## 0.0 a 1.0, sempre. Anche con vite a zero o negative.
 func health_ratio() -> float:
 	return clampf(health / maxf(health_max, 0.0001), 0.0, 1.0)
@@ -668,6 +717,34 @@ func xp_bar_max() -> float:
 func game_over_visible() -> bool:
 	return _game_over_panel != null and _game_over_panel.visible
 
+## Firewall: l'indicatore e' visibile?
+func firewall_visible() -> bool:
+	return _firewall != null and _firewall.visible
+
+func is_firewall_inside() -> bool:
+	return firewall_inside
+
+func firewall_inside_time_value() -> float:
+	return firewall_inside_time
+
+func firewall_time() -> float:
+	return firewall_inside_time
+
+func firewall_damage() -> float:
+	return firewall_damage_last
+
+func firewall_damage_last_value() -> float:
+	return firewall_damage_last
+
+func firewall_damage_total_value() -> float:
+	return firewall_damage_total
+
+func firewall_grace() -> float:
+	return firewall_grace_left
+
+## Testo dell'indicatore del firewall, letto dalla Label.
+func firewall_text() -> String:
+	return _firewall.text if _firewall != null else ""
 ## La partita e' finita per l'HUD se **uno** di tre lo dice: un chiamante esplicito,
 ## la vita a zero (che l'HUD conosce gia' perche' `set_state` gliela da), o la
 ## simulazione (`Game.horde.is_game_over()`). Una schermata che compare solo se il
@@ -688,6 +765,7 @@ func refresh() -> void:
 		return
 	_refresh_xp(game)
 	_refresh_wave(game)
+	_refresh_firewall(game)
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
@@ -785,6 +863,47 @@ func _refresh_round(horde: Object) -> void:
 		return
 	round_over = over
 	redraw()
+
+# --- Firewall: lettura dal contratto ----------------------------------------------
+func _refresh_firewall(game: Node) -> void:
+	var horde = game.get("horde")
+	if not (horde is Object) or not is_instance_valid(horde):
+		return
+	var h := horde as Object
+	var changed := false
+	var raw_inside = h.get("firewall_inside")
+	if typeof(raw_inside) == TYPE_BOOL:
+		if bool(raw_inside) != firewall_inside:
+			firewall_inside = bool(raw_inside)
+			changed = true
+	var raw_time = h.get("firewall_inside_time")
+	if raw_time == null:
+		raw_time = h.get("firewall_timer")
+	if typeof(raw_time) == TYPE_FLOAT or typeof(raw_time) == TYPE_INT:
+		var t := maxf(_finite_or_zero(float(raw_time)), 0.0)
+		if t != firewall_inside_time:
+			firewall_inside_time = t
+			changed = true
+	var raw_last = h.get("firewall_damage_last")
+	if typeof(raw_last) == TYPE_FLOAT or typeof(raw_last) == TYPE_INT:
+		var d := maxf(_finite_or_zero(float(raw_last)), 0.0)
+		if d != firewall_damage_last:
+			firewall_damage_last = d
+			changed = true
+	var raw_total = h.get("firewall_damage_total")
+	if typeof(raw_total) == TYPE_FLOAT or typeof(raw_total) == TYPE_INT:
+		var t2 := maxf(_finite_or_zero(float(raw_total)), 0.0)
+		if t2 != firewall_damage_total:
+			firewall_damage_total = t2
+			changed = true
+	var raw_grace = h.get("firewall_grace_left")
+	if typeof(raw_grace) == TYPE_FLOAT or typeof(raw_grace) == TYPE_INT:
+		var g := maxf(_finite_or_zero(float(raw_grace)), 0.0)
+		if g != firewall_grace_left:
+			firewall_grace_left = g
+			changed = true
+	if changed:
+		redraw()
 
 # --- m17: il tempo, letto da -orda ------------------------------------------------
 #
@@ -1167,7 +1286,7 @@ func redraw() -> void:
 	_redraw_wave()
 	_redraw_clock()
 	_redraw_game_over()
-
+	_redraw_firewall()
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
@@ -1223,6 +1342,12 @@ func _redraw_game_over() -> void:
 	if _game_over_text != null:
 		_game_over_text.text = "GAME OVER - WAVE %d" % wave_at_death
 
+func _redraw_firewall() -> void:
+	if _firewall == null:
+		return
+	_firewall.visible = firewall_inside
+	if firewall_inside:
+		_firewall.text = FIREWALL_TEXT_FORMAT % [firewall_inside_time, firewall_damage_total]
 # --- Interno ------------------------------------------------------------------
 
 ## Applica i due numeri dell'XP senza ridisegnare: `set_progression` e

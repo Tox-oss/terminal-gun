@@ -1271,6 +1271,16 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Step 3 del design doc — stack armi / weapon_pipeline.gd** — GATE 8/8, PERM 15/15, committata.
 
+**Onda pendente (nuova):** **Step 4 del design doc — RAM/crash (Buffer Overflow).** Limite slot di memoria della pipeline; superarlo o creare combinazioni troppo instabili provoca Buffer Overflow (autodanno + surriscaldamento temporaneo dell'arma). Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §3 — Gestione della RAM).
+
+Scope:
+- `-gameplay`: src/player/weapon_pipeline.gd, src/player/player.gd, src/player/progression.gd, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: src/ui/hud.gd, scenes/hud.tscn (indicatore surriscaldamento/crash), tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare -ui. Prima foglia: **gameplay**.
+
 **Onda pendente (correttiva):** **Fix movimento + pipeline interattiva (tasto B).** Tre problemi segnalati dall'utente:
 1. Movimento compromesso, nemici slittano indietro — lo scroll-W è ancora sbagliato (trattato come riposizionamento del contenuto, non come meccanica di inseguimento). Debito aperto.
 2. Pipeline visibile on-screen ma non modificabile: va apribile con B, che apre un menu che permette di spostare i comandi mettendo in pausa il gioco (get_tree().paused = true, process_mode Always per i menu).

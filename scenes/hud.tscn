@@ -260,6 +260,66 @@ theme_override_font_sizes/font_size = 16
 text = "FIREWALL 0.00s DMG 0.0 (20%/s)"
 horizontal_alignment = 0
 
+[node name="Overheat" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 150.0
+offset_right = 360.0
+offset_bottom = 178.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "OVERHEAT 0.00s"
+horizontal_alignment = 0
+
+[node name="Crash" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 150.0
+offset_right = 360.0
+offset_bottom = 178.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "CRASH 0.00s"
+horizontal_alignment = 0
+
+[node name="BufferOverflow" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 150.0
+offset_right = 360.0
+offset_bottom = 178.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "BUFFER OVERFLOW 0.00s"
+horizontal_alignment = 0
+
+[node name="Overflow" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 150.0
+offset_right = 360.0
+offset_bottom = 178.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "OVERFLOW 0.00s"
+horizontal_alignment = 0
+
+[node name="Overheated" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 150.0
+offset_right = 360.0
+offset_bottom = 178.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "OVERHEATED 0.00s"
+horizontal_alignment = 0
+
 [node name="Weapon" type="Label" parent="Root"]
 offset_left = 24.0
 offset_top = 654.0

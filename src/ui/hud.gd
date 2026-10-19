@@ -351,6 +351,18 @@ var firewall_damage_last: float = 0.0
 var firewall_damage_total: float = 0.0
 ## Secondi di grazia che restano prima che il danno inizi.
 var firewall_grace_left: float = 1.0
+# --- Surriscaldamento / crash (Buffer Overflow) --------------------------------
+## Stato di surriscaldamento/crash. Tutti gli alias puntano allo stesso stato.
+var overheat: bool = false
+var overheated: bool = false
+var crash: bool = false
+var buffer_overflow: bool = false
+var buffer_overflowed: bool = false
+var overflow: bool = false
+var overflowed: bool = false
+## Tempo di surriscaldamento rimanente, in secondi.
+var overheat_time: float = 0.0
+var overheat_timer: float = 0.0
 ## ## m17: i secondi di partita, di `-orda` (`Run.elapsed_s`)
 ##
 ## Un campo **solo di lettura dal contratto**: nessun chiamante lo scrive a mano,
@@ -387,6 +399,12 @@ var _restart_hint: Label = null
 ## Firewall: indicatore di pericolo. Sta in `Root`, si vede solo quando il
 ## giocatore e' dentro il firewall.
 var _firewall: Label = null
+## Surriscaldamento / crash: indicatori (alias per compatibilita').
+var _overheat: Label = null
+var _crash: Label = null
+var _buffer_overflow: Label = null
+var _overflow: Label = null
+var _overheated: Label = null
 ## Pipeline: pannello in basso con gli slot RAM.
 var _pipeline_panel: Control = null
 var _pipeline_title: Label = null
@@ -456,6 +474,11 @@ func _ready() -> void:
 	_clock = get_node_or_null("Root/Clock") as Label
 	_restart_hint = get_node_or_null("Root/GameOver/RestartHint") as Label
 	_firewall = get_node_or_null("Root/Firewall") as Label
+	_overheat = get_node_or_null("Root/Overheat") as Label
+	_crash = get_node_or_null("Root/Crash") as Label
+	_buffer_overflow = get_node_or_null("Root/BufferOverflow") as Label
+	_overflow = get_node_or_null("Root/Overflow") as Label
+	_overheated = get_node_or_null("Root/Overheated") as Label
 	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
 	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
 	_collect_cards()
@@ -745,6 +768,74 @@ func game_over_visible() -> bool:
 func firewall_visible() -> bool:
 	return _firewall != null and _firewall.visible
 
+# --- Surriscaldamento / crash: superficie per il test ----------------------------
+func set_overheat(p_on: bool) -> void:
+	_set_overheat_state(bool(p_on))
+func set_overheated(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_crash(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_buffer_overflow(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_buffer_overflowed(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_overflow(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_overflowed(p_on: bool) -> void:
+	set_overheat(p_on)
+
+# alias "inside"
+func set_overheat_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_overheated_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_crash_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_buffer_overflow_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_buffer_overflowed_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+func set_overflow_inside(p_on: bool) -> void:
+	set_overheat(p_on)
+
+# tempo
+func set_overheat_time(p_seconds: float) -> void:
+	overheat_time = maxf(_finite_or_zero(p_seconds), 0.0)
+	overheat_timer = overheat_time
+	redraw()
+func set_overheat_timer(p_seconds: float) -> void:
+	set_overheat_time(p_seconds)
+func set_overheated_time(p_seconds: float) -> void:
+	set_overheat_time(p_seconds)
+func set_crash_time(p_seconds: float) -> void:
+	set_overheat_time(p_seconds)
+func set_buffer_overflow_time(p_seconds: float) -> void:
+	set_overheat_time(p_seconds)
+func set_overflow_time(p_seconds: float) -> void:
+	set_overheat_time(p_seconds)
+
+func overheat_visible() -> bool:
+	return _overheat != null and _overheat.visible
+func overheated_visible() -> bool:
+	return overheat_visible()
+func crash_visible() -> bool:
+	return (_crash != null and _crash.visible) or overheat
+func buffer_overflow_visible() -> bool:
+	return (_buffer_overflow != null and _buffer_overflow.visible) or overheat
+func overflow_visible() -> bool:
+	return (_overflow != null and _overflow.visible) or overheat
+
+func overheat_text() -> String:
+	return _overheat.text if _overheat != null else ""
+func overheated_text() -> String:
+	return overheat_text()
+func crash_text() -> String:
+	return _crash.text if _crash != null else ""
+func buffer_overflow_text() -> String:
+	return _buffer_overflow.text if _buffer_overflow != null else ""
+func overflow_text() -> String:
+	return _overflow.text if _overflow != null else ""
+
 func is_firewall_inside() -> bool:
 	return firewall_inside
 
@@ -790,6 +881,7 @@ func refresh() -> void:
 	_refresh_xp(game)
 	_refresh_wave(game)
 	_refresh_firewall(game)
+	_refresh_overheat(game)
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
@@ -930,6 +1022,70 @@ func _refresh_firewall(game: Node) -> void:
 			changed = true
 	if changed:
 		redraw()
+
+# --- Surriscaldamento / crash: lettura dal contratto -------------------------------
+func _refresh_overheat(game: Node) -> void:
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return
+	var p := player as Object
+	var state := false
+	# Player
+	for key in ["buffer_overflowed", "overflowed", "overflow", "crash", "overheat", "overheated"]:
+		var raw = p.get(key)
+		if typeof(raw) == TYPE_BOOL and bool(raw):
+			state = true
+	if p.has_method("check_buffer_overflow"):
+		var r = p.call("check_buffer_overflow")
+		if typeof(r) == TYPE_BOOL and bool(r):
+			state = true
+	# Weapon
+	var weapon = null
+	var raw_w = p.get("weapon")
+	if raw_w is Object and is_instance_valid(raw_w):
+		weapon = raw_w as Object
+	if weapon != null:
+		for key in ["overheated", "overheat"]:
+			var raw = weapon.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+		if weapon.has_method("is_overheated"):
+			var r = weapon.call("is_overheated")
+			if typeof(r) == TYPE_BOOL and bool(r):
+				state = true
+		var raw_t = weapon.get("overheat_timer")
+		if typeof(raw_t) == TYPE_FLOAT or typeof(raw_t) == TYPE_INT:
+			var t := maxf(float(raw_t), 0.0)
+			if t > 0.0:
+				state = true
+			if t != overheat_time:
+				overheat_time = t
+				overheat_timer = t
+	# Applica
+	var prev_state := overheat
+	var prev_time := overheat_time
+	_set_overheat_state(state)
+	if state != prev_state or overheat_time != prev_time:
+		redraw()
+
+func _set_overheat_state(on: bool) -> void:
+	if on == overheat:
+		# aggiorna comunque alias e tempo
+		overheated = on
+		crash = on
+		buffer_overflow = on
+		buffer_overflowed = on
+		overflow = on
+		overflowed = on
+		return
+	overheat = on
+	overheated = on
+	crash = on
+	buffer_overflow = on
+	buffer_overflowed = on
+	overflow = on
+	overflowed = on
+	redraw()
 
 # --- Pipeline: lettura dal contratto ----------------------------------------------
 func _refresh_pipeline(game: Node) -> void:
@@ -1491,6 +1647,7 @@ func redraw() -> void:
 	_redraw_clock()
 	_redraw_game_over()
 	_redraw_firewall()
+	_redraw_overheat()
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
@@ -1552,6 +1709,28 @@ func _redraw_firewall() -> void:
 	_firewall.visible = firewall_inside
 	if firewall_inside:
 		_firewall.text = FIREWALL_TEXT_FORMAT % [firewall_inside_time, firewall_damage_total]
+
+func _redraw_overheat() -> void:
+	if _overheat != null:
+		_overheat.visible = overheat
+		if overheat:
+			_overheat.text = "OVERHEAT %.2fs" % overheat_time
+	if _crash != null:
+		_crash.visible = overheat
+		if overheat:
+			_crash.text = "CRASH %.2fs" % overheat_time
+	if _buffer_overflow != null:
+		_buffer_overflow.visible = overheat
+		if overheat:
+			_buffer_overflow.text = "BUFFER OVERFLOW %.2fs" % overheat_time
+	if _overflow != null:
+		_overflow.visible = overheat
+		if overheat:
+			_overflow.text = "OVERFLOW %.2fs" % overheat_time
+	if _overheated != null:
+		_overheated.visible = overheat
+		if overheat:
+			_overheated.text = "OVERHEATED %.2fs" % overheat_time
 # --- Interno ------------------------------------------------------------------
 
 ## Applica i due numeri dell'XP senza ridisegnare: `set_progression` e

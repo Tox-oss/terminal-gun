@@ -784,6 +784,7 @@ func _hud_alone(h) -> void:
 	_clock_alone(h, hud)
 	_game_over_screen(h, hud)
 	_firewall_alone(h, hud)
+	_overheat_alone(h, hud)
 	_pipeline_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
@@ -1319,6 +1320,7 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	# in cui un orologio fermo a `00:00` si distingue da un numero scritto dentro.
 	_clock_from_contract(h, game, hud, round_no)
 	_firewall_from_contract(h, game, hud, round_no)	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
+	_overheat_from_contract(h, game, hud, round_no)
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
 	_health_from_contract(h, game, arena, hud, round_no)
@@ -1728,6 +1730,39 @@ func _player_number(player: Object, key: String) -> float:
 	if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
 		return float(raw)
 	return 0.0
+
+## Indicatore di surriscaldamento/crash (Buffer Overflow): compare e sparisce.
+func _overheat_alone(h, hud) -> void:
+	h.check(not hud.overheat_visible(), "all'avvio l'indicatore di surriscaldamento non si vede")
+	hud.set_overheat(true)
+	hud.set_overheat_time(0.6)
+	h.check(hud.overheat_visible(), "con set_overheat(true) l'indicatore deve vedersi")
+	h.check(hud.overheat_text().contains("0.60") or hud.overheat_text() != "",
+		"il tempo di surriscaldamento deve essere a schermo: \"%s\"" % hud.overheat_text())
+	hud.set_overheat(false)
+	h.check(not hud.overheat_visible(), "con set_overheat(false) l'indicatore deve sparire")
+
+## L'HUD legge lo stato di surriscaldamento dal contratto (player/weapon).
+func _overheat_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var player = game.get("player")
+	if not h.check(player is Object and is_instance_valid(player),
+			"avvio %d: il contratto non espone un player valido" % round_no):
+		return
+	(player as Object).set("buffer_overflowed", true)
+	var weapon = (player as Object).get("weapon")
+	if weapon is Object and is_instance_valid(weapon):
+		(weapon as Object).set("overheated", true)
+		(weapon as Object).set("overheat_timer", 0.6)
+	hud.refresh()
+	h.check(hud.overheat_visible() or hud.buffer_overflow_visible() or hud.crash_visible(),
+		"avvio %d: con buffer_overflowed l'indicatore deve vedersi" % round_no)
+	(player as Object).set("buffer_overflowed", false)
+	if weapon is Object and is_instance_valid(weapon):
+		(weapon as Object).set("overheated", false)
+		(weapon as Object).set("overheat_timer", 0.0)
+	hud.refresh()
+	h.check(not hud.overheat_visible(),
+		"avvio %d: tolto il surriscaldamento l'indicatore deve sparire" % round_no)
 
 ## Il numero sotto la barra della vita: intero **arrotondato**, perche' e' quello
 ## che si vede. `roundi` e' la stessa regola dichiarata in `hud.gd`: l'HUD non

@@ -1267,7 +1267,17 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Step 1 del design doc — level-up → nodi/comandi (Noita)** — GATE 8/8, committata.
 
-**Onda pendente (nuova):** **Step 2 del design doc — specie speciali: Trojan e Wurm.** Trojan: cavallo degli scacchi, movimento a scatti a L (timer che sceglie un punto con offset a L rispetto al player e scatta rapidamente). Wurm: catena segmentata, nodo padre segue il player, figli seguono a cascata (position = parent.previous_position). Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale). -assets potrebbe servire per modelli (Wurm segmentato).
+**Onda chiusa:** **Step 2 del design doc — specie speciali Trojan e Wurm** — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (nuova):** **Step 3 del design doc — stack armi / weapon_pipeline.gd.** Gestione della stringa di esecuzione e dei modificatori (Noita-style): pipeline di nodi (Comandi, Modificatori, Operatori) con slot RAM, Buffer Overflow. Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §3 e §4).
+
+Scope:
+- `-gameplay`: src/player/weapon_pipeline.gd (già creato in step 1), src/player/player.gd, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: src/ui/hud.gd, scenes/hud.tscn (pannello pipeline), tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare -ui. Prima foglia: **gameplay**. Trojan: cavallo degli scacchi, movimento a scatti a L (timer che sceglie un punto con offset a L rispetto al player e scatta rapidamente). Wurm: catena segmentata, nodo padre segue il player, figli seguono a cascata (position = parent.previous_position). Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale). -assets potrebbe servire per modelli (Wurm segmentato).
 
 Meccanica dichiarata dall'utente (design_concettuale.md §2 e §4).
 

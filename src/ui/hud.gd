@@ -391,6 +391,9 @@ var _firewall: Label = null
 var _pipeline_panel: Control = null
 var _pipeline_title: Label = null
 var _pipeline_slots: Array[Button] = []
+## Menu pausa della pipeline, aperto con B.
+var _pipeline_menu_panel: Control = null
+var _pause_menu_panel: Control = null
 
 # --- Il pannello delle scelte (m6) ---------------------------------------------
 ## Il pannello e le carte. I `Button` sono in un array **perche' il numero di
@@ -459,6 +462,8 @@ func _ready() -> void:
 	_pipeline_panel = get_node_or_null("Root/Pipeline") as Control
 	_pipeline_title = get_node_or_null("Root/Pipeline/PipelineTitle") as Label
 	_collect_pipeline_slots()
+	_pipeline_menu_panel = get_node_or_null("Root/PipelineMenu") as Control
+	_pause_menu_panel = get_node_or_null("Root/PauseMenu") as Control
 	redraw()
 
 ## Le carte, per nome in chiaro e in ordine: `Card0`, `Card1`, ... La lista
@@ -789,6 +794,7 @@ func refresh() -> void:
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
 	_refresh_pipeline(game)
+	_refresh_pipeline_menu(game)
 
 ## XP e soglia del livello da `Game.player.progression`, che e' di -gameplay.
 ## Entrambi opzionali: se non ci sono, il valore di riserva resta e l'HUD non si
@@ -955,6 +961,27 @@ func _refresh_pipeline(game: Node) -> void:
 	if changed:
 		redraw()
 
+# --- Menu pausa della pipeline: lettura dal contratto ------------------------------
+func _refresh_pipeline_menu(game: Node) -> void:
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		_set_pipeline_menu_visible(false)
+		return
+	var open := false
+	if (player as Object).has_method("is_pipeline_menu_open"):
+		open = bool((player as Object).call("is_pipeline_menu_open"))
+	else:
+		var raw = (player as Object).get("pipeline_menu_open")
+		if typeof(raw) == TYPE_BOOL:
+			open = bool(raw)
+	_set_pipeline_menu_visible(open)
+
+func _set_pipeline_menu_visible(on: bool) -> void:
+	if _pipeline_menu_panel != null:
+		_pipeline_menu_panel.visible = on
+	if _pause_menu_panel != null:
+		_pause_menu_panel.visible = on
+ 
 # --- m17: il tempo, letto da -orda ------------------------------------------------
 #
 # Nessun orologio qui dentro. `Run.elapsed_s` e' gia' stato, cresce di un `+=`
@@ -1230,6 +1257,9 @@ func _on_card_pressed(index: int) -> void:
 	# Rilegge tutto: le carte rimaste cambiano numero e testo, e se erano le
 	# ultime il pannello si chiude e toglie la pausa da solo.
 	_sync_upgrade_panel(prog)
+	# Il nodo scelto entra nella pipeline RAM: rilegge il contratto perche' il
+	# token sia visibile subito, non al frame dopo.
+	_refresh_pipeline(_contract())
 
 ## Il testo di una carta, preso dal metodo che espone `-gameplay`. Se il metodo
 ## non c'e' ancora, la carta mostra il suo numero e un avviso: meglio una carta
@@ -1270,6 +1300,22 @@ func _as_text(raw: Variant) -> String:
 # --- La superficie della pipeline, per il test ---------------------------------
 func pipeline_panel_visible() -> bool:
 	return _pipeline_panel != null and _pipeline_panel.visible
+
+func pipeline_menu_visible() -> bool:
+	return (_pipeline_menu_panel != null and _pipeline_menu_panel.visible) or (_pause_menu_panel != null and _pause_menu_panel.visible)
+
+func pipeline_menu_open() -> bool:
+	return pipeline_menu_visible()
+
+func pause_menu_visible() -> bool:
+	return pipeline_menu_visible()
+
+func pipeline_menu_process_mode_at(path: String) -> int:
+	var node := get_node_or_null(path)
+	return node.process_mode if node != null else -1
+
+func pause_menu_process_mode_at(path: String) -> int:
+	return pipeline_menu_process_mode_at(path)
 
 func pipeline_panel() -> Control:
 	return _pipeline_panel

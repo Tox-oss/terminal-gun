@@ -986,6 +986,14 @@ func _pipeline_alone(h, hud) -> void:
 	if hud.has_method("pipeline_slots"):
 		h.check(hud.pipeline_slots() is Array,
 			"pipeline_slots() deve restituire un array")
+	if hud.has_method("pipeline_menu_visible"):
+		h.check(not hud.pipeline_menu_visible(),
+			"all'avvio il menu pausa della pipeline non si vede")
+	if hud.has_method("pipeline_menu_process_mode_at"):
+		h.eq(hud.pipeline_menu_process_mode_at("Root/PipelineMenu"), Node.PROCESS_MODE_ALWAYS,
+			"il menu pausa della pipeline deve essere PROCESS_MODE_ALWAYS")
+		h.eq(hud.pipeline_menu_process_mode_at("Root/PauseMenu"), Node.PROCESS_MODE_ALWAYS,
+			"il menu pausa deve essere PROCESS_MODE_ALWAYS")
 	# Assegnazione di prova tramite il contratto vivo.
 	if hud.has_method("assign_pipeline_slot"):
 		var ok: bool = hud.assign_pipeline_slot(0, "echo")

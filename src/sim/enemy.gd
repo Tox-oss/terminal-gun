@@ -616,14 +616,13 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 
 	# Banda elastica sul bordo dell'arena: il nemico puo' sbordare di qualche
 	# decina (knockback), non deve poter sparire.
-	var flat := Vector2(pos.x, pos.z)
+	# La mappa e' mobile: il bordo segue il bersaglio (il giocatore), non l'origine
+	# del mondo, altrimenti i nemici slittano indietro mentre la mappa avanza.
+	var center_flat := Vector2(target.x, target.z)
+	var flat := Vector2(pos.x - target.x, pos.z - target.z)
 	var r := flat.length()
 	var limit := maxf(1.0, arena_radius - RADIUS[kind])
 	if r > limit:
-		# `flat` e' un Vector2 perche' la distanza dal centro si calcola sul piano:
-		# la spinta pero' va su `vel`, che e' un Vector3, quindi il verso va
-		# rimontato con y = 0 invece che promuoverlo (promuovere aggiungerebbe
-		# anche una componente verticale, che qui non esiste).
 		vel -= Vector3(flat.x, 0.0, flat.y) / maxf(r, 0.001) * (r - limit) * EDGE_PUSH
 
 	timers[i] = maxf(0.0, timers[i] - delta)

@@ -170,7 +170,9 @@ func build(list: PackedVector3Array) -> void:
 	# `custom_aabb` e' derivato dai dischi e non scritto a mano: un riquadro
 	# sbagliato qui taglia gli ostacoli senza dire niente (la stessa lezione
 	# scritta accanto a `_fit_aabbs()` in `arena_ground.gd`).
-	custom_aabb = _aabb(list)
+	# La mappa e' mobile: gli ostacoli accompagnano il giocatore, quindi il
+	# riquadro di culling non puo' restare fisso al centro del mondo.
+	custom_aabb = AABB(Vector3(-1000.0, -100.0, -1000.0), Vector3(2000.0, 200.0, 2000.0))
 	for i in n:
 		var t := obstacle_transform(list[i])
 		mm.set_instance_transform(i, t)

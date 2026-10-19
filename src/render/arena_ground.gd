@@ -108,9 +108,9 @@ func _add_multimesh(node_name: String, scene_path: String) -> MultiMeshInstance3
 	return mi
 
 func _fit_aabbs(radius: float) -> void:
-	var side := radius * 2.0 + FLOOR_MARGIN
-	var half := side * 0.5 * sqrt(2.0)
-	var box := AABB(Vector3(-half, -0.5, -half), Vector3(half * 2.0, 10.0, half * 2.0))
+	# La mappa e' mobile: il terreno accompagna il giocatore, quindi il riquadro
+	# di culling non puo' restare fisso al centro del mondo.
+	var box := AABB(Vector3(-1000.0, -100.0, -1000.0), Vector3(2000.0, 200.0, 2000.0))
 	for mi in [_floor, _wall, _crates]:
 		if mi != null:
 			(mi as MultiMeshInstance3D).custom_aabb = box

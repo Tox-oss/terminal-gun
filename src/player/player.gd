@@ -550,6 +550,8 @@ func is_dead() -> bool:
 ## pannello aperto l'albero e' fermo e questa riga non gira, quindi la carta di un
 ## potenziamento non puo' diventare un restart.
 const RESTART_KEYS := [KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]
+## Tasto che apre il menu della pipeline RAM: spostare i comandi mette in pausa.
+const PIPELINE_MENU_KEYS := [KEY_B]
 
 ## Il tasto del restart **in parole**, per l'interfaccia: il numero dei tasti e'
 ## di questo file e l'interfaccia deve scrivere quello che qui e' dichiarato, non
@@ -558,18 +560,65 @@ const RESTART_KEYS := [KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]
 func restart_hint() -> String:
 	return "R / INVIO / SPAZIO"
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not read_keys or not is_dead():
+## Il menu della pipeline e' aperto? Campo di stato, non un nodo: aprire e
+## chiudere non crea nodi.
+var pipeline_menu_open := false
+var _pipeline_menu_paused_by := false
+
+func open_pipeline_menu() -> void:
+	if pipeline_menu_open:
 		return
+	pipeline_menu_open = true
+	_set_pipeline_menu_paused(true)
+
+func close_pipeline_menu() -> void:
+	if not pipeline_menu_open:
+		return
+	pipeline_menu_open = false
+	_set_pipeline_menu_paused(false)
+
+func toggle_pipeline_menu() -> void:
+	if pipeline_menu_open:
+		close_pipeline_menu()
+	else:
+		open_pipeline_menu()
+
+func is_pipeline_menu_open() -> bool:
+	return pipeline_menu_open
+
+func _set_pipeline_menu_paused(on: bool) -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	if on:
+		if not tree.paused:
+			tree.paused = true
+			_pipeline_menu_paused_by = true
+		return
+	if _pipeline_menu_paused_by and tree.paused:
+		tree.paused = false
+	_pipeline_menu_paused_by = false
+
+func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if not RESTART_KEYS.has(key.physical_keycode):
-		return
-	restart_run()
-	var vp := get_viewport()
-	if vp != null:
-		vp.set_input_as_handled()
+	# Restart solo quando si e' morti.
+	if read_keys and is_dead():
+		if RESTART_KEYS.has(key.physical_keycode):
+			restart_run()
+			var vp := get_viewport()
+			if vp != null:
+				vp.set_input_as_handled()
+			return
+	# Menu pipeline con B, solo in vita.
+	if read_keys and not is_dead():
+		if PIPELINE_MENU_KEYS.has(key.physical_keycode):
+			toggle_pipeline_menu()
+			var vp2 := get_viewport()
+			if vp2 != null:
+				vp2.set_input_as_handled()
+			return
 
 # --- Il ciclo di gioco ---------------------------------------------------------
 
@@ -895,6 +944,22 @@ func clear_pipeline() -> void:
 		pipeline.clear()
 	_pipeline_sync()
 	buffer_overflowed = false
+
+## Sposta un comando da uno slot all'altro senza creare o liberare nodi: la RAM
+## resta entro la capacita' dichiarata. Restituisce false se la mossa rompe la
+## stabilita' della pipeline o esce dai limiti.
+func pipeline_move(from_index: int, to_index: int) -> bool:
+	if pipeline == null:
+		return false
+	var ok := bool(pipeline.move(from_index, to_index))
+	_pipeline_sync()
+	return ok
+
+func move_pipeline_node(from_index: int, to_index: int) -> bool:
+	return pipeline_move(from_index, to_index)
+
+func swap_pipeline_slots(a: int, b: int) -> bool:
+	return pipeline_move(a, b)
 
 func pipeline_clear() -> void:
 	clear_pipeline()

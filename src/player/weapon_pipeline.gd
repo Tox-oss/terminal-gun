@@ -162,3 +162,29 @@ func set_slots(nodes: Array) -> bool:
 	slots = nuovo
 	overflowed = false
 	return true
+
+## Sposta il comando dello slot `from_index` nello slot `to_index`, senza
+## creare o liberare nodi. La RAM resta entro `capacity`. Restituisce false se
+## la mossa rompe la stabilita'.
+func move(from_index: int, to_index: int) -> bool:
+	if from_index < 0 or from_index >= slots.size():
+		overflowed = true
+		return false
+	if to_index < 0:
+		overflowed = true
+		return false
+	if from_index == to_index:
+		overflowed = false
+		return true
+	var id := slots[from_index]
+	slots.remove_at(from_index)
+	var target := clampi(to_index, 0, slots.size())
+	slots.insert(target, id)
+	if slots.size() > capacity or not is_stable():
+		# Ritorna allo stato precedente.
+		slots.remove_at(target)
+		slots.insert(from_index if from_index <= slots.size() else slots.size(), id)
+		overflowed = true
+		return false
+	overflowed = false
+	return true

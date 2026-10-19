@@ -235,7 +235,6 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
-	_update_scroll_offset()
 	refresh()
 
 # --- Costruzione --------------------------------------------------------------
@@ -275,7 +274,9 @@ func _build() -> void:
 	# Il riquadro lo dichiaro invece di lasciarlo calcolare dal buffer: il
 	# nemico piu' alto si trova a 28 m dal centro e il motore deve sapere che la
 	# scena da disegnare arriva almeno li'.
-	custom_aabb = AABB(Vector3(-34.0, -2.0, -34.0), Vector3(68.0, 12.0, 68.0))
+	# La mappa e' mobile: i nemici seguono il giocatore anche lontano dall'origine,
+	# quindi il riquadro di culling non puo' restare fisso al centro del mondo.
+	custom_aabb = AABB(Vector3(-1000.0, -100.0, -1000.0), Vector3(2000.0, 200.0, 2000.0))
 	for i in CAPACITY:
 		mm.set_instance_transform(i, _hidden_transform())
 		mm.set_instance_color(i, Color.WHITE)
@@ -508,8 +509,11 @@ func instance_transform(pos: Vector3, radius: float, i: int) -> Transform3D:
 	# La sollevata segue la scala: meta' dell'altezza effettiva del corpo, cosi'
 	# i piedi restano sul pavimento a ogni taglia invece che a una sola.
 	var lift: float = 0.5 * s * _mesh_height
+	# Il nemico segue la mappa in coordinate **assolute**: niente scorrimento
+	# sottratto, altrimenti slitta rispetto a terreno e ostacoli che accompagnano
+	# il giocatore. Il bordo dell'arena segue gia' il bersaglio in simulazione.
 	return Transform3D(_shared_rotation().scaled(Vector3(s, s, s)),
-		Vector3(pos.x - _scroll_offset.x, pos.y + lift + bob, pos.z - _scroll_offset.z))
+		Vector3(pos.x, pos.y + lift + bob, pos.z))
 
 ## La rotazione che hanno in comune tutti i nemici. Cambia solo con l'orologio,
 ## quindi si ricostruisce una volta per frame e non una volta per nemico. Con 200

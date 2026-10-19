@@ -143,14 +143,16 @@ const LONTANO := 39.0
 ## misurato", e senza il ponte un id che toccasse un campo che nessuno guarda
 ## passerebbe tutto.
 const MISURA_DI := {
-	"damage": "danno",
-	"fire_rate": "cadenza",
-	"move_speed": "corsa",
-	"projectile_speed": "velocita",
-	"knockback": "spinta",
-	"pierce": "perforante",
-	"vitality": "vita",
-	"range": "gittata",
+	"echo": "danno",
+	"grep": "cadenza",
+	"ping": "velocita",
+	"curl": "spinta",
+	"rm": "perforante",
+	"-r": "perforante",
+	"-f": "velocita",
+	"sudo": "danno",
+	"|": "perforante",
+	"&&": "gittata",
 }
 ## Ordine di stampa della tabella delle misure.
 const MISURE := ["danno", "cadenza", "corsa", "velocita", "spinta", "perforante", "vita", "gittata"]
@@ -464,8 +466,7 @@ func _ritorno_alla_base(h) -> void:
 	# Gli otto potenziamenti insieme, e **senza** nessun reset in mezzo: qui i
 	# numeri devono essere diversi, altrimenti la sezione dopo non misurerebbe
 	# niente.
-	for id in ["damage", "fire_rate", "move_speed", "projectile_speed",
-			"knockback", "pierce", "vitality", "range"]:
+	for id in ["echo", "grep", "ping", "curl", "rm", "-r", "-f", "sudo", "|", "&&"]:
 		_prog.apply(str(id))
 	var sporco := _numeri_grezzi()
 	h.check(not _grezzi_uguali(base, sporco),

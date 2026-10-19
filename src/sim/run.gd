@@ -323,8 +323,21 @@ const CATCHUP_SAFETY := 4.0
 ## non si toccano: solo il punto di partenza scende, e la saturazione si sposta
 ## di un gradino (da onda 8 a onda 9) perche' la curva ha un gradino in piu' da
 ## fare. Il numero non e' copiato da nessun altro file: viene da questa misura.
-const POP_BASE_PER_FLOOR := 12
-const POP_BASE := 12
+## ## m19: riduzione della densita' iniziale (feedback di gioco, seconda passata)
+##
+## Misurato prima di questa modifica su `tests/test_orda.gd`: l'onda 1 partiva a
+## 12 nemici vivi (`Run.POP_BASE` precedente), e il gioco risultava ancora troppo
+## denso: instabile, il giocatore non riusciva a scappare. Il valore nuovo e'
+## **9**: circa tre quarti della densita' iniziale precedente, il punto piu' basso
+## compatibile con i criteri dichiarati (almeno 9 nemici vivi per il poligono di
+## `tests/test_upgrades.gd` e 8 per il livello di `tests/test_ui.gd`), scelto
+## perche' lascia un campo che si guarda e si spara fin dal primo frame senza
+## svuotare l'onda (che resta di `WAVE_BASE = 200` uccisioni). La crescita per
+## onda (`POP_STEP = 25`) e il tetto (`POP_MAX = Horde.MAX_ENEMIES = 200`) non
+## si toccano: solo il punto di partenza scende. Il numero non e' copiato da
+## nessun altro file: viene da questa misura.
+const POP_BASE_PER_FLOOR := 9
+const POP_BASE := 9
 ## Quanti in piu' vivi a ogni onda.
 const POP_STEP := 25
 ## Tetto della popolazione: **deve valere `Horde.MAX_ENEMIES`**, ed e' scritto

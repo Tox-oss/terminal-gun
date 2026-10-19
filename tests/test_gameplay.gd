@@ -1798,7 +1798,7 @@ func _xp_and_upgrades(h) -> void:
 	# arrivare alla costante di uno script senza metterla in `const preload` qui
 	# dentro (vedi la nota sul caricamento in testa al file).
 	var known := _known_upgrades(prog)
-	h.eq(known.size(), 8, "la progressione dichiara 8 potenziamenti possibili")
+	h.eq(known.size(), 10, "la progressione dichiara 10 nodi di codice possibili")
 
 	# I valori di qui sotto sono campi di orda e d'arma: salvati, cambiati per
 	# rendere la misura pulita, e rimessi a posto **sempre**, anche se un'asserzione

@@ -42,7 +42,10 @@ const XP_STEP := 6.0
 const OFFERS := 3
 ## Quanti potenziamenti diversi esistono: con 8, i tre offerti non possono essere
 ## sempre gli stessi tre.
-const UPGRADE_IDS := ["damage", "fire_rate", "move_speed", "projectile_speed",
+const NODE_IDS := ["echo", "grep", "ping", "curl", "rm", "-r", "-f", "sudo", "|", "&&"]
+const UPGRADE_IDS := NODE_IDS
+const CODE_NODES := NODE_IDS
+const STAT_UPGRADE_IDS := ["damage", "fire_rate", "move_speed", "projectile_speed",
 	"knockback", "pierce", "vitality", "range"]
 
 ## ## I potenziamenti: nome e **quanto**, in un posto solo
@@ -74,6 +77,17 @@ const UPGRADE_IDS := ["damage", "fire_rate", "move_speed", "projectile_speed",
 ## Solo ASCII nelle stringhe: la console di Windows mangia gli accenti
 ## (piano §5.1) e questi finiscono in una Label, cioe' a schermo.
 const UPGRADES := {
+	"echo": {"label": "echo", "numero": 1.25},
+	"grep": {"label": "grep", "numero": 0.85, "inversa": true},
+	"ping": {"label": "ping", "numero": 1.20},
+	"curl": {"label": "curl", "numero": 1.30},
+	"rm": {"label": "rm", "somma": 1.0, "unita": "nemico"},
+	"-r": {"label": "-r", "somma": 1.0, "unita": "nemico"},
+	"-f": {"label": "-f", "numero": 1.20},
+	"sudo": {"label": "sudo", "numero": 1.50},
+	"|": {"label": "|", "somma": 1.0, "unita": "nemico"},
+	"&&": {"label": "&&", "numero": 1.25},
+	# Compatibilita' con i vecchi id stat (test_orda, restart, ecc.)
 	"damage": {"label": "Danno", "numero": 1.25},
 	"fire_rate": {"label": "Cadenza", "numero": 0.85, "inversa": true},
 	"move_speed": {"label": "Corsa", "numero": 1.10},
@@ -253,6 +267,31 @@ func offer_effect(index: int) -> String:
 		return "%s %s" % [piatto, unita] if unita != "" else piatto
 	return "+%d%%" % int(roundf(_crescita(def) * 100.0))
 
+## Nodo di codice dell'offerta numero `index`, oppure "" se non esiste.
+func offer_node(index: int) -> String:
+	var def := _def_offerta(index)
+	if def.is_empty():
+		return ""
+	if index < 0 or index >= offers.size():
+		return ""
+	return str(offers[index])
+
+## Alias per compatibilita' con possibili nomi di superficie.
+func offer_id(index: int) -> String:
+	return offer_node(index)
+
+func node_label(index: int) -> String:
+	return offer_label(index)
+
+func node_type(id: String) -> String:
+	if ["echo", "grep", "ping", "curl", "rm"].has(id):
+		return "command"
+	if ["-r", "-f", "sudo"].has(id):
+		return "modifier"
+	if ["|", "&&"].has(id):
+		return "operator"
+	return "unknown"
+
 ## Applica la scelta numero `index` e **scarta le altre offerte**. Restituisce
 ## l'id applicato, o "" se l'indice non esiste.
 ##
@@ -303,7 +342,7 @@ func apply(id: String) -> bool:
 	if def.is_empty():
 		return false
 	var w = player.weapon
-	var needs_weapon := id in ["damage", "fire_rate", "projectile_speed", "knockback", "pierce", "range"]
+	var needs_weapon := id in ["echo", "grep", "ping", "curl", "rm", "-r", "-f", "sudo", "|", "&&", "damage", "fire_rate", "projectile_speed", "knockback", "pierce", "range"]
 	if needs_weapon and w == null:
 		return false
 	# Zero non e' un potenziamento: e' anche il modo in cui una voce di tabella
@@ -313,6 +352,39 @@ func apply(id: String) -> bool:
 		return false
 	var fatto := false
 	match id:
+		"echo":
+			w.damage *= n
+			fatto = true
+		"grep":
+			w.fire_interval *= n
+			fatto = true
+		"ping":
+			w.projectile_speed *= n
+			fatto = true
+		"curl":
+			w.knockback *= n
+			fatto = true
+		"rm":
+			w.pierce = mini(int(w.pierce) + int(roundf(n)), ProjectileScript.MAX_PIERCE)
+			fatto = true
+		"-r":
+			w.pierce = mini(int(w.pierce) + int(roundf(n)), ProjectileScript.MAX_PIERCE)
+			fatto = true
+		"-f":
+			w.projectile_speed *= n
+			w.knockback *= n
+			fatto = true
+		"sudo":
+			w.damage *= n
+			w.fire_interval *= 1.2
+			fatto = true
+		"|":
+			w.pierce = mini(int(w.pierce) + int(roundf(n)), ProjectileScript.MAX_PIERCE)
+			fatto = true
+		"&&":
+			w.projectile_life *= n
+			fatto = true
+		# Compatibilita' con i vecchi id stat.
 		"damage":
 			w.damage *= n
 			fatto = true
@@ -333,12 +405,6 @@ func apply(id: String) -> bool:
 			fatto = true
 		"vitality":
 			player.max_hp += n
-			# Rianimare un morto non e' un potenziamento. `player.heal()` ha gia'
-			# questa regola scritta ("rianimare un morto e' un bug, non una
-			# feature") e un upgrade che la scavalca la rende falsa: chi applica
-			# potenziamenti a menu aperto durante il game_over si ritroverebbe in
-			# piedi senza aver premuto il tasto del restart. Con la vita a zero la
-			# soglia di sopravvivenza sale e basta.
 			var vita: float = player.hp
 			if vita > 0.0:
 				player.hp = vita + n

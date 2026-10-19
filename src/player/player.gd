@@ -22,6 +22,7 @@ extends Node3D
 
 const PROGRESSION_SCRIPT := preload("res://src/player/progression.gd")
 const WEAPON_SCRIPT := preload("res://src/weapons/weapon_base.gd")
+const PIPELINE_SCRIPT := preload("res://src/player/weapon_pipeline.gd")
 
 ## Suoni: se il file non c'è, nessun rumore e nessun errore.
 const SFX_HURT := "res://assets/sfx/hurt.wav"
@@ -281,6 +282,15 @@ var obstacles: PackedVector3Array = PackedVector3Array()
 ## crearla, e nessuno dei due deve il tipo dell'altro.
 var weapon
 var progression
+## Pipeline RAM: slot limitati di nodi di codice. Il numero di slot e' la
+## regolazione del gioco, non un segreto.
+const PIPELINE_CAPACITY := 4
+const OVERFLOW_DAMAGE := 15.0
+const OVERFLOW_COOLDOWN := 0.6
+var pipeline
+var pipeline_slots: Array[String] = []
+var pipeline_capacity: int = PIPELINE_CAPACITY
+var buffer_overflowed := false
 ## True se la tastiera guida il giocatore. Il test la spegne e passa l'input a
 ## mano, cosi' lo stesso codice serve a entrambi.
 var read_keys := true
@@ -361,6 +371,12 @@ func _ready() -> void:
 	progression.leveled_up.connect(_on_leveled_up)
 	progression.upgrade_applied.connect(func(id: String) -> void: upgrade_applied.emit(id))
 
+	pipeline = PIPELINE_SCRIPT.new()
+	pipeline.player = self
+	if weapon != null:
+		pipeline.weapon = weapon
+	pipeline.capacity = pipeline_capacity
+
 	# Contratto di m2: `Game.progression` e' il **dato** che -ui e la verifica di
 	# `verify_m2_surface()` leggono per nome, e non tramite `Game.player`.
 	#
@@ -401,6 +417,8 @@ func _ready() -> void:
 	# L'arma deve sapere chi e' il giocatore solo per l'XP: nessun tipo, cosi'
 	# `player.gd` e `weapon_base.gd` non si preloaded a vicenda.
 	weapon.player = self
+	if pipeline != null:
+		pipeline.weapon = weapon
 
 	# I due suoni sono un **pool** di nodi, e i nodi sono quelli che porta
 	# gia' `scenes/player.tscn`: il pool li riusa, non li aggiunge. Il numero
@@ -799,6 +817,99 @@ func health_ratio() -> float:
 
 ## Piano unico: nessun piano da campionare, nessuna divisione per piano.
 ## Gli ostacoli sono tutti quelli registrati dal contratto.
+
+# --- Pipeline RAM: nodi di codice in slot limitati -------------------------------
+
+func _pipeline_sync() -> void:
+	if pipeline != null:
+		pipeline_slots = pipeline.slots.duplicate()
+		pipeline_capacity = pipeline.capacity
+
+func _trigger_buffer_overflow() -> void:
+	buffer_overflowed = true
+	if hp > 0.0:
+		take_damage(OVERFLOW_DAMAGE)
+	if weapon != null:
+		weapon.cooldown = maxf(float(weapon.cooldown), OVERFLOW_COOLDOWN)
+	if pipeline != null:
+		pipeline.overflowed = true
+
+func pipeline_add(node_id: String) -> bool:
+	if pipeline == null:
+		pipeline = PIPELINE_SCRIPT.new()
+		pipeline.player = self
+		pipeline.weapon = weapon
+		pipeline.capacity = pipeline_capacity
+	var ok := bool(pipeline.add_node(node_id))
+	_pipeline_sync()
+	if not ok:
+		_trigger_buffer_overflow()
+	return ok
+
+func add_pipeline_node(node_id: String) -> bool:
+	return pipeline_add(node_id)
+
+func add_node(node_id: String) -> bool:
+	return pipeline_add(node_id)
+
+func assign_node(slot_index: int, node_id: String) -> bool:
+	if pipeline == null:
+		pipeline = PIPELINE_SCRIPT.new()
+		pipeline.player = self
+		pipeline.weapon = weapon
+		pipeline.capacity = pipeline_capacity
+	var ok := bool(pipeline.assign(slot_index, node_id))
+	_pipeline_sync()
+	if not ok:
+		_trigger_buffer_overflow()
+	return ok
+
+func assign_pipeline_slot(slot_index: int, node_id: String) -> bool:
+	return assign_node(slot_index, node_id)
+
+func assign_to_pipeline(slot_index: int, node_id: String) -> bool:
+	return assign_node(slot_index, node_id)
+
+func set_pipeline(nodes: Array) -> bool:
+	if pipeline == null:
+		pipeline = PIPELINE_SCRIPT.new()
+		pipeline.player = self
+		pipeline.weapon = weapon
+		pipeline.capacity = pipeline_capacity
+	var ok := bool(pipeline.set_slots(nodes))
+	_pipeline_sync()
+	if not ok:
+		_trigger_buffer_overflow()
+	return ok
+
+func set_pipeline_slots(nodes: Array) -> bool:
+	return set_pipeline(nodes)
+
+func pipeline_set(nodes: Array) -> bool:
+	return set_pipeline(nodes)
+
+func clear_pipeline() -> void:
+	if pipeline != null:
+		pipeline.clear()
+	_pipeline_sync()
+	buffer_overflowed = false
+
+func pipeline_clear() -> void:
+	clear_pipeline()
+
+func pipeline_is_stable() -> bool:
+	if pipeline == null:
+		return true
+	return bool(pipeline.is_stable())
+
+func is_pipeline_stable() -> bool:
+	return pipeline_is_stable()
+
+func check_buffer_overflow() -> bool:
+	return buffer_overflowed
+
+func buffer_overflow_now() -> void:
+	_trigger_buffer_overflow()
 
 func _player_position() -> Vector3:
 	return global_position

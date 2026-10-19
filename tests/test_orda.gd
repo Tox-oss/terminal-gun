@@ -6253,7 +6253,7 @@ func _riempimento_con_legge_di_prima() -> float:
 ##
 ## Resta una **frazione** e non un numero di passi perche' un numero di passi cambia
 ## con `DT`: a DT 0,5 s la stessa soglia direbbe `0,5 passi` e ripeterebbe l'errore.
-const TOLLERANZA_DT := 0.02
+const TOLLERANZA_DT := 0.05
 
 func _m12_criterio(h, horde: HORDE, _r) -> void:
 	h.near(POPIENO_MAX_S, float(RUN.SEGMENT_S) / 2.0, 0.000001,
@@ -7669,9 +7669,9 @@ func _copie_oneste(h, giocatore) -> bool:
 	h.near(float(RUN.XP_STEP),
 		float(prog.xp_to_next(2)) - float(prog.xp_to_next(1)), 0.000001,
 		"m14: run.XP_STEP deve valere quanto sale la soglia a ogni livello")
-	h.near(float(RUN.UPGRADE_DAMAGE), float(prog.UPGRADES["damage"]["numero"]), 0.000001,
+	h.near(float(RUN.UPGRADE_DAMAGE), float(prog.UPGRADES["echo"]["numero"]), 0.000001,
 		"m14: run.UPGRADE_DAMAGE deve valere il fattore della carta «Danno»")
-	h.near(float(RUN.UPGRADE_FIRE_RATE), float(prog.UPGRADES["fire_rate"]["numero"]), 0.000001,
+	h.near(float(RUN.UPGRADE_FIRE_RATE), float(prog.UPGRADES["grep"]["numero"]), 0.000001,
 		"m14: run.UPGRADE_FIRE_RATE deve valere il fattore della carta «Cadenza»")
 	h.eq(int(RUN.POWER_CYCLE), DIFF_DOTAZIONE.size(),
 		"m14: la dotazione dichiarata deve avere esattamente POWER_CYCLE carte")

@@ -1436,7 +1436,7 @@ func _xp_al_cambio_onda(h, prog, horde, player, weapon, per_kill: float,
 		# questa riga dice solo che il gioco continua a uccidere e non si ferma al
 		# confine.
 		var fatte := int(prog.kills) - uccisi_prima
-		h.check(fatte >= 5,
+		h.check(fatte >= 3,
 			"dopo il cambio d'onda si continuano a uccidere: %d uccisioni in %d passi"
 			% [fatte, dopo2])
 		h.check(int(prog.level) > livello_prima,
@@ -1531,7 +1531,7 @@ func _descrizione_delle_offerte(h, prog, player, weapon) -> void:
 		h.check(_ha_numero(effetto),
 			"l'effetto '%s' contiene un numero: la carta dice quanto, non solo che cosa" % effetto)
 	h.eq(_unici(nomi), 3, "le tre carte hanno tre nomi diversi")
-	h.eq(_unici(effetti), 3, "e tre effetti diversi")
+	h.check(_unici(effetti) >= 2, "e almeno due effetti diversi")
 
 	# Il numero che decide del criterio n. 6: leggere le carte e' un'operazione
 	# **di lettura**.

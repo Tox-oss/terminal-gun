@@ -1271,7 +1271,19 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Step 3 del design doc — stack armi / weapon_pipeline.gd** — GATE 8/8, PERM 15/15, committata.
 
-**Onda pendente (nuova):** **Step 4 del design doc — RAM/crash (Buffer Overflow).** Limite slot di memoria della pipeline; superarlo o creare combinazioni troppo instabili provoca Buffer Overflow (autodanno + surriscaldamento temporaneo dell'arma). Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale).
+**Onda chiusa:** **Step 4 del design doc — RAM/crash (Buffer Overflow)** — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (nuova):** **Bestiario — Ransomware (.locked).** Carro armato lento e pesante; se si avvicina troppo, blocca temporaneamente un comando/arma casuale. Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §2).
+
+Scope:
+- `-orda`: nuova specie in src/sim/ (enemy.gd, horde.gd, run.gd): tipo, tabelle, spawn, movimento lento/pesante, logica di blocco comando. tests/test_orda.gd, tests/test_gameloop.gd.
+- `-arena`: rendering modello enemy_ransomware.glb, src/render/, scenes/arena_main.tscn, tests/test_arena.gd.
+- `-gameplay`: collisione/danno, blocco comando casuale (integrazione con pipeline), src/player/, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: feedback visivo del blocco, src/ui/, scenes/hud.tscn, tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare ogni foglia. Prima foglia: **orda**.
 
 Meccanica dichiarata dall'utente (design_concettuale.md §3 — Gestione della RAM).
 

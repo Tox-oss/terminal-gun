@@ -5566,7 +5566,10 @@ func _azzera_l_orologio(h, horde: HORDE, sezione: String) -> void:
 ## confronta le due e va rossa quando divergono. Non e' una copia del numero
 ## (quella sarebbe una seconda fonte): e' la **riga che obbliga la fonte a non
 ## muoversi in silenzio**.
-const SOGLIA_MORTAR := 180.0
+## Aggiornato a 210.0: -orda ha allungato SEGMENT_S a 210 s (ritmo più lento),
+## quindi il mortar si sblocca dopo 210 s e non più dopo 180 s. Deve restare
+## allineato a `Run.MORTAR_AFTER_S` (asserito dalla sezione sottostante).
+const SOGLIA_MORTAR := 210.0
 
 # --- 19. m17: il terzo minuto: l'orologio, la soglia con denti, e la misura ----
 #
@@ -5605,7 +5608,7 @@ const DT_OROLOGIO := 0.2
 
 ## Quanti passi coprono 180,0 s a `DT_OROLOGIO`: 900. Scritto, non calcolato, per
 ##che' il numero che il piano si porta via e' leggibile senza fare la divisione.
-const PASSI_OROLOGIO := 900
+const PASSI_OROLOGIO := 1050
 
 ## Quante **uccisioni per passo** la misura mette al campo: una.
 ##
@@ -6030,7 +6033,7 @@ const UCCISIONI_TOLLERANZA := 1.0
 ## poteva scrivere come una costante. **Con il taglio il numero e' uno solo** e il
 ## controfattuale e' di nuovo una costante — e quindi verificabile.
 const POPIENO_MIN_S := 5.52
-const POPIENO_MAX_S := 90.0
+const POPIENO_MAX_S := 105.0
 
 ## La scala del campo durante la partita intera. Come la sonda di m17: la barra non
 ## dipende da quanti vivi ci sono (dipende dalle uccisioni), quindi il numero che
@@ -6042,7 +6045,7 @@ func _m12_orologio(h, horde: HORDE) -> void:
 	var r = horde.run
 	if not h.check(r != null, "m12: la sezione ha bisogno di una partita vera"):
 		return
-	_corsia_kill = RUN.ASSIMILATION_1
+	_corsia_kill = RUN.SPAWN_RATE
 	_m12_timeline(h, horde, r)
 	_m12_ancoraggio(h, r)
 	_m12_criterio(h, horde, r)
@@ -6060,9 +6063,9 @@ func _m12_orologio(h, horde: HORDE) -> void:
 func _m12_timeline(h, horde: HORDE, r) -> void:
 	h.eq(int(RUN.SEGMENTS), 4,
 		"m12: quattro segmenti, e sono quattro (non cinque, non tre)")
-	h.near(RUN.SEGMENT_S, 180.0, 0.000001, "m12: il segmento dura 180,0 s")
+	h.near(RUN.SEGMENT_S, 210.0, 0.000001, "m12: il segmento dura 210,0 s")
 	h.near(RUN.FIREWALL_AFTER_S, 120.0, 0.000001, "m12: il firewall comincia a 120,0 s")
-	h.near(RUN.BOSS_AT_S, 720.0, 0.000001, "m12: il boss a 720,0 s = 4 segmenti")
+	h.near(RUN.BOSS_AT_S, 840.0, 0.000001, "m12: il boss a 840,0 s = 4 segmenti")
 	h.near(RUN.RUN_END_S, 1080.0, 0.000001, "m12: la fine del run a 1080,0 s")
 	h.near(RUN.SQUEEZE_AT_S, RUN.RUN_END_S, 0.000001,
 		"m12: lo stringimento e' lo stesso istante della fine: due numeri per lo stesso "
@@ -6086,10 +6089,10 @@ func _m12_timeline(h, horde: HORDE, r) -> void:
 	# ## Le due strade della fine, e la prova che sono **due**
 	horde.restart_run()
 	r.elapsed_s = RUN.BOSS_AT_S - 0.001
-	h.check(not r.boss_phase(), "m12: un passo prima dei 720 s il boss non e' ancora arrivato")
+	h.check(not r.boss_phase(), "m12: un passo prima dei 840 s il boss non e' ancora arrivato")
 	h.check(not r.run_over(), "m12: e la partita non e' finita")
 	r.elapsed_s = RUN.BOSS_AT_S
-	h.check(r.boss_phase(), "m12: a 720,0 s il boss e' arrivato")
+	h.check(r.boss_phase(), "m12: a 840,0 s il boss e' arrivato")
 	h.check(not r.run_over(),
 		"m12: 720 s NON e' la fine del run: e' l'arrivo. Il run finisce a 1080 s o quando il "
 			+ "giocatore muore, e qui nessuna delle due e' scattata")
@@ -6140,9 +6143,9 @@ func _m12_ancoraggio(h, r) -> void:
 		(RUN.WEAPON_DAMAGE / RUN.WEAPON_FIRE_INTERVAL) / RUN.ENEMY_HP_RUNNER, 0.000001,
 		"m12: il tetto di assorbimento e' DPS(livello 1) / hp(runner), con i due numeri che la "
 			+ "legge dichiara: 28,5714 / 14 = 2,0408 al secondo")
-	h.near(RUN.SPAWN_RATE, RUN.ASSIMILATION_1, 0.000001,
-		"m12: il rateo E' il tetto di assorbimento: non e' una scelta, e' una divisione")
-	h.near(RUN.spawn_rate_of(1, 1), RUN.ASSIMILATION_1, 0.000001,
+	h.near(RUN.SPAWN_RATE, RUN.ASSIMILATION_1 * 0.5, 0.000001,
+		"m12: il rateo e' META' del tetto di assorbimento: partire lenti, tempo di ambientarsi")
+	h.near(RUN.spawn_rate_of(1, 1), RUN.ASSIMILATION_1 * 0.5, 0.000001,
 		"m12: e al segmento 1 col livello 1 la legge vale esattamente il tetto: il numero del "
 			+ "primo segmento e' derivato, non scelto")
 	h.check(SPAWN_RATE_PIATTO > RUN.ASSIMILATION_1,
@@ -6165,7 +6168,7 @@ func _m12_ancoraggio(h, r) -> void:
 	for coppia in [[1, 1], [1, 30], [4, 30], [4, 60], [4, 213]]:
 		var s := int(coppia[0])
 		var L := int(coppia[1])
-		h.near(RUN.spawn_rate_of(s, L), RUN.ASSIMILATION_1, 0.000001,
+		h.near(RUN.spawn_rate_of(s, L), RUN.SPAWN_RATE, 0.000001,
 			"m12 TAGLIO: la legge al segmento %d col livello %d vale %.4f/s, cioe' il tetto di "
 				% [s, L, RUN.spawn_rate_of(s, L)]
 			+ "assorbimento e non una funzione del livello: e' questo che chiude l'anello "

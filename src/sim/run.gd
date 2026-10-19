@@ -128,7 +128,14 @@ const FIREWALL_DAMAGE_FRACTION := 0.2
 ## anche il numero di biomi che la descrizione dell'utente produce. E
 ## `MORTAR_AFTER_S = 180,0 s` (m17) e' **esattamente un segmento**: il mortar si
 ## sblocca alla fine del primo.
-const SEGMENT_S := 180.0
+## ## Feedback di gioco: spam delle orde ogni 3-4 minuti
+##
+## Il segmento passa da 180,0 s (3 minuti) a 210,0 s (3,5 minuti): l'utente ha
+## chiesto intervalli di 3-4 minuti per testare la build, e 210,0 s sta dentro
+## quella banda senza allungare il run oltre i 1080 s gia' dichiarati. E' il
+## numero piu' vicino al 3,5 minuti che tiene BOSS_AT_S = 4 x SEGMENT_S = 840 s
+## dentro RUN_END_S = 1080 s, lasciando ~4 minuti di zona boss.
+const SEGMENT_S := 210.0
 const SEGMENTS := 4
 
 ## Il boss: fine segmento 4. `4 x 180 s`, scritto come prodotto e non come
@@ -449,7 +456,14 @@ const ASSIMILATION_1 := (WEAPON_DAMAGE / WEAPON_FIRE_INTERVAL) / ENEMY_HP_RUNNER
 ## nome resta `SPAWN_RATE` perche' `tests/test_gameloop.gd` e
 ## `tests/test_progression.gd` lo leggono come costante e devono continuare a
 ## leggere **il rateo di avvio**, che e' esattamente questo numero.
-const SPAWN_RATE := ASSIMILATION_1
+## ## Feedback di gioco: partire molto lenti
+##
+## Il rateo di avvio passa da ASSIMILATION_1 (2,0408/s) a meta': il giocatore
+## di livello 1 assorbe 2,04 nemici/s, quindi un rateo dimezzato lascia il campo
+## che cresce con lento respiro invece di saturarsi subito, e dà tempo di
+## ambientarsi. Il tetto di assorbimento resta dichiarato in ASSIMILATION_1 e il
+## test verifica il rapporto (ora 0,5) invece di l'uguaglianza.
+const SPAWN_RATE := ASSIMILATION_1 * 0.5
 
 ## ## IL RECUPERO DEL RATEO **NON ESISTE**, ed e' una decisione, non una dimenticanza
 ##
@@ -699,7 +713,7 @@ func _init() -> void:
 ## Il numero e' **180,0 s** e non «l'onda N» perche' l'onda 1 non dura piu' 180 s
 ## al ritmo di oggi (vedi `elapsed_s` qui sopra): «terzo minuto» deve dire il
 ## terzo minuto anche se `-gameplay` cambia ancora il ritmo dell'onda 1.
-static var MORTAR_AFTER_S := 180.0
+static var MORTAR_AFTER_S := 210.0
 
 ## Un passo di partita: il tempo passa **qui e solo qui**.
 ##

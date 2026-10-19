@@ -466,10 +466,12 @@ const M16_VECCHIA := 0.7
 ## (200). Lo scenario e' «coperto», ed e' quello che l'utente ha giocato.
 const M16_NEMICI := 200
 ## Tetto di passi per arrivare a `M16_NEMICI` vivi. Il riempimento va al ritmo di
-## `run.spawn_rate()` (8/s), quindi 200 nemici sono ~25 s: 6000 passi sono 100 s,
-## quattro volte quello, e il tetto serve a far fallire la sezione invece di
+## `run.spawn_rate()` (ora `Run.SPAWN_RATE = ASSIMILATION_1 * 0.5`, cioe' circa
+## 1,02/s: il rateo e' stato dimezzato rispetto a prima per dare respiro al
+## giocatore di livello 1), quindi 200 nemici sono ~196 s: 12000 passi sono
+## 200 s, circa quello, e il tetto serve a far fallire la sezione invece di
 ## girare per sempre.
-const M16_PASSI_PIENI := 6000
+const M16_PASSI_PIENI := 12000
 ## Passi di riscaldamento **prima** della finestra: l'orda deve arrivare addosso,
 ## altrimenti la finestra misurerebbe un campo vuoto. 900 passi sono 15 s.
 const M16_SCALDATURA := 900

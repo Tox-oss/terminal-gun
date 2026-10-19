@@ -1269,7 +1269,22 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Step 2 del design doc — specie speciali Trojan e Wurm** — GATE 8/8, PERM 15/15, committata.
 
-**Onda pendente (nuova):** **Step 3 del design doc — stack armi / weapon_pipeline.gd.** Gestione della stringa di esecuzione e dei modificatori (Noita-style): pipeline di nodi (Comandi, Modificatori, Operatori) con slot RAM, Buffer Overflow. Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale).
+**Onda chiusa:** **Step 3 del design doc — stack armi / weapon_pipeline.gd** — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (correttiva):** **Fix movimento + pipeline interattiva (tasto B).** Tre problemi segnalati dall'utente:
+1. Movimento compromesso, nemici slittano indietro — lo scroll-W è ancora sbagliato (trattato come riposizionamento del contenuto, non come meccanica di inseguimento). Debito aperto.
+2. Pipeline visibile on-screen ma non modificabile: va apribile con B, che apre un menu che permette di spostare i comandi mettendo in pausa il gioco (get_tree().paused = true, process_mode Always per i menu).
+3. Comandi e card non rispecchiano le istruzioni: container UI che bloccano input (mouse_filter), sincronizzazione carta scelta → token pipeline, card/box interazione.
+
+Foglie, nell'ordine: **orda → arena → gameplay → ui** (sequenziale).
+
+Scope:
+- `-orda`: correggere scroll-W (mappa mobile che accompagna il giocatore, spawn dentro la mappa), src/sim/, tests/test_orda.gd, tests/test_gameloop.gd.
+- `-arena`: rendering mappa mobile coerente (no slittamento), src/render/, scenes/arena_main.tscn, tests/test_arena.gd.
+- `-gameplay`: pipeline interattiva con B (pausa, spostamento comandi), sincronizzazione carta → token, src/player/, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: card/box UI, mouse_filter, pannello pipeline modificabile, menu pausa con B, src/ui/, scenes/hud.tscn, tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare ogni foglia. Prima foglia: **orda**.
 
 Meccanica dichiarata dall'utente (design_concettuale.md §3 e §4).
 

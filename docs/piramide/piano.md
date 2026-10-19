@@ -1263,7 +1263,17 @@ Il primo blocco del design dell'utente (§1.8), e il suo prerequisito: **`take_d
 
 Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
-**Onda chiusa (2026-10-19):** «rimuovi torre, scorrimento in W» — GATE 8/8, PERM 15/15, committata. L'interpretazione dello scroll era sbagliata: trattato come riposizionamento del contenuto invece di meccanica di inseguimento. Correzione definita dall'utente.
+**Onda chiusa (2026-10-19):** «rimuovi torre, scorrimento in W» — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (nuova):** **Step 1 del design doc — trasformare il level-up da stat passive a nodi/comandi (stile Noita).** Sostituire le opzioni stat (Vita/Corsa/Spinta) con nodi di codice: Comandi (echo, grep, ping, curl, rm), Modificatori (-r, -f, sudo), Operatori (|, &&). Aggiungere un'interfaccia "Pipeline" in basso con slot RAM. Foglie, nell'ordine deciso dall'utente: **gameplay → ui** (sequenziale). -orda non toccato (il bestiario viene dopo, step 2).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §3 e §4): nodi di codice raccolti durante la run, assegnati in slot RAM nell'ordine desiderato; superare il limite di slot o creare combinazioni instabili provoca Buffer Overflow (autodanno + surriscaldamento temporaneo dell'arma).
+
+Scope:
+- `-gameplay`: progression.gd (offerte diventano nodi), upgrades.gd, player.gd (pipeline RAM), weapon_pipeline.gd nuovo, tests/test_progression.gd, test_upgrades.gd, test_gameplay.gd.
+- `-ui`: hud.gd, hud.tscn (pannello pipeline), tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare -ui. Prima foglia: **gameplay**.
 
 **Onda pendente (nuova, quota disponibile):** **firewall che accompagna la mappa.** La mappa è un'arena rettangolare mobile che avanza in direzione W (su sullo schermo); il giocatore deve seguirla. Se resta dentro il firewall per più di 1 s, perde il 20% della vita massima al secondo. Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
 

@@ -32,6 +32,10 @@ const SFX_IMPACT := "res://assets/sfx/bonk.wav"
 
 ## Secondi fra due colpi. 0.35 = quasi 3 colpi al secondo.
 const FIRE_INTERVAL := 0.35
+## Secondi di surriscaldamento dell'arma dopo un Buffer Overflow: per tutto
+## questo tempo l'arma non spara.
+const OVERHEAT_DURATION := 0.6
+const OVERFLOW_COOLDOWN := 0.6
 ## Danno per proiettile.
 const DAMAGE := 10.0
 ## ## m18: la velocita' del proiettile **non e' un numero**, e' una legge
@@ -262,6 +266,10 @@ var anticipa := true
 ## Countdown del proiettile successivo. Parte a `0.0`: il primo colpo esce al
 ## primo `step()`.
 var cooldown := 0.0
+## Surriscaldamento temporaneo dell'arma: mentre e' vero, l'arma non spara.
+var overheated := false
+var overheat_timer := 0.0
+var overheat_cooldown := 0.0
 ## Quanti colpi sono partiti dal caricamento. Il test ci fa caso.
 var shots := 0
 ## Il pool: 100 proiettili, nessun nodo per proiettile. Senza tipo di classe,
@@ -346,6 +354,9 @@ func reset() -> void:
 	anticipa = true
 	cooldown = 0.0
 	shots = 0
+	overheated = false
+	overheat_timer = 0.0
+	overheat_cooldown = 0.0
 	# ## m18: la velocita' torna alla **derivazione**, non a un numero scritto
 	#
 	# `reset()` e' «la regolazione di partenza», e la regolazione di partenza della
@@ -380,8 +391,11 @@ func reset() -> void:
 ## sempre: quello che si ferma e' il fuoco, non il mondo.
 func step(delta: float) -> void:
 	cooldown -= delta
+	overheat_timer = maxf(overheat_timer - delta, 0.0)
+	if overheat_timer <= 0.0:
+		overheated = false
 	_sfx_gap -= delta
-	if cooldown <= 0.0 and not _morto():
+	if cooldown <= 0.0 and not _morto() and not overheated:
 		_try_fire()
 	_chiudi_bonk_scaduti(delta)
 	if pool != null:
@@ -401,6 +415,16 @@ func step(delta: float) -> void:
 ## vicenda e nessuno dei due deve il tipo dell'altro (piano §5, regola 3). Un
 ## giocatore finto — o un'arma usata da sola — non ha `is_dead()`, e allora non
 ## e' morto: il portatore del difetto e' il giocatore vero, che ce l'ha.
+## Surriscalda l'arma per `duration` secondi: per tutto quel tempo non spara.
+func overheat(duration: float) -> void:
+	overheated = true
+	overheat_timer = maxf(overheat_timer, duration)
+	overheat_cooldown = overheat_timer
+	cooldown = maxf(cooldown, duration)
+
+func is_overheated() -> bool:
+	return overheated or overheat_timer > 0.0
+
 func _morto() -> bool:
 	if player == null or not is_instance_valid(player):
 		return false

@@ -875,15 +875,24 @@ func _pipeline_sync() -> void:
 	if pipeline != null:
 		pipeline_slots = pipeline.slots.duplicate()
 		pipeline_capacity = pipeline.capacity
+		buffer_overflowed = pipeline.overflowed
 
 func _trigger_buffer_overflow() -> void:
+	if pipeline != null:
+		pipeline._trigger_buffer_overflow()
+		_pipeline_sync()
+		buffer_overflowed = pipeline.overflowed
+		return
 	buffer_overflowed = true
 	if hp > 0.0:
 		take_damage(OVERFLOW_DAMAGE)
 	if weapon != null:
-		weapon.cooldown = maxf(float(weapon.cooldown), OVERFLOW_COOLDOWN)
-	if pipeline != null:
-		pipeline.overflowed = true
+		if weapon.has_method("overheat"):
+			weapon.overheat(OVERFLOW_COOLDOWN)
+		else:
+			weapon.cooldown = maxf(float(weapon.cooldown), OVERFLOW_COOLDOWN)
+			weapon.overheated = true
+			weapon.overheat_timer = OVERFLOW_COOLDOWN
 
 func pipeline_add(node_id: String) -> bool:
 	if pipeline == null:
@@ -893,8 +902,8 @@ func pipeline_add(node_id: String) -> bool:
 		pipeline.capacity = pipeline_capacity
 	var ok := bool(pipeline.add_node(node_id))
 	_pipeline_sync()
-	if not ok:
-		_trigger_buffer_overflow()
+	if not ok and pipeline != null:
+		buffer_overflowed = pipeline.overflowed
 	return ok
 
 func add_pipeline_node(node_id: String) -> bool:
@@ -911,8 +920,8 @@ func assign_node(slot_index: int, node_id: String) -> bool:
 		pipeline.capacity = pipeline_capacity
 	var ok := bool(pipeline.assign(slot_index, node_id))
 	_pipeline_sync()
-	if not ok:
-		_trigger_buffer_overflow()
+	if not ok and pipeline != null:
+		buffer_overflowed = pipeline.overflowed
 	return ok
 
 func assign_pipeline_slot(slot_index: int, node_id: String) -> bool:
@@ -929,8 +938,8 @@ func set_pipeline(nodes: Array) -> bool:
 		pipeline.capacity = pipeline_capacity
 	var ok := bool(pipeline.set_slots(nodes))
 	_pipeline_sync()
-	if not ok:
-		_trigger_buffer_overflow()
+	if not ok and pipeline != null:
+		buffer_overflowed = pipeline.overflowed
 	return ok
 
 func set_pipeline_slots(nodes: Array) -> bool:

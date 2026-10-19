@@ -9,6 +9,12 @@ const MODIFIERS := ["-r", "-f", "sudo"]
 const OPERATORS := ["|", "&&"]
 const COMMANDS := ["echo", "grep", "ping", "curl", "rm"]
 
+## Danno che il Buffer Overflow infligge al giocatore, in HP.
+const OVERFLOW_DAMAGE := 15.0
+## Secondi di surriscaldamento dell'arma dopo un Buffer Overflow: per tutto
+## questo tempo l'arma non spara.
+const OVERFLOW_COOLDOWN := 0.6
+
 var player = null
 var weapon = null
 var capacity: int = CAPACITY
@@ -59,7 +65,7 @@ func clear() -> void:
 ## allocazione: lavora sugli slot gia' presenti.
 func execute() -> bool:
 	if not is_stable(slots):
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	# Valutazione sequenziale: un operatore `&&` interrompe la catena se il
 	# nodo precedente non ha prodotto un risultato; `|` passa il risultato al
@@ -73,11 +79,8 @@ func execute() -> bool:
 			# `|` non interrompe: il risultato passa al nodo successivo.
 			continue
 		if _is_modifier(id):
-			# Un modificatore si applica al comando che lo segue; se non c'e'
-			# nessun comando a destra, la combinazione e' instabile (gia' coperta
-			# da is_stable, ma si difende qui per non leggere fuori confine).
 			if i + 1 >= slots.size() or not _is_command(str(slots[i + 1])):
-				overflowed = true
+				_trigger_buffer_overflow()
 				return false
 			continue
 		# Comando: si esegue sempre. Il risultato resta vero per default.
@@ -103,12 +106,12 @@ func eval() -> bool:
 ## Aggiunge un nodo in coda, se c'e' spazio e la combinazione resta stabile.
 func add_node(id: String) -> bool:
 	if slots.size() >= capacity:
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	slots.append(id)
 	if not is_stable():
 		slots.pop_back()
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	overflowed = false
 	return true
@@ -119,7 +122,7 @@ func add(id: String) -> bool:
 
 func assign(slot_index: int, id: String) -> bool:
 	if slot_index < 0 or slot_index >= capacity:
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	if id == "":
 		# Svuota lo slot senza creare buchi: rimuove la voce in quella
@@ -130,7 +133,7 @@ func assign(slot_index: int, id: String) -> bool:
 		return true
 	if slot_index >= slots.size():
 		if slots.size() >= capacity:
-			overflowed = true
+			_trigger_buffer_overflow()
 			return false
 		slots.append(id)
 	else:
@@ -138,13 +141,12 @@ func assign(slot_index: int, id: String) -> bool:
 		slots[slot_index] = id
 		if not is_stable():
 			slots[slot_index] = precedente
-			overflowed = true
+			_trigger_buffer_overflow()
 			return false
 	if not is_stable():
-		# Rimuovi l'ultima voce aggiunta se la combinazione non regge.
 		if slots.size() > 0:
 			slots.pop_back()
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	overflowed = false
 	return true
@@ -154,10 +156,10 @@ func set_slots(nodes: Array) -> bool:
 	for n in nodes:
 		nuovo.append(str(n))
 	if nuovo.size() > capacity:
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	if not is_stable(nuovo):
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	slots = nuovo
 	overflowed = false
@@ -168,10 +170,10 @@ func set_slots(nodes: Array) -> bool:
 ## la mossa rompe la stabilita'.
 func move(from_index: int, to_index: int) -> bool:
 	if from_index < 0 or from_index >= slots.size():
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	if to_index < 0:
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	if from_index == to_index:
 		overflowed = false
@@ -181,10 +183,25 @@ func move(from_index: int, to_index: int) -> bool:
 	var target := clampi(to_index, 0, slots.size())
 	slots.insert(target, id)
 	if slots.size() > capacity or not is_stable():
-		# Ritorna allo stato precedente.
 		slots.remove_at(target)
 		slots.insert(from_index if from_index <= slots.size() else slots.size(), id)
-		overflowed = true
+		_trigger_buffer_overflow()
 		return false
 	overflowed = false
 	return true
+
+## Applica gli effetti del Buffer Overflow: autodanno al giocatore e
+## surriscaldamento temporaneo dell'arma (blocco sparo per OVERFLOW_COOLDOWN s).
+func _trigger_buffer_overflow() -> void:
+	overflowed = true
+	if player != null and is_instance_valid(player):
+		if player.has_method("take_damage"):
+			player.take_damage(OVERFLOW_DAMAGE)
+		player.buffer_overflowed = true
+	if weapon != null and is_instance_valid(weapon):
+		if weapon.has_method("overheat"):
+			weapon.overheat(OVERFLOW_COOLDOWN)
+		else:
+			weapon.cooldown = maxf(float(weapon.cooldown), OVERFLOW_COOLDOWN)
+			weapon.overheated = true
+			weapon.overheat_timer = OVERFLOW_COOLDOWN

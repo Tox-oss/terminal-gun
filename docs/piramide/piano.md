@@ -1277,7 +1277,19 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Bestiario — Rootkit (sudo su)** — GATE 8/8, PERM 15/15, committata.
 
-**Onda pendente (nuova):** **Bestiario — Adware / Pop-up Storm.** Piccole entità caotiche che, se circondano il giocatore, riempiono lo schermo di finestre di testo finte ([CLICK HERE]). Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
+**Onda chiusa:** **Bestiario — Adware / Pop-up Storm** — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (nuova):** **Bestiario — Kernel Panic (boss).** Boss finale: 900 HP, alta resistenza al knockback, distorce l'estetica del terminale e spara raffiche a 360°. Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §2).
+
+Scope:
+- `-orda`: boss in src/sim/ (enemy.gd, horde.gd, run.gd): tipo, tabelle (HP 900, resistenza knockback alta), spawn (fase 4 / 09:00-12:00), raffiche 360°. tests/test_orda.gd, tests/test_gameloam.gd.
+- `-arena`: rendering modello enemy_boss.glb, src/render/, scenes/arena_main.tscn, tests/test_arena.gd.
+- `-gameplay`: collisione/danno, raffiche 360°, src/player/, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: feedback visivo (distorsione terminale), src/ui/, scenes/hud.tscn, tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare ogni foglia. Prima foglia: **orda**.
 
 Meccanica dichiarata dall'utente (design_concettuale.md §2).
 

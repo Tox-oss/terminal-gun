@@ -272,6 +272,90 @@ theme_override_font_sizes/font_size = 16
 text = "ROOTKIT EMERGING"
 horizontal_alignment = 0
 
+[node name="Boss" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="BossWarning" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="BossAlert" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="KernelPanic" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="KernelPanicPhase" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="Distortion" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
+[node name="TerminalDistortion" type="Label" parent="Root"]
+visible = false
+offset_left = 24.0
+offset_top = 165.0
+offset_right = 360.0
+offset_bottom = 193.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.784314)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "KERNEL PANIC - BOSS"
+horizontal_alignment = 0
+
 [node name="Overheat" type="Label" parent="Root"]
 visible = false
 offset_left = 24.0

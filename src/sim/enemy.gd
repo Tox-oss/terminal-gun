@@ -29,8 +29,9 @@ const TROJAN := 5
 const WURM := 6
 const RANSOMWARE := 7
 const ROOTKIT := 8
-const KIND_COUNT := 9
-const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wurm", "ransomware", "rootkit"]
+const ADWARE := 9
+const KIND_COUNT := 10
+const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wurm", "ransomware", "rootkit", "adware"]
 
 # Tabelle per specie, allineate 1:1 con KIND_NAMES. Indexate da `kind`.
 ##
@@ -50,12 +51,12 @@ const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wu
 ## uno contro i numeri scritti qui sotto. Un quinto tipo che si fosse portato
 ## via una cifra delle altre quattro avrebbe spostato le misure di sette
 ## milestone senza dirlo, e la cosa piu' vicina a un numero che mente.
-static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0, 65.0, 50.0, 30.0, 220.0, 45.0])
-static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7, 2.9, 5.0, 3.5, 1.5, 5.5])
-static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90, 1.40, 0.75, 0.50, 1.20, 0.55])
-static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0, 3.2, 1.5, 0.9, 4.5, 1.3])
+static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0, 65.0, 50.0, 30.0, 220.0, 45.0, 18.0])
+static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7, 2.9, 5.0, 3.5, 1.5, 5.5, 7.0])
+static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90, 1.40, 0.75, 0.50, 1.20, 0.55, 0.35])
+static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0, 3.2, 1.5, 0.9, 4.5, 1.3, 0.5])
 ## Quanto knockback il nemico si mangia: 0 = tutto, 0.9 = quasi immobile.
-static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90, 0.70, 0.25, 0.10, 0.85, 0.20])
+static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90, 0.70, 0.25, 0.10, 0.85, 0.20, 0.05])
 ## Tinta per specie: e' quello che arena passa al MultiMesh, cosi' l'arena non
 ## deve sapere cosa sia un nemico.
 ##
@@ -72,6 +73,7 @@ static var COLOR := PackedColorArray([
 	Color(0.30, 0.80, 0.40),
 	Color(0.35, 0.05, 0.15),
 	Color(0.10, 0.45, 0.25),
+	Color(1.00, 0.45, 0.75),
 ])
 
 ## Oltre' questa distanza dal bersaglio il nemico rallenta (arrivo).
@@ -596,6 +598,12 @@ static func step(i: int, delta: float, target: Vector3, push: Vector3,
 	if flow != null:
 		dir = flow.steer(pos, target)
 
+	# Adware: movimento caotico, piccole entita' che sciamano.
+	if kind == ADWARE:
+		var jitter := Vector3(sin(pos.x * 5.3 + pos.z), 0.0, cos(pos.z * 4.7 - pos.x))
+		var combined := dir + jitter * 0.7
+		if combined.length_squared() > 0.0001:
+			dir = combined.normalized()
 	# Arrivo: rallenta vicino al bersaglio, altrimenti gli si infila addosso e
 	# i 200 nemici diventano un solo punto.
 	var arrive := clampf(dist / ARRIVE_RADIUS, 0.0, 1.0)

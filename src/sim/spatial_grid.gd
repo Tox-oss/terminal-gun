@@ -43,7 +43,7 @@ const CELL := 4.0
 ## grande costa solo `BUCKET_SIZE * 4` byte per cella riscaldata, e il
 ## riscaldamento sta in `setup()`, che gira una volta sola all'avvio: 841 celle
 ## da 25 slot sono ~84 KB, presi **prima** del primo frame e mai piu'.
-const BUCKET_SLOTS := 32
+const BUCKET_SLOTS := 48
 ## `bucket[0]` = quanti indici validi.
 const HEAD := 0
 ## Il primo slot di dato.

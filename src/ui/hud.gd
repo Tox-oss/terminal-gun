@@ -363,6 +363,20 @@ var rootkit_alert: bool = false
 var rootkit_warning: bool = false
 var sudo_su: bool = false
 var rootkit_time: float = 0.0
+# --- Boss (Kernel Panic): fase boss a 840 s -------------------------------------
+## Stato della fase boss. Alias per compatibilita', come per rootkit/overheat.
+var boss: bool = false
+var boss_phase: bool = false
+var kernel_panic: bool = false
+var kernel_panic_phase: bool = false
+var boss_active: bool = false
+var boss_arrived: bool = false
+var boss_warning: bool = false
+var boss_alert: bool = false
+var boss_distortion: bool = false
+var terminal_distortion: bool = false
+var distortion: bool = false
+var kernel_panic_time: float = 0.0
 # --- Surriscaldamento / crash (Buffer Overflow) --------------------------------
 ## Stato di surriscaldamento/crash. Tutti gli alias puntano allo stesso stato.
 var overheat: bool = false
@@ -431,6 +445,14 @@ var _restart_hint: Label = null
 var _firewall: Label = null
 ## Rootkit: indicatore di emersione. Sta in `Root`.
 var _rootkit: Label = null
+## Boss (Kernel Panic): indicatore di fase boss / distorsione terminale.
+var _boss: Label = null
+var _boss_warning: Label = null
+var _boss_alert: Label = null
+var _kernel_panic: Label = null
+var _kernel_panic_phase: Label = null
+var _distortion: Label = null
+var _terminal_distortion: Label = null
 ## Surriscaldamento / crash: indicatori (alias per compatibilita').
 var _overheat: Label = null
 var _crash: Label = null
@@ -521,6 +543,40 @@ func _ready() -> void:
 		_rootkit = get_node_or_null("Root/RootkitAlert") as Label
 	if _rootkit == null:
 		_rootkit = get_node_or_null("Root/RootkitWarning") as Label
+	# Boss (Kernel Panic): legge i nodi disponibili e li aliasa tutti sul primo
+	# trovato, come per rootkit/overheat: un nodo solo basta a rappresentare lo
+	# stato, ma i nomi diversi rendono il test robusto.
+	_boss = get_node_or_null("Root/Boss") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/BossWarning") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/BossAlert") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/KernelPanic") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/KernelPanicPhase") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/Distortion") as Label
+	if _boss == null:
+		_boss = get_node_or_null("Root/TerminalDistortion") as Label
+	_boss_warning = get_node_or_null("Root/BossWarning") as Label
+	if _boss_warning == null:
+		_boss_warning = _boss
+	_boss_alert = get_node_or_null("Root/BossAlert") as Label
+	if _boss_alert == null:
+		_boss_alert = _boss
+	_kernel_panic = get_node_or_null("Root/KernelPanic") as Label
+	if _kernel_panic == null:
+		_kernel_panic = _boss
+	_kernel_panic_phase = get_node_or_null("Root/KernelPanicPhase") as Label
+	if _kernel_panic_phase == null:
+		_kernel_panic_phase = _boss
+	_distortion = get_node_or_null("Root/Distortion") as Label
+	if _distortion == null:
+		_distortion = _boss
+	_terminal_distortion = get_node_or_null("Root/TerminalDistortion") as Label
+	if _terminal_distortion == null:
+		_terminal_distortion = _boss
 	_overheat = get_node_or_null("Root/Overheat") as Label
 	_crash = get_node_or_null("Root/Crash") as Label
 	_buffer_overflow = get_node_or_null("Root/BufferOverflow") as Label
@@ -893,6 +949,103 @@ func rootkit_text() -> String:
 func rootkit_emerged_text() -> String:
 	return rootkit_text()
 
+# --- Boss (Kernel Panic): superficie per il test ------------------------------
+func _set_boss_state(p_on: bool) -> void:
+	var changed := p_on != boss
+	boss = p_on
+	boss_phase = p_on
+	kernel_panic = p_on
+	kernel_panic_phase = p_on
+	boss_active = p_on
+	boss_arrived = p_on
+	boss_warning = p_on
+	boss_alert = p_on
+	boss_distortion = p_on
+	terminal_distortion = p_on
+	distortion = p_on
+	if p_on:
+		kernel_panic_time = kernel_panic_time if kernel_panic_time > 0.0 else 0.0
+	if changed:
+		redraw()
+
+func set_boss(p_value: Variant) -> void:
+	if p_value is String:
+		_set_boss_state(str(p_value) != "")
+	else:
+		_set_boss_state(bool(p_value))
+func set_boss_phase(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_kernel_panic(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_kernel_panic_phase(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_boss_active(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_boss_arrived(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_boss_warning(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_boss_alert(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_distortion(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_terminal_distortion(p_value: Variant) -> void:
+	set_boss(p_value)
+func set_boss_distortion(p_value: Variant) -> void:
+	set_boss(p_value)
+
+func set_boss_time(p_seconds: float) -> void:
+	kernel_panic_time = maxf(_finite_or_zero(p_seconds), 0.0)
+	if boss:
+		redraw()
+func set_kernel_panic_time(p_seconds: float) -> void:
+	set_boss_time(p_seconds)
+
+func boss_visible() -> bool:
+	return _boss != null and _boss.visible
+func boss_phase_visible() -> bool:
+	return boss_visible()
+func kernel_panic_visible() -> bool:
+	return boss_visible()
+func kernel_panic_phase_visible() -> bool:
+	return boss_visible()
+func boss_active_visible() -> bool:
+	return boss_visible()
+func boss_arrived_visible() -> bool:
+	return boss_visible()
+func boss_warning_visible() -> bool:
+	return boss_visible()
+func boss_alert_visible() -> bool:
+	return boss_visible()
+func distortion_visible() -> bool:
+	return boss_visible()
+func terminal_distortion_visible() -> bool:
+	return boss_visible()
+
+func boss_text() -> String:
+	return _boss.text if _boss != null else ""
+func boss_phase_text() -> String:
+	return boss_text()
+func kernel_panic_text() -> String:
+	return boss_text()
+func kernel_panic_phase_text() -> String:
+	return boss_text()
+func boss_warning_text() -> String:
+	return boss_text()
+func boss_alert_text() -> String:
+	return boss_text()
+func distortion_text() -> String:
+	return boss_text()
+func terminal_distortion_text() -> String:
+	return boss_text()
+
+func is_boss_phase() -> bool:
+	return boss
+func is_boss() -> bool:
+	return boss
+func is_kernel_panic() -> bool:
+	return boss
+
 func is_rootkit_emerged() -> bool:
 	return rootkit
 
@@ -1150,6 +1303,7 @@ func refresh() -> void:
 	_refresh_overheat(game)
 	_refresh_command_blocked(game)
 	_refresh_rootkit(game)
+	_refresh_boss(game)
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
@@ -1476,6 +1630,73 @@ func _refresh_rootkit(game: Node) -> void:
 					state = true
 	var prev := rootkit
 	_set_rootkit_state(state)
+	if state != prev:
+		redraw()
+
+# --- Boss (Kernel Panic): lettura dal contratto ----------------------------------
+func _refresh_boss(game: Node) -> void:
+	var state := false
+	# Player
+	var player = game.get("player")
+	if player is Object and is_instance_valid(player):
+		var p := player as Object
+		for key in ["boss", "boss_phase", "kernel_panic", "kernel_panic_phase", "boss_active", "boss_arrived", "boss_warning", "boss_alert", "distortion", "terminal_distortion", "boss_distortion"]:
+			var raw = p.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+		for m in ["is_boss", "is_boss_phase", "is_kernel_panic", "boss_phase", "kernel_panic"]:
+			if p.has_method(m):
+				var r = p.call(m)
+				if typeof(r) == TYPE_BOOL and bool(r):
+					state = true
+		var weapon = null
+		var raw_w = p.get("weapon")
+		if raw_w is Object and is_instance_valid(raw_w):
+			weapon = raw_w as Object
+		if weapon != null:
+			for key in ["boss", "boss_phase", "kernel_panic", "distortion"]:
+				var raw = weapon.get(key)
+				if typeof(raw) == TYPE_BOOL and bool(raw):
+					state = true
+	# Horde
+	var horde = game.get("horde")
+	if horde is Object and is_instance_valid(horde):
+		var h := horde as Object
+		for key in ["boss", "boss_phase", "kernel_panic", "boss_active", "boss_arrived"]:
+			var raw = h.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+			if (typeof(raw) == TYPE_INT or typeof(raw) == TYPE_FLOAT) and int(raw) > 0:
+				state = true
+		for m in ["boss_phase", "is_boss_phase", "has_boss", "boss_arrived"]:
+			if h.has_method(m):
+				var r = h.call(m)
+				if typeof(r) == TYPE_BOOL and bool(r):
+					state = true
+				if (typeof(r) == TYPE_INT or typeof(r) == TYPE_FLOAT) and int(r) > 0:
+					state = true
+		# Tempo: fase boss a 840 s.
+		var seconds := -1.0
+		if h.has_method("elapsed_s"):
+			var raw_e = h.call("elapsed_s")
+			if typeof(raw_e) == TYPE_FLOAT or typeof(raw_e) == TYPE_INT:
+				seconds = float(raw_e)
+		if seconds >= 840.0:
+			state = true
+		# Oggetto run
+		var run = h.get("run")
+		if run is Object and is_instance_valid(run):
+			var r := run as Object
+			if r.has_method("boss_phase"):
+				var bp = r.call("boss_phase")
+				if typeof(bp) == TYPE_BOOL and bool(bp):
+					state = true
+			var raw_e2 = r.get("elapsed_s")
+			if typeof(raw_e2) == TYPE_FLOAT or typeof(raw_e2) == TYPE_INT:
+				if float(raw_e2) >= 840.0:
+					state = true
+	var prev := boss
+	_set_boss_state(state)
 	if state != prev:
 		redraw()
 
@@ -2042,6 +2263,7 @@ func redraw() -> void:
 	_redraw_overheat()
 	_redraw_command_blocked()
 	_redraw_rootkit()
+	_redraw_boss()
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
@@ -2148,6 +2370,15 @@ func _redraw_rootkit() -> void:
 	_rootkit.visible = rootkit
 	if rootkit:
 		_rootkit.text = "ROOTKIT EMERGING"
+
+func _redraw_boss() -> void:
+	var nodes := [_boss, _boss_warning, _boss_alert, _kernel_panic, _kernel_panic_phase, _distortion, _terminal_distortion]
+	for node in nodes:
+		if node == null:
+			continue
+		node.visible = boss
+		if boss:
+			node.text = "KERNEL PANIC - BOSS"
 
 # --- Interno ------------------------------------------------------------------
 ## Applica i due numeri dell'XP senza ridisegnare: `set_progression` e

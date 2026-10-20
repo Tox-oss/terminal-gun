@@ -787,6 +787,7 @@ func _hud_alone(h) -> void:
 	_overheat_alone(h, hud)
 	_command_blocked_alone(h, hud)
 	_rootkit_alone(h, hud)
+	_boss_alone(h, hud)
 	_pipeline_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
@@ -1325,6 +1326,7 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	_overheat_from_contract(h, game, hud, round_no)
 	_command_blocked_from_contract(h, game, hud, round_no)
 	_rootkit_from_contract(h, game, hud, round_no)
+	_boss_from_contract(h, game, hud, round_no)
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
 	_health_from_contract(h, game, arena, hud, round_no)
@@ -1841,6 +1843,42 @@ func _rootkit_from_contract(h, game: Node, hud, round_no: int) -> void:
 	hud.refresh()
 	h.check(not hud.rootkit_visible(),
 		"avvio %d: tolto il rootkit l'indicatore deve sparire" % round_no)
+
+## Indicatore Boss (Kernel Panic): compare e sparisce.
+func _boss_alone(h, hud) -> void:
+	h.check(not hud.boss_visible(), "all'avvio l'indicatore del boss non si vede")
+	hud.set_boss(true)
+	h.check(hud.boss_visible(), "con set_boss(true) l'indicatore deve vedersi")
+	h.check(hud.boss_text() != "", "il boss deve avere un testo: \"%s\"" % hud.boss_text())
+	hud.set_boss(false)
+	h.check(not hud.boss_visible(), "con set_boss(false) l'indicatore deve sparire")
+
+## L'HUD legge lo stato del boss dal contratto (player/horde/tempo).
+func _boss_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var player = game.get("player")
+	if not h.check(player is Object and is_instance_valid(player),
+			"avvio %d: il contratto non espone un player valido" % round_no):
+		return
+	(player as Object).set("boss", true)
+	(player as Object).set("kernel_panic", true)
+	var horde = game.get("horde")
+	if horde is Object and is_instance_valid(horde):
+		var run = (horde as Object).get("run")
+		if run is Object and is_instance_valid(run):
+			(run as Object).set("elapsed_s", 900.0)
+	hud.refresh()
+	h.check(hud.boss_visible() or hud.boss_phase_visible() or hud.kernel_panic_visible(),
+		"avvio %d: con boss attivo l'indicatore deve vedersi" % round_no)
+	if player is Object and is_instance_valid(player):
+		(player as Object).set("boss", false)
+		(player as Object).set("kernel_panic", false)
+	if horde is Object and is_instance_valid(horde):
+		var run2 = (horde as Object).get("run")
+		if run2 is Object and is_instance_valid(run2):
+			(run2 as Object).set("elapsed_s", 0.0)
+	hud.refresh()
+	h.check(not hud.boss_visible(),
+		"avvio %d: tolto il boss l'indicatore deve sparire" % round_no)
 
 ## Il numero sotto la barra della vita: intero **arrotondato**, perche' e' quello
 ## che si vede. `roundi` e' la stessa regola dichiarata in `hud.gd`: l'HUD non

@@ -135,6 +135,9 @@ const SEPARATION_CHECKS := 6
 const SEPARATION_FORCE := 11.0
 ## Dalla zona dei colpi dello sparo, un nemico non deve arrivare addosso.
 const MIN_SPAWN_GAP := 12.0
+## Adware: soglia di circondamento per attivare il pop-up storm.
+const ADWARE_STORM_THRESHOLD := 5
+const ADWARE_SURROUND_RADIUS := 8.0
 
 ## Il buco di nascita della **disposizione iniziale**, in metri dal giocatore.
 ##
@@ -512,6 +515,10 @@ var rootkits_emerged: int:
 	set(v):
 		_rootkit_emerged_count = int(v)
 		_rootkit_under_player = int(v) > 0
+## Adware: pop-up storm. Numero di adware vicini al giocatore in questo passo
+## e flag di attivazione quando superano la soglia.
+var adware_near_player: int = 0
+var popup_storm: bool = false
 ## Da dove viene il numero del telegrrafo che sta sul contratto: `contratto` se
 ## e' stato registrato, `fallback` altrimenti. Come `body_scale_source`: distingue
 ## «canale scritto» da «canale che nessuno ha scritto», che sembrano uguali.
@@ -1643,6 +1650,18 @@ func step(delta: float) -> void:
 	# scambio-ultimo: la richiesta di un nemico appena ucciso e' gia' stata
 	# consegnata, e la decisione di m12 — una richiesta consegnata non e' un
 	# colpo perso — vale anche per il mortar).
+	# Adware: pop-up storm. Conta gli adware vicini al giocatore in questo passo
+	# e attiva lo storm se superano la soglia. Nessuna allocazione.
+	adware_near_player = 0
+	if ha_giocatore:
+		for _ai in count:
+			if kinds[_ai] != E.ADWARE:
+				continue
+			var _dx := transforms[_ai].x - focus.x
+			var _dz := transforms[_ai].z - focus.z
+			if sqrt(_dx * _dx + _dz * _dz) <= ADWARE_SURROUND_RADIUS:
+				adware_near_player += 1
+	popup_storm = ha_giocatore and adware_near_player >= ADWARE_STORM_THRESHOLD
 	_mortar_step(delta, focus, ha_giocatore)
 	_apply_bites(delta)
 	_apply_firewall(delta)

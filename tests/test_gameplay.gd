@@ -355,6 +355,13 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## **Rootkit**: stesso criterio degli incrementi precedenti (un nodo per specie,
 ## non un nodo per colpo), quindi il tetto passa da 27 a 28.
 ##
+## ## 28 -> 29: l'incremento e' ancora di `-arena` e si dichiara qui.
+## E' **un nodo solo**, una `MultiMeshInstance3D` aggiunta da `-arena` (gate
+## rosso: il test asseriva 28 nodi, la scena ne ha 29): stesso criterio degli
+## incrementi precedenti (un nodo per disegno, non un nodo per colpo), quindi
+## il tetto passa da 28 a 29. Il motivo del nodo nuovo e' di `-arena` e non di
+## -gameplay: nessun nodo di -gameplay e' stato aggiunto.
+##
 ## ## 24 -> 30: l'incremento e' della **torre**, e la voce era definita male (m12)
 ##
 ## Fino a ieri questa costante diceva «la scena **meno HUD**», e li' c'era dentro
@@ -382,7 +389,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 28
+const NODI_SCENA_VERA := 29
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #

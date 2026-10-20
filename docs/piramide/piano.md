@@ -1275,7 +1275,19 @@ Da aggiornare a fine onda. **w0, w1, w2 e w3 verdi. Milestone 1 chiusa.**
 
 **Onda chiusa:** **Bestiario — Ransomware (.locked)** — GATE 8/8, PERM 15/15, committata.
 
-**Onda pendente (nuova):** **Bestiario — Rootkit (sudo su).** Si muove "sotto" la griglia di gioco e emerge all'improvviso sotto i piedi del player. Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
+**Onda chiusa:** **Bestiario — Rootkit (sudo su)** — GATE 8/8, PERM 15/15, committata.
+
+**Onda pendente (nuova):** **Bestiario — Adware / Pop-up Storm.** Piccole entità caotiche che, se circondano il giocatore, riempiono lo schermo di finestre di testo finte ([CLICK HERE]). Foglie, nell'ordine deciso dall'utente: **orda → arena → gameplay → ui** (sequenziale).
+
+Meccanica dichiarata dall'utente (design_concettuale.md §2).
+
+Scope:
+- `-orda`: nuova specie in src/sim/ (enemy.gd, horde.gd, run.gd): tipo, tabelle, spawn, movimento caotico. tests/test_orda.gd, tests/test_gameloam.gd.
+- `-arena`: rendering modello enemy_adware.glb, src/render/, scenes/arena_main.tscn, tests/test_arena.gd.
+- `-gameplay`: collisione/danno da circondamento, src/player/, src/weapons/, tests/test_gameplay.gd, test_progression.gd, test_upgrades.gd.
+- `-ui`: feedback visivo (pop-up finte), src/ui/, scenes/hud.tscn, tests/test_ui.gd.
+
+Il vertice congela la superficie contrattuale (se serve) in contracts.gd prima di lanciare ogni foglia. Prima foglia: **orda**.
 
 Meccanica dichiarata dall'utente (design_concettuale.md §2).
 

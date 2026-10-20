@@ -785,6 +785,7 @@ func _hud_alone(h) -> void:
 	_game_over_screen(h, hud)
 	_firewall_alone(h, hud)
 	_overheat_alone(h, hud)
+	_command_blocked_alone(h, hud)
 	_pipeline_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
@@ -1321,6 +1322,7 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	_clock_from_contract(h, game, hud, round_no)
 	_firewall_from_contract(h, game, hud, round_no)	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
 	_overheat_from_contract(h, game, hud, round_no)
+	_command_blocked_from_contract(h, game, hud, round_no)
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
 	_health_from_contract(h, game, arena, hud, round_no)
@@ -1763,6 +1765,47 @@ func _overheat_from_contract(h, game: Node, hud, round_no: int) -> void:
 	hud.refresh()
 	h.check(not hud.overheat_visible(),
 		"avvio %d: tolto il surriscaldamento l'indicatore deve sparire" % round_no)
+
+## Indicatore comando bloccato (Ransomware): compare e sparisce.
+func _command_blocked_alone(h, hud) -> void:
+	h.check(not hud.command_blocked_visible(), "all'avvio l'indicatore del comando bloccato non si vede")
+	hud.set_command_blocked(true)
+	hud.set_command_blocked_name("echo")
+	h.check(hud.command_blocked_visible(), "con set_command_blocked(true) l'indicatore deve vedersi")
+	h.check(hud.command_blocked_text() != "",
+		"il comando bloccato deve essere a schermo: \"%s\"" % hud.command_blocked_text())
+	hud.set_command_blocked(false)
+	h.check(not hud.command_blocked_visible(), "con set_command_blocked(false) l'indicatore deve sparire")
+
+## L'HUD legge lo stato del comando bloccato dal contratto (player/weapon).
+func _command_blocked_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var player = game.get("player")
+	if not h.check(player is Object and is_instance_valid(player),
+			"avvio %d: il contratto non espone un player valido" % round_no):
+		return
+	(player as Object).set("command_blocked", true)
+	(player as Object).set("blocked_command", true)
+	(player as Object).set("locked", true)
+	(player as Object).set("disabled_command", true)
+	(player as Object).set("command_blocked_name", "echo")
+	var weapon = (player as Object).get("weapon")
+	if weapon is Object and is_instance_valid(weapon):
+		(weapon as Object).set("command_blocked", true)
+		(weapon as Object).set("command_blocked_time", 1.0)
+	hud.refresh()
+	h.check(hud.command_blocked_visible() or hud.blocked_command_visible() or hud.locked_visible() or hud.disabled_command_visible(),
+		"avvio %d: con command_blocked l'indicatore deve vedersi" % round_no)
+	(player as Object).set("command_blocked", false)
+	(player as Object).set("blocked_command", false)
+	(player as Object).set("locked", false)
+	(player as Object).set("disabled_command", false)
+	(player as Object).set("command_blocked_name", "")
+	if weapon is Object and is_instance_valid(weapon):
+		(weapon as Object).set("command_blocked", false)
+		(weapon as Object).set("command_blocked_time", 0.0)
+	hud.refresh()
+	h.check(not hud.command_blocked_visible(),
+		"avvio %d: tolto il blocco l'indicatore deve sparire" % round_no)
 
 ## Il numero sotto la barra della vita: intero **arrotondato**, perche' e' quello
 ## che si vede. `roundi` e' la stessa regola dichiarata in `hud.gd`: l'HUD non

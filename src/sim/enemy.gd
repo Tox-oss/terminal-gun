@@ -27,8 +27,9 @@ const BOSS := 3
 const MORTAR := 4
 const TROJAN := 5
 const WURM := 6
-const KIND_COUNT := 7
-const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wurm"]
+const RANSOMWARE := 7
+const KIND_COUNT := 8
+const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wurm", "ransomware"]
 
 # Tabelle per specie, allineate 1:1 con KIND_NAMES. Indexate da `kind`.
 ##
@@ -48,12 +49,12 @@ const KIND_NAMES := ["runner", "grunt", "brute", "boss", "mortar", "trojan", "wu
 ## uno contro i numeri scritti qui sotto. Un quinto tipo che si fosse portato
 ## via una cifra delle altre quattro avrebbe spostato le misure di sette
 ## milestone senza dirlo, e la cosa piu' vicina a un numero che mente.
-static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0, 65.0, 50.0, 30.0])
-static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7, 2.9, 5.0, 3.5])
-static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90, 1.40, 0.75, 0.50])
-static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0, 3.2, 1.5, 0.9])
+static var HP_MAX := PackedFloat32Array([14.0, 34.0, 110.0, 900.0, 65.0, 50.0, 30.0, 220.0])
+static var SPEED := PackedFloat32Array([6.6, 4.0, 2.3, 1.7, 2.9, 5.0, 3.5, 1.5])
+static var RADIUS := PackedFloat32Array([0.45, 0.60, 1.00, 1.90, 1.40, 0.75, 0.50, 1.20])
+static var MASS := PackedFloat32Array([0.7, 1.0, 2.6, 6.0, 3.2, 1.5, 0.9, 4.5])
 ## Quanto knockback il nemico si mangia: 0 = tutto, 0.9 = quasi immobile.
-static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90, 0.70, 0.25, 0.10])
+static var KNOCKBACK_RESIST := PackedFloat32Array([0.0, 0.20, 0.55, 0.90, 0.70, 0.25, 0.10, 0.85])
 ## Tinta per specie: e' quello che arena passa al MultiMesh, cosi' l'arena non
 ## deve sapere cosa sia un nemico.
 ##
@@ -68,6 +69,7 @@ static var COLOR := PackedColorArray([
 	Color(0.16, 0.74, 0.80),
 	Color(0.95, 0.60, 0.20),
 	Color(0.30, 0.80, 0.40),
+	Color(0.35, 0.05, 0.15),
 ])
 
 ## Oltre' questa distanza dal bersaglio il nemico rallenta (arrivo).

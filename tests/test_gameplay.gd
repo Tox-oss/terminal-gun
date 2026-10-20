@@ -345,6 +345,11 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## specie **Trojan** e **Wurm**: stesso criterio degli incrementi precedenti (un
 ## nodo per specie, non un nodo per colpo), quindi il tetto passa da 24 a 26.
 ##
+## ## 26 -> 27: l'incremento e' ancora di `-arena` e si dichiara qui.
+## E' **un nodo solo**, una `MultiMeshInstance3D` aggiunta da `-arena` per la nuova
+## specie **Ransomware**: stesso criterio degli incrementi precedenti (un nodo per
+## specie, non un nodo per colpo), quindi il tetto passa da 26 a 27.
+##
 ## ## 24 -> 30: l'incremento e' della **torre**, e la voce era definita male (m12)
 ##
 ## Fino a ieri questa costante diceva «la scena **meno HUD**», e li' c'era dentro
@@ -372,7 +377,7 @@ const LONTANO := Vector3(11.0, 0.0, -6.0)
 ## possibile e resta quello di prima: se **-gameplay** aggiungesse un nodo,
 ## questa asserzione andrebbe rossa — ed e' quello che deve fare, perche'
 ## nessun nodo di -gameplay si giustifica da solo.
-const NODI_SCENA_VERA := 26
+const NODI_SCENA_VERA := 27
 
 # --- m10: il disco di prova, e perche' i numeri sono qui dentro ----------------
 #

@@ -291,6 +291,115 @@ var pipeline
 var pipeline_slots: Array[String] = []
 var pipeline_capacity: int = PIPELINE_CAPACITY
 var buffer_overflowed := false
+
+# --- Comando bloccato (Ransomware .locked): stato esposto al contratto (HUD) ---
+# Tutti gli alias puntano allo stesso stato, come in src/ui/hud.gd.
+var _command_blocked_state := false
+var _command_blocked_name_state := ""
+var _command_blocked_time_state := 0.0
+
+var command_blocked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var blocked_command: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var locked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var command_locked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var disabled_command: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var command_disabled: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var blocked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var ransomware: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var ransomwared: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+
+var blocked_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var command_blocked_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var locked_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var disabled_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var command_disabled_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var blocked_command_id: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var disabled_command_id: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+
+var command_blocked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var blocked_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var locked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var locked_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var command_locked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var disabled_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var command_disabled_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+
+# Alias ambiguo (HUD lo legge sia come bool che come stringa): campo Variant.
+var locked_command = false
 ## True se la tastiera guida il giocatore. Il test la spegne e passa l'input a
 ## mano, cosi' lo stesso codice serve a entrambi.
 var read_keys := true

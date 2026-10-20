@@ -1665,6 +1665,8 @@ func _apply_bites(delta: float) -> void:
 		# in ingresso come `touch_damage_last / touch_scale_of(wave)`.
 		var danno := E.touch_damage_of(kinds[i]) * _touch_scale()
 		game.damage_player(danno)
+		if kinds[i] == E.RANSOMWARE:
+			game.disable_command()
 		touch_damage_last = danno
 		touch_bites_last += 1
 		_bite_interval_left = TOUCH_INTERVAL

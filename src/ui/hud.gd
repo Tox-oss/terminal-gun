@@ -363,6 +363,24 @@ var overflowed: bool = false
 ## Tempo di surriscaldamento rimanente, in secondi.
 var overheat_time: float = 0.0
 var overheat_timer: float = 0.0
+# --- Comando bloccato (Ransomware .locked) ------------------------------------
+## Un comando/arma e' bloccato adesso. Tutti gli alias puntano allo stesso stato.
+var command_blocked: bool = false
+var blocked_command: bool = false
+var locked: bool = false
+var locked_command: bool = false
+var command_locked: bool = false
+var disabled_command: bool = false
+var command_disabled: bool = false
+var blocked: bool = false
+var ransomware: bool = false
+var ransomwared: bool = false
+## Nome del comando bloccato (se noto), di `-gameplay`.
+var _command_blocked_name: String = ""
+## Secondi di blocco rimanenti (se noti).
+var command_blocked_time: float = 0.0
+var blocked_command_time: float = 0.0
+var locked_time: float = 0.0
 ## ## m17: i secondi di partita, di `-orda` (`Run.elapsed_s`)
 ##
 ## Un campo **solo di lettura dal contratto**: nessun chiamante lo scrive a mano,
@@ -405,6 +423,14 @@ var _crash: Label = null
 var _buffer_overflow: Label = null
 var _overflow: Label = null
 var _overheated: Label = null
+## Comando bloccato (Ransomware): indicatore. Alias per compatibilita'.
+var _command_blocked: Label = null
+var _blocked_command: Label = null
+var _locked: Label = null
+var _locked_command: Label = null
+var _command_locked: Label = null
+var _disabled_command: Label = null
+var _command_disabled: Label = null
 ## Pipeline: pannello in basso con gli slot RAM.
 var _pipeline_panel: Control = null
 var _pipeline_title: Label = null
@@ -479,6 +505,25 @@ func _ready() -> void:
 	_buffer_overflow = get_node_or_null("Root/BufferOverflow") as Label
 	_overflow = get_node_or_null("Root/Overflow") as Label
 	_overheated = get_node_or_null("Root/Overheated") as Label
+	_command_blocked = get_node_or_null("Root/CommandBlocked") as Label
+	_blocked_command = get_node_or_null("Root/BlockedCommand") as Label
+	_locked = get_node_or_null("Root/Locked") as Label
+	_locked_command = get_node_or_null("Root/LockedCommand") as Label
+	_command_locked = get_node_or_null("Root/CommandLocked") as Label
+	_disabled_command = get_node_or_null("Root/DisabledCommand") as Label
+	_command_disabled = get_node_or_null("Root/CommandDisabled") as Label
+	if _command_blocked == null:
+		_command_blocked = _blocked_command
+	if _command_blocked == null:
+		_command_blocked = _locked
+	if _command_blocked == null:
+		_command_blocked = _locked_command
+	if _command_blocked == null:
+		_command_blocked = _command_locked
+	if _command_blocked == null:
+		_command_blocked = _disabled_command
+	if _command_blocked == null:
+		_command_blocked = _command_disabled
 	_upgrade_panel = get_node_or_null("Root/Upgrade") as Control
 	_upgrade_title = get_node_or_null("Root/Upgrade/UpgradeTitle") as Label
 	_collect_cards()
@@ -836,6 +881,144 @@ func buffer_overflow_text() -> String:
 func overflow_text() -> String:
 	return _overflow.text if _overflow != null else ""
 
+# --- Comando bloccato (Ransomware): superficie per il test ---------------------
+func _set_command_blocked_state(p_on: bool, p_name: String = "", p_time: float = -1.0) -> void:
+	var changed := p_on != command_blocked or (p_name != "" and p_name != _command_blocked_name) or (p_time >= 0.0 and p_time != command_blocked_time)
+	command_blocked = p_on
+	blocked_command = p_on
+	locked = p_on
+	locked_command = p_on
+	command_locked = p_on
+	disabled_command = p_on
+	command_disabled = p_on
+	blocked = p_on
+	ransomware = p_on
+	ransomwared = p_on
+	if p_name != "":
+		_command_blocked_name = p_name
+	if not p_on:
+		_command_blocked_name = ""
+		command_blocked_time = 0.0
+		blocked_command_time = 0.0
+		locked_time = 0.0
+	elif p_time >= 0.0:
+		command_blocked_time = p_time
+		blocked_command_time = p_time
+		locked_time = p_time
+	if changed:
+		redraw()
+
+func set_command_blocked(p_value: Variant) -> void:
+	if p_value is String:
+		var s := str(p_value)
+		_set_command_blocked_state(s != "", s)
+	else:
+		_set_command_blocked_state(bool(p_value))
+func set_blocked_command(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_locked(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_locked_command(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_command_locked(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_disabled_command(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_command_disabled(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_blocked(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_ransomware(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+func set_ransomwared(p_value: Variant) -> void:
+	set_command_blocked(p_value)
+
+func set_command_blocked_time(p_seconds: float) -> void:
+	command_blocked_time = maxf(_finite_or_zero(p_seconds), 0.0)
+	blocked_command_time = command_blocked_time
+	locked_time = command_blocked_time
+	if command_blocked:
+		redraw()
+func set_blocked_command_time(p_seconds: float) -> void:
+	set_command_blocked_time(p_seconds)
+func set_locked_time(p_seconds: float) -> void:
+	set_command_blocked_time(p_seconds)
+func set_locked_command_time(p_seconds: float) -> void:
+	set_command_blocked_time(p_seconds)
+func set_command_locked_time(p_seconds: float) -> void:
+	set_command_blocked_time(p_seconds)
+
+func set_command_blocked_name(p_name: String) -> void:
+	_command_blocked_name = p_name
+	if command_blocked:
+		redraw()
+func set_blocked_command_name(p_name: String) -> void:
+	set_command_blocked_name(p_name)
+func set_locked_command_name(p_name: String) -> void:
+	set_command_blocked_name(p_name)
+func set_disabled_command_name(p_name: String) -> void:
+	set_command_blocked_name(p_name)
+func set_command_disabled_name(p_name: String) -> void:
+	set_command_blocked_name(p_name)
+
+func command_blocked_visible() -> bool:
+	return _command_blocked != null and _command_blocked.visible
+func blocked_command_visible() -> bool:
+	return command_blocked_visible()
+func locked_visible() -> bool:
+	return command_blocked_visible()
+func locked_command_visible() -> bool:
+	return command_blocked_visible()
+func command_locked_visible() -> bool:
+	return command_blocked_visible()
+func disabled_command_visible() -> bool:
+	return command_blocked_visible()
+func command_disabled_visible() -> bool:
+	return command_blocked_visible()
+func blocked_visible() -> bool:
+	return command_blocked_visible()
+func ransomware_visible() -> bool:
+	return command_blocked_visible()
+
+func command_blocked_text() -> String:
+	return _command_blocked.text if _command_blocked != null else ""
+func blocked_command_text() -> String:
+	return command_blocked_text()
+func locked_text() -> String:
+	return command_blocked_text()
+func locked_command_text() -> String:
+	return command_blocked_text()
+func command_locked_text() -> String:
+	return command_blocked_text()
+func disabled_command_text() -> String:
+	return command_blocked_text()
+func command_disabled_text() -> String:
+	return command_blocked_text()
+
+func command_blocked_name() -> String:
+	return _command_blocked_name
+func blocked_command_name() -> String:
+	return _command_blocked_name
+func locked_command_name() -> String:
+	return _command_blocked_name
+func disabled_command_name() -> String:
+	return _command_blocked_name
+func command_locked_name() -> String:
+	return _command_blocked_name
+func command_disabled_name() -> String:
+	return _command_blocked_name
+func locked_name() -> String:
+	return _command_blocked_name
+func blocked_name() -> String:
+	return _command_blocked_name
+
+func command_blocked_time_value() -> float:
+	return command_blocked_time
+func blocked_command_time_value() -> float:
+	return command_blocked_time
+func locked_time_value() -> float:
+	return command_blocked_time
+
 func is_firewall_inside() -> bool:
 	return firewall_inside
 
@@ -882,6 +1065,7 @@ func refresh() -> void:
 	_refresh_wave(game)
 	_refresh_firewall(game)
 	_refresh_overheat(game)
+	_refresh_command_blocked(game)
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
@@ -1086,6 +1270,74 @@ func _set_overheat_state(on: bool) -> void:
 	overflow = on
 	overflowed = on
 	redraw()
+
+# --- Comando bloccato (Ransomware): lettura dal contratto -------------------------
+func _refresh_command_blocked(game: Node) -> void:
+	var player = game.get("player")
+	if not (player is Object) or not is_instance_valid(player):
+		return
+	var p := player as Object
+	var state := false
+	var found := false
+	for key in ["command_blocked", "blocked_command", "locked", "locked_command", "command_locked", "disabled_command", "command_disabled", "blocked", "ransomware", "ransomwared"]:
+		var raw = p.get(key)
+		if typeof(raw) == TYPE_BOOL:
+			found = true
+			if bool(raw):
+				state = true
+	for m in ["is_command_blocked", "is_blocked_command", "is_locked", "command_blocked", "blocked_command", "disabled_command", "command_disabled", "is_ransomware_blocked"]:
+		if p.has_method(m):
+			found = true
+			var r = p.call(m)
+			if typeof(r) == TYPE_BOOL and bool(r):
+				state = true
+	var weapon = null
+	var raw_w = p.get("weapon")
+	if raw_w is Object and is_instance_valid(raw_w):
+		weapon = raw_w as Object
+	if weapon != null:
+		for key in ["command_blocked", "blocked_command", "locked", "locked_command", "command_locked", "disabled_command", "command_disabled", "blocked", "ransomware", "ransomwared"]:
+			var raw = weapon.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+		for m in ["is_command_blocked", "is_blocked_command", "is_locked", "command_blocked", "blocked_command", "disabled_command", "command_disabled"]:
+			if weapon.has_method(m):
+				var r = weapon.call(m)
+				if typeof(r) == TYPE_BOOL and bool(r):
+					state = true
+	# Nome del comando bloccato
+	var cmd_name := ""
+	for key in ["blocked_command_name", "command_blocked_name", "locked_command_name", "disabled_command_name", "command_disabled_name", "blocked_command_id", "disabled_command_id", "locked_command"]:
+		var raw = p.get(key)
+		if typeof(raw) == TYPE_STRING and str(raw) != "":
+			cmd_name = str(raw)
+	if cmd_name == "" and weapon != null:
+		for key in ["blocked_command_name", "command_blocked_name", "locked_command_name"]:
+			var raw = weapon.get(key)
+			if typeof(raw) == TYPE_STRING and str(raw) != "":
+				cmd_name = str(raw)
+	for m in ["blocked_command_name", "command_blocked_name", "locked_command_name", "disabled_command_name"]:
+		if cmd_name == "" and p.has_method(m):
+			var r = p.call(m)
+			if typeof(r) == TYPE_STRING and str(r) != "":
+				cmd_name = str(r)
+	# Tempo
+	var cmd_time := command_blocked_time
+	for key in ["command_blocked_time", "blocked_command_time", "locked_time", "locked_command_time", "command_locked_time", "disabled_command_time", "command_disabled_time"]:
+		var raw = p.get(key)
+		if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
+			cmd_time = maxf(_finite_or_zero(float(raw)), 0.0)
+	if weapon != null:
+		for key in ["command_blocked_time", "blocked_command_time", "locked_time"]:
+			var raw = weapon.get(key)
+			if typeof(raw) == TYPE_FLOAT or typeof(raw) == TYPE_INT:
+				cmd_time = maxf(_finite_or_zero(float(raw)), 0.0)
+	var prev_state := command_blocked
+	var prev_name := _command_blocked_name
+	var prev_time := command_blocked_time
+	_set_command_blocked_state(state, cmd_name, cmd_time)
+	if state != prev_state or _command_blocked_name != prev_name or command_blocked_time != prev_time:
+		redraw()
 
 # --- Pipeline: lettura dal contratto ----------------------------------------------
 func _refresh_pipeline(game: Node) -> void:
@@ -1648,6 +1900,7 @@ func redraw() -> void:
 	_redraw_game_over()
 	_redraw_firewall()
 	_redraw_overheat()
+	_redraw_command_blocked()
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
@@ -1731,6 +1984,23 @@ func _redraw_overheat() -> void:
 		_overheated.visible = overheat
 		if overheat:
 			_overheated.text = "OVERHEATED %.2fs" % overheat_time
+func _redraw_command_blocked() -> void:
+	if _command_blocked != null:
+		_command_blocked.visible = command_blocked
+		if command_blocked:
+			if _command_blocked_name != "":
+				_command_blocked.text = "COMMAND BLOCKED: %s" % _command_blocked_name
+			else:
+				_command_blocked.text = "COMMAND BLOCKED"
+	for node in [_blocked_command, _locked, _locked_command, _command_locked, _disabled_command, _command_disabled]:
+		if node != null:
+			node.visible = command_blocked
+			if command_blocked:
+				if _command_blocked_name != "":
+					node.text = "COMMAND BLOCKED: %s" % _command_blocked_name
+				else:
+					node.text = "COMMAND BLOCKED"
+
 # --- Interno ------------------------------------------------------------------
 
 ## Applica i due numeri dell'XP senza ridisegnare: `set_progression` e

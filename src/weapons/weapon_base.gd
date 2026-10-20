@@ -301,6 +301,113 @@ var impatti := 0
 ## `weapon_base.gd` solo per crearla, e nessuno dei due deve il tipo dell'altro.
 var player
 
+# --- Comando bloccato (Ransomware .locked): stato esposto al contratto (HUD) ---
+var _command_blocked_state := false
+var _command_blocked_name_state := ""
+var _command_blocked_time_state := 0.0
+
+var command_blocked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var blocked_command: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var locked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var command_locked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var disabled_command: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var command_disabled: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var blocked: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var ransomware: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+var ransomwared: bool:
+	get: return _command_blocked_state
+	set(v): _command_blocked_state = bool(v)
+
+var blocked_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var command_blocked_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var locked_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var disabled_command_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var command_disabled_name: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var blocked_command_id: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+var disabled_command_id: String:
+	get: return _command_blocked_name_state
+	set(v): _command_blocked_name_state = str(v)
+
+var command_blocked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var blocked_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var locked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var locked_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var command_locked_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var disabled_command_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+var command_disabled_time: float:
+	get: return _command_blocked_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_command_blocked_time_state = float(v)
+		else:
+			_command_blocked_time_state = 0.0
+
+var locked_command = false
+
 func _ready() -> void:
 	pool = PoolScript.new()
 	pool.name = "Pool"

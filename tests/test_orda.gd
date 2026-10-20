@@ -4984,8 +4984,8 @@ func _mortar(h, horde: HORDE) -> void:
 
 ## ## Le sei tabelle: allineate 1:1, e le quattro specie immobili
 func _m13_tabelle(h) -> void:
-	h.eq(ENEMY.KIND_COUNT, 8, "m13: KIND_COUNT e' 5 specie piu' trojan, wurm e ransomware")
-	h.eq(ENEMY.KIND_NAMES.size(), 8, "m13: KIND_NAMES ha otto nomi")
+	h.eq(ENEMY.KIND_COUNT, 9, "m13: KIND_COUNT e' 5 specie piu' trojan, wurm, ransomware e rootkit")
+	h.eq(ENEMY.KIND_NAMES.size(), 9, "m13: KIND_NAMES ha nove nomi")
 	h.eq(ENEMY.KIND_NAMES[ENEMY.MORTAR], "mortar", "m13: la quinta voce si chiama mortar")
 	# Le cinque tabelle numeriche 1:1 su `KIND_COUNT`, e ognuna con la sua
 	# versione di quattro specie da confrontare voce per voce. `near` e non
@@ -5002,14 +5002,14 @@ func _m13_tabelle(h) -> void:
 	for riga in tabelle:
 		var nome: String = riga[0]
 		var tabella: PackedFloat32Array = riga[1]
-		h.eq(tabella.size(), 8,
+		h.eq(tabella.size(), 9,
 			"m13: la tabella %s ha una voce per specie, non quattro" % nome)
 		var quattro: PackedFloat32Array = riga[2]
 		for k in 4:
 			h.near(tabella[k], quattro[k], 0.0001,
 				"m13: la tabella %s non ha spostato la voce %s (indice %d): %.4f contro %.4f"
 					% [nome, ENEMY.KIND_NAMES[k], k, tabella[k], quattro[k]])
-	h.eq(ENEMY.COLOR.size(), 8, "m13: anche la tabella delle tinte ha otto voci")
+	h.eq(ENEMY.COLOR.size(), 9, "m13: anche la tabella delle tinte ha nove voci")
 	for k in 4:
 		h.near(ENEMY.touch_damage_of(k), QUATTRO_MORSO[k], 0.006,
 			"m13: il morso di %s e' ancora %.2f hp, il numero che il vertice ha dichiarato "
@@ -5053,7 +5053,7 @@ func _quattro_specie_sicure() -> String:
 func _m13_peso_fonte(h, horde: HORDE) -> void:
 	for w in [1, 2, 3, 4, 8, 12, 20]:
 		var pesi := SPAWNER.wave_weights(int(w))
-		h.eq(pesi.size(), 8, "m14: i pesi dell'onda %d hanno una voce per specie" % int(w))
+		h.eq(pesi.size(), 9, "m14: i pesi dell'onda %d hanno una voce per specie" % int(w))
 		h.eq(pesi[ENEMY.MORTAR], SPAWNER.MORTAR_WEIGHT,
 			"m14: sul peso di produzione la voce del mortar sull'onda %d deve valere quello che "
 				% int(w)
@@ -7032,7 +7032,7 @@ func _pesi_onda1(h) -> void:
 ## quota (vedi `_quota_mortar`) senza che questa riga vada rossa, e scriverlo qui
 ## significherebbe legare il test a una scelta che la sezione 17 guarda per quello
 ## che e' — quanto nasce, non quanto pesa.
-static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 3.0, 2.0, 2.0, 2.0])
+static var PESI_ONDA2_DICHIARATI := PackedFloat32Array([47.5, 30.0, 18.8, 5.0, 3.0, 2.0, 2.0, 2.0, 2.0])
 
 func _onde_2_e_avanti(h) -> void:
 	var due := SPAWNER.wave_weights(2)

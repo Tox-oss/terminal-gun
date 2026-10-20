@@ -351,6 +351,18 @@ var firewall_damage_last: float = 0.0
 var firewall_damage_total: float = 0.0
 ## Secondi di grazia che restano prima che il danno inizi.
 var firewall_grace_left: float = 1.0
+# --- Rootkit (sudo su): emersione sotto il player ------------------------------
+## Un rootkit e' emerso sotto il player adesso. Tutti gli alias puntano allo
+## stesso stato.
+var rootkit: bool = false
+var rootkit_emerged: bool = false
+var rootkit_emerging: bool = false
+var rootkit_under: bool = false
+var rootkit_underfoot: bool = false
+var rootkit_alert: bool = false
+var rootkit_warning: bool = false
+var sudo_su: bool = false
+var rootkit_time: float = 0.0
 # --- Surriscaldamento / crash (Buffer Overflow) --------------------------------
 ## Stato di surriscaldamento/crash. Tutti gli alias puntano allo stesso stato.
 var overheat: bool = false
@@ -417,6 +429,8 @@ var _restart_hint: Label = null
 ## Firewall: indicatore di pericolo. Sta in `Root`, si vede solo quando il
 ## giocatore e' dentro il firewall.
 var _firewall: Label = null
+## Rootkit: indicatore di emersione. Sta in `Root`.
+var _rootkit: Label = null
 ## Surriscaldamento / crash: indicatori (alias per compatibilita').
 var _overheat: Label = null
 var _crash: Label = null
@@ -500,6 +514,13 @@ func _ready() -> void:
 	_clock = get_node_or_null("Root/Clock") as Label
 	_restart_hint = get_node_or_null("Root/GameOver/RestartHint") as Label
 	_firewall = get_node_or_null("Root/Firewall") as Label
+	_rootkit = get_node_or_null("Root/Rootkit") as Label
+	if _rootkit == null:
+		_rootkit = get_node_or_null("Root/RootkitEmerging") as Label
+	if _rootkit == null:
+		_rootkit = get_node_or_null("Root/RootkitAlert") as Label
+	if _rootkit == null:
+		_rootkit = get_node_or_null("Root/RootkitWarning") as Label
 	_overheat = get_node_or_null("Root/Overheat") as Label
 	_crash = get_node_or_null("Root/Crash") as Label
 	_buffer_overflow = get_node_or_null("Root/BufferOverflow") as Label
@@ -813,6 +834,68 @@ func game_over_visible() -> bool:
 func firewall_visible() -> bool:
 	return _firewall != null and _firewall.visible
 
+# --- Rootkit (sudo su): superficie per il test -------------------------------
+func _set_rootkit_state(p_on: bool) -> void:
+	var changed := p_on != rootkit
+	rootkit = p_on
+	rootkit_emerged = p_on
+	rootkit_emerging = p_on
+	rootkit_under = p_on
+	rootkit_underfoot = p_on
+	rootkit_alert = p_on
+	rootkit_warning = p_on
+	sudo_su = p_on
+	if changed:
+		redraw()
+
+func set_rootkit(p_value: Variant) -> void:
+	if p_value is String:
+		_set_rootkit_state(str(p_value) != "")
+	else:
+		_set_rootkit_state(bool(p_value))
+func set_rootkit_emerged(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_emerging(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_under(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_underfoot(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_alert(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_warning(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_sudo_su(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_sudo(p_value: Variant) -> void:
+	set_rootkit(p_value)
+func set_rootkit_state(p_value: Variant) -> void:
+	set_rootkit(p_value)
+
+func set_rootkit_time(p_seconds: float) -> void:
+	rootkit_time = maxf(_finite_or_zero(p_seconds), 0.0)
+	if rootkit:
+		redraw()
+
+func rootkit_visible() -> bool:
+	return _rootkit != null and _rootkit.visible
+func rootkit_emerged_visible() -> bool:
+	return rootkit_visible()
+func rootkit_under_visible() -> bool:
+	return rootkit_visible()
+func rootkit_alert_visible() -> bool:
+	return rootkit_visible()
+func rootkit_warning_visible() -> bool:
+	return rootkit_visible()
+
+func rootkit_text() -> String:
+	return _rootkit.text if _rootkit != null else ""
+func rootkit_emerged_text() -> String:
+	return rootkit_text()
+
+func is_rootkit_emerged() -> bool:
+	return rootkit
+
 # --- Surriscaldamento / crash: superficie per il test ----------------------------
 func set_overheat(p_on: bool) -> void:
 	_set_overheat_state(bool(p_on))
@@ -1066,6 +1149,7 @@ func refresh() -> void:
 	_refresh_firewall(game)
 	_refresh_overheat(game)
 	_refresh_command_blocked(game)
+	_refresh_rootkit(game)
 	_refresh_clock(game)
 	_refresh_restart_hint(game)
 	_refresh_upgrades(game)
@@ -1337,6 +1421,62 @@ func _refresh_command_blocked(game: Node) -> void:
 	var prev_time := command_blocked_time
 	_set_command_blocked_state(state, cmd_name, cmd_time)
 	if state != prev_state or _command_blocked_name != prev_name or command_blocked_time != prev_time:
+		redraw()
+
+# --- Rootkit (sudo su): lettura dal contratto ------------------------------------
+func _refresh_rootkit(game: Node) -> void:
+	var state := false
+	# Player
+	var player = game.get("player")
+	if player is Object and is_instance_valid(player):
+		var p := player as Object
+		for key in ["rootkit", "rootkit_emerged", "rootkit_emerging", "rootkit_under", "rootkit_underfoot", "rootkit_alert", "rootkit_warning", "sudo_su", "rootkit_detected", "rootkit_active"]:
+			var raw = p.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+		for m in ["is_rootkit", "is_rootkit_emerged", "rootkit_emerged", "rootkit_under", "has_rootkit"]:
+			if p.has_method(m):
+				var r = p.call(m)
+				if typeof(r) == TYPE_BOOL and bool(r):
+					state = true
+		var weapon = null
+		var raw_w = p.get("weapon")
+		if raw_w is Object and is_instance_valid(raw_w):
+			weapon = raw_w as Object
+		if weapon != null:
+			for key in ["rootkit", "rootkit_emerged", "rootkit_under"]:
+				var raw = weapon.get(key)
+				if typeof(raw) == TYPE_BOOL and bool(raw):
+					state = true
+	# Horde
+	var horde = game.get("horde")
+	if horde is Object and is_instance_valid(horde):
+		var h := horde as Object
+		for key in ["rootkit_under_player", "rootkit_emerged_count", "rootkit_count_emerged", "rootkits_emerged"]:
+			var raw = h.get(key)
+			if typeof(raw) == TYPE_BOOL and bool(raw):
+				state = true
+			if (typeof(raw) == TYPE_INT or typeof(raw) == TYPE_FLOAT) and int(raw) > 0:
+				state = true
+		# array di stato per nemico
+		for key in ["rootkit_emerged", "rootkit_timers"]:
+			var raw = h.get(key)
+			if raw is Array:
+				for v in (raw as Array):
+					if typeof(v) == TYPE_INT and int(v) == 1:
+						state = true
+					if typeof(v) == TYPE_BOOL and bool(v):
+						state = true
+		for m in ["has_rootkit_emerged", "rootkit_emerged", "rootkit_under_player", "any_rootkit_emerged"]:
+			if h.has_method(m):
+				var r = h.call(m)
+				if typeof(r) == TYPE_BOOL and bool(r):
+					state = true
+				if (typeof(r) == TYPE_INT or typeof(r) == TYPE_FLOAT) and int(r) > 0:
+					state = true
+	var prev := rootkit
+	_set_rootkit_state(state)
+	if state != prev:
 		redraw()
 
 # --- Pipeline: lettura dal contratto ----------------------------------------------
@@ -1901,6 +2041,7 @@ func redraw() -> void:
 	_redraw_firewall()
 	_redraw_overheat()
 	_redraw_command_blocked()
+	_redraw_rootkit()
 ## La barra dell'XP. `max_value` prende il denominatore **finito e positivo** e
 ## `value` viene clampato dentro: e' il secondo posto in cui una divisione per
 ## zero fa un HUD che non si vede, perche' qui non si divide ma si moltiplica per
@@ -2001,8 +2142,14 @@ func _redraw_command_blocked() -> void:
 				else:
 					node.text = "COMMAND BLOCKED"
 
-# --- Interno ------------------------------------------------------------------
+func _redraw_rootkit() -> void:
+	if _rootkit == null:
+		return
+	_rootkit.visible = rootkit
+	if rootkit:
+		_rootkit.text = "ROOTKIT EMERGING"
 
+# --- Interno ------------------------------------------------------------------
 ## Applica i due numeri dell'XP senza ridisegnare: `set_progression` e
 ## `_refresh_xp` li mettono in campo e ridisegnano una volta sola.
 func _apply_xp(p_xp: float, p_xp_next: float) -> void:

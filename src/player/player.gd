@@ -398,6 +398,58 @@ var command_disabled_time: float:
 		else:
 			_command_blocked_time_state = 0.0
 
+# --- Rootkit (sudo su): stato esposto al contratto (HUD), come in src/ui/hud.gd ---
+# Tutti gli alias puntano allo stesso stato, come in src/ui/hud.gd: l'HUD legge
+# qualunque di questi nomi e li tratta come lo stesso booleano.
+var _rootkit_state := false
+var _rootkit_time_state := 0.0
+
+var rootkit: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_emerged: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_emerging: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_under: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_underfoot: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_alert: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_warning: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var sudo_su: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_detected: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+var rootkit_active: bool:
+	get: return _rootkit_state
+	set(v): _rootkit_state = bool(v)
+
+var rootkit_time: float:
+	get: return _rootkit_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_rootkit_time_state = float(v)
+		else:
+			_rootkit_time_state = 0.0
+var rootkit_timer: float:
+	get: return _rootkit_time_state
+	set(v):
+		if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+			_rootkit_time_state = float(v)
+		else:
+			_rootkit_time_state = 0.0
+
 # Alias ambiguo (HUD lo legge sia come bool che come stringa): campo Variant.
 var locked_command = false
 ## True se la tastiera guida il giocatore. Il test la spegne e passa l'input a

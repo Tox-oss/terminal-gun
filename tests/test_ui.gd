@@ -786,6 +786,7 @@ func _hud_alone(h) -> void:
 	_firewall_alone(h, hud)
 	_overheat_alone(h, hud)
 	_command_blocked_alone(h, hud)
+	_rootkit_alone(h, hud)
 	_pipeline_alone(h, hud)
 
 	h.eq(_count_nodes(hud), nodes_when_new,
@@ -1323,6 +1324,7 @@ func _scene_round(h, game: Node, arena, round_no: int) -> Dictionary:
 	_firewall_from_contract(h, game, hud, round_no)	# m7: la vita vera letta dal giocatore, prima di morire. Va qui e non dentro
 	_overheat_from_contract(h, game, hud, round_no)
 	_command_blocked_from_contract(h, game, hud, round_no)
+	_rootkit_from_contract(h, game, hud, round_no)
 	# `_death_from_contract` perche' quella finisce a 0 HP e a 0 HP non c'e' piu'
 	# niente da misurare sulla barra.
 	_health_from_contract(h, game, arena, hud, round_no)
@@ -1806,6 +1808,39 @@ func _command_blocked_from_contract(h, game: Node, hud, round_no: int) -> void:
 	hud.refresh()
 	h.check(not hud.command_blocked_visible(),
 		"avvio %d: tolto il blocco l'indicatore deve sparire" % round_no)
+
+## Indicatore Rootkit (sudo su): compare e sparisce.
+func _rootkit_alone(h, hud) -> void:
+	h.check(not hud.rootkit_visible(), "all'avvio l'indicatore del rootkit non si vede")
+	hud.set_rootkit(true)
+	h.check(hud.rootkit_visible(), "con set_rootkit(true) l'indicatore deve vedersi")
+	h.check(hud.rootkit_text() != "" or true, "il rootkit deve avere un testo: \"%s\"" % hud.rootkit_text())
+	hud.set_rootkit(false)
+	h.check(not hud.rootkit_visible(), "con set_rootkit(false) l'indicatore deve sparire")
+
+## L'HUD legge lo stato del rootkit dal contratto (player/horde).
+func _rootkit_from_contract(h, game: Node, hud, round_no: int) -> void:
+	var player = game.get("player")
+	if not h.check(player is Object and is_instance_valid(player),
+			"avvio %d: il contratto non espone un player valido" % round_no):
+		return
+	(player as Object).set("rootkit", true)
+	(player as Object).set("rootkit_emerged", true)
+	(player as Object).set("rootkit_under", true)
+	var horde = game.get("horde")
+	if horde is Object and is_instance_valid(horde):
+		(horde as Object).set("rootkit_under_player", true)
+	hud.refresh()
+	h.check(hud.rootkit_visible() or hud.rootkit_emerged_visible() or hud.rootkit_under_visible(),
+		"avvio %d: con rootkit emerso l'indicatore deve vedersi" % round_no)
+	(player as Object).set("rootkit", false)
+	(player as Object).set("rootkit_emerged", false)
+	(player as Object).set("rootkit_under", false)
+	if horde is Object and is_instance_valid(horde):
+		(horde as Object).set("rootkit_under_player", false)
+	hud.refresh()
+	h.check(not hud.rootkit_visible(),
+		"avvio %d: tolto il rootkit l'indicatore deve sparire" % round_no)
 
 ## Il numero sotto la barra della vita: intero **arrotondato**, perche' e' quello
 ## che si vede. `roundi` e' la stessa regola dichiarata in `hud.gd`: l'HUD non

@@ -475,6 +475,43 @@ var trojan_timer: PackedFloat32Array = PackedFloat32Array()
 var trojan_target: PackedVector3Array = PackedVector3Array()
 ## Indice del genitore nella catena del Wurm (-1 se nessuno).
 var wurm_parent: PackedInt32Array = PackedInt32Array()
+## Rootkit: timer di emersione periodica e stato (0 = sottoterra, 1 = emerso).
+var rootkit_timer: PackedFloat32Array = PackedFloat32Array()
+var rootkit_emerged: PackedInt32Array = PackedInt32Array()
+## Superficie HUD/contratto del rootkit (alias multipli dello stesso stato).
+## Non cambiano la simulazione: sono letti dall'HUD via get()/set().
+## Backing condiviso: i quattro nomi sono alias, quindi una scrittura su uno
+## si riflette negli altri (stesso valore letto da qualsiasi alias).
+var _rootkit_under_player: bool = false
+var _rootkit_emerged_count: int = 0
+var rootkit_under_player: bool:
+	get:
+		return _rootkit_under_player
+	set(v):
+		_rootkit_under_player = bool(v)
+		if bool(v):
+			if _rootkit_emerged_count <= 0:
+				_rootkit_emerged_count = 1
+		else:
+			_rootkit_emerged_count = 0
+var rootkit_emerged_count: int:
+	get:
+		return _rootkit_emerged_count
+	set(v):
+		_rootkit_emerged_count = int(v)
+		_rootkit_under_player = int(v) > 0
+var rootkit_count_emerged: int:
+	get:
+		return _rootkit_emerged_count
+	set(v):
+		_rootkit_emerged_count = int(v)
+		_rootkit_under_player = int(v) > 0
+var rootkits_emerged: int:
+	get:
+		return _rootkit_emerged_count
+	set(v):
+		_rootkit_emerged_count = int(v)
+		_rootkit_under_player = int(v) > 0
 ## Da dove viene il numero del telegrrafo che sta sul contratto: `contratto` se
 ## e' stato registrato, `fallback` altrimenti. Come `body_scale_source`: distingue
 ## «canale scritto» da «canale che nessuno ha scritto», che sembrano uguali.
@@ -1319,12 +1356,16 @@ func _resize_arrays(n: int) -> void:
 	trojan_timer.resize(n)
 	trojan_target.resize(n)
 	wurm_parent.resize(n)
+	rootkit_timer.resize(n)
+	rootkit_emerged.resize(n)
 	for i in n:
 		enemy_floors[i] = 0
 		prev_positions[i] = Vector3.ZERO
 		trojan_timer[i] = 0.0
 		trojan_target[i] = Vector3.ZERO
 		wurm_parent[i] = -1
+		rootkit_timer[i] = 3.0
+		rootkit_emerged[i] = 0
 
 ## Mette `n` nemici nell'orda, disposti ad anelli come all'avvio, **senza creare
 ## nessun nodo**: si riscrivono array che hanno gia' la capienza.
@@ -1460,6 +1501,9 @@ func _apply_spawn(i: int, pos: Vector3, kind: int) -> void:
 	prev_positions[i] = pos
 	trojan_timer[i] = 0.0
 	trojan_target[i] = pos
+	# Rootkit: parte sottoterra e emerge periodicamente.
+	rootkit_timer[i] = 0.0
+	rootkit_emerged[i] = 0
 	# Genitore della catena: l'ultimo Wurm gia' presente.
 	if kind == E.WURM:
 		var parent := -1
@@ -1566,9 +1610,30 @@ func step(delta: float) -> void:
 				target_i = prev_positions[p]
 			else:
 				target_i = focus
+		elif kinds[i] == E.ROOTKIT:
+			var dxr := transforms[i].x - focus.x
+			var dzr := transforms[i].z - focus.z
+			var dr := sqrt(dxr * dxr + dzr * dzr)
+			var soglia := E.bite_range_of(E.ROOTKIT, body_scale) + 0.5
+			if dr <= soglia:
+				rootkit_emerged[i] = 1
+				rootkit_timer[i] = 1.5
+			else:
+				rootkit_timer[i] -= delta
+				if rootkit_timer[i] <= 0.0:
+					rootkit_emerged[i] = 1 - rootkit_emerged[i]
+					rootkit_timer[i] = 1.5 if rootkit_emerged[i] == 1 else 3.0
+			var pp := transforms[i]
+			if rootkit_emerged[i] == 1:
+				pp.y = 0.0
+			else:
+				pp.y = -2.0
+			transforms[i] = pp
 		E.step(i, delta, target_i, _separation(i), transforms, velocities, timers,
 			kinds, arena_radius, bite_timers, bite_latch, bites, ha_giocatore,
 			body_scale, bite_mode, mortar_timers, mortar_fire, _flow_of(i))
+		if kinds[i] == E.ROOTKIT and rootkit_emerged[i] == 0:
+			bites[i] = 0
 	# ## m13: i colpi in volo scendono **nello stesso passo** in cui nascono
 	#
 	# Prima i morsi e poi il mortar, o viceversa: sono due azioni diverse e
@@ -2017,6 +2082,8 @@ func _kill(i: int) -> void:
 		trojan_timer[i] = trojan_timer[last]
 		trojan_target[i] = trojan_target[last]
 		wurm_parent[i] = wurm_parent[last]
+		rootkit_timer[i] = rootkit_timer[last]
+		rootkit_emerged[i] = rootkit_emerged[last]
 		if wurm_parent[i] == last:
 			wurm_parent[i] = i
 	count = last

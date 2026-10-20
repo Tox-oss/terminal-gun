@@ -244,6 +244,10 @@ mesh_slot = 4
 script = ExtResource("3_enemies")
 mesh_slot = 5
 
+[node name="EnemiesRootkit" type="MultiMeshInstance3D" parent="."]
+script = ExtResource("3_enemies")
+mesh_slot = 6
+
 ; ## LA CUPOOLA ROSSA DEL MORTAR, e perche' sta DOPO `Enemies`
 ;
 ; L'utente l'ha chiesta il 2026-10-15: «viene segnalato con una cupola rossa dove
